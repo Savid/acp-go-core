@@ -19,7 +19,7 @@ func TestEnvironmentBuildMergeOrder(t *testing.T) {
 		Process:        []string{"HOME=/home/me", "PATH=/usr/bin:/bin", "KEEP=1", "ACP_GO_X_INTERNAL_MARK=1"},
 		Agent:          map[string]string{"HOME": "/agent", "AGENT": "a"},
 		Session:        map[string]string{"HOME": "/session", "EMPTY": "", "PATH": "/opt/bin"},
-		Owned:          map[string]string{"X_HOME": "/owned"},
+		Owned:          map[string]string{"X_HOME": "/owned", "ACP_GO_X_INTERNAL_MODE": "ask"},
 		InternalPrefix: "ACP_GO_X_INTERNAL_",
 		ExtraPathDirs:  []string{"/ops/first", "/ops/second"},
 	}
@@ -27,6 +27,7 @@ func TestEnvironmentBuildMergeOrder(t *testing.T) {
 	got, err := env.Build()
 	require.NoError(t, err)
 	require.Equal(t, []string{
+		"ACP_GO_X_INTERNAL_MODE=ask",
 		"AGENT=a",
 		"EMPTY=",
 		"HOME=/session",

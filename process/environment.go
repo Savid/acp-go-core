@@ -14,7 +14,9 @@ import (
 )
 
 // Environment is the merge that produces a harness environment. Later layers
-// win. Nothing is scrubbed except names under InternalPrefix.
+// win. Nothing is scrubbed except inherited names under InternalPrefix; the
+// Owned layer is applied after that drop, so the sibling's own markers reach
+// the child.
 type Environment struct {
 	// Process is the sibling's own environment, in KEY=value form, read once at
 	// construction.
@@ -96,7 +98,7 @@ func (e Environment) Build() ([]string, error) {
 	}
 
 	values := parse(e.Process)
-	for _, layer := range []map[string]string{e.Agent, e.Session, e.Owned} {
+	for _, layer := range []map[string]string{e.Agent, e.Session} {
 		for _, key := range slices.Sorted(maps.Keys(layer)) {
 			values[key] = layer[key]
 		}
@@ -108,6 +110,10 @@ func (e Environment) Build() ([]string, error) {
 				delete(values, key)
 			}
 		}
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(e.Owned)) {
+		values[key] = e.Owned[key]
 	}
 
 	if len(e.ExtraPathDirs) > 0 {
