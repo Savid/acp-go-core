@@ -41,10 +41,11 @@ internal [selected-model gate](#image-capability-model).
 
 ### Catalog Membership
 
-A **native entry** is one the harness enumerates for itself. A **configured
-entry** is one the deployment named: the default model and a host-listed id
-from `WithConfiguredModels`. Configured entries are always published, after
-the native rows, as the id alone unless a native row carries it.
+A **native entry** is one the harness enumerates for itself, read once when
+the native runtime starts. A **configured entry** is one the deployment
+named: the default model and a host-listed id from `WithConfiguredModels`.
+Configured entries are always published, after the native rows, as the id
+alone unless a native row carries it.
 
 Membership never gates selection: a value absent from a menu still travels to
 the harness. An adapter never reads a provider endpoint the harness does not
@@ -110,6 +111,7 @@ trustworthy MIME whatever the native artifact shape:
 |---|---|
 | Base64 plus trustworthy MIME | Decode, validate, enforce limits, emit one image |
 | Data URL | Parse, validate, enforce limits, emit one image |
+| Readable local file | Bounded read under the [allowed roots](#local-read-roots), sniff, emit one image |
 | Remote URI only | Emit one `resource_link`; never fetch |
 
 - Never emit both an image and a resource link for one artifact. Signed URLs
@@ -128,12 +130,21 @@ trustworthy MIME whatever the native artifact shape:
   array and once across a turn's agent chunks, keyed by native identity plus
   fingerprint.
 
+### Local Read Roots
+
+A local output read targets a regular file within the session workspace, the
+scratch parent, `os.TempDir()`, or a native artifact root listed in the
+registry. The handoff root serves inbound handoff only and never widens
+output roots. `image.ReadFile` resolves the path and compares it with the
+roots resolved to the same degree, bounds the read before allocation, and
+validates bytes independently of extensions. An out-of-root path, symlink
+escape, or non-regular file fails `path_not_allowed`.
+
 ### Replay
 
 `session/load` replay delivers the same image content as live output, decoded
-through the same output gate from the sibling's durable source: the mirrored
-native rows when they carry the bytes, otherwise a wrapper-owned artifact
-store keyed by native identity plus fingerprint. Replay of an artifact the
+through the same output gate from the mirrored native rows, which carry the
+bytes. Replay of an artifact the
 source no longer holds fails the whole load with the closed non-prompt error
 vocabulary, never a silent hole. Raw events and logs carry safe metadata only,
 never a second copy of the base64.

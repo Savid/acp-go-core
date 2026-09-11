@@ -42,6 +42,7 @@ Pick the narrowest direct surface that can implement the contract:
 
 | Sibling | Native surface | Why |
 |---|---|---|
+| Codex | `codex app-server --listen stdio://` | Native app-server protocol with thread, turn, model, and event APIs. |
 | Pi | `pi --mode rpc` JSONL over stdin/stdout | One RPC process per session with explicit native state and environment control. |
 
 The selected surface MUST expose the lifecycle, permissions, restore, and ID

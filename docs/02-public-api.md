@@ -141,11 +141,11 @@ Rules:
   [registry](registry.md#vendor-process-options). Unset, the harness resolves
   its home from the inherited environment exactly as it would from a shell.
   `Home` never acts as a scratch parent.
-- `WithScratchDir` is the parent for all ephemeral state: extension staging,
-  hydration staging, and probe directories. Empty means `os.TempDir()`; a
-  missing directory is created `0700`. Every ephemeral path is created through
-  the sibling's single scratch accessor with a stable
-  `acp-go-<vendor>-<purpose>-*` prefix so a host can sweep orphans.
+- `WithScratchDir` is the parent for all ephemeral state: extension staging
+  and probe directories. Empty means `os.TempDir()`; a missing directory is
+  created `0700`. Every ephemeral path is created through the sibling's
+  single scratch accessor with a stable `acp-go-<vendor>-<purpose>-*` prefix
+  so a host can sweep orphans.
 - `WithInputHandoffRoot` is the only host-supplied read root and opts in to
   [handoff image input](05-behavior.md#image-input). It MUST be absolute; a
   relative path is a construction failure. The adapter never writes, moves, or
@@ -168,7 +168,9 @@ Rules:
   not in the manifest is never overwritten and fails with the same error. A
   managed file whose content changes keeps its prior bytes in `.seed.bak`.
   Secrets go in `env` and are referenced from seeded files by variable
-  indirection.
+  indirection. Native config injection is preferred where the harness offers
+  it: Codex `WithCodexConfigOverrides` passes `-c key=value` and writes
+  nothing.
 - Construction failures use `<vendor>_invalid_options`
   ([00-overview.md](00-overview.md#uniform-error-shapes)): `NewAgent` returns
   no error, and `Initialize` and every session-establishing entry point deliver
@@ -204,6 +206,11 @@ Empty values are forwarded as `KEY=`.
 `PATH` the merge produced, joined with `os.PathListSeparator` and omitting
 empty components. Executable resolution and version probing use steps 1 and 2
 only.
+
+On a multiplexed runtime the shared process receives steps 1, 2, and 4; each
+logical session's `env` and `extraPathDirs` travel on that session's own
+native start or resume request and never enter the shared process
+environment.
 
 ### Effective Image Limits
 

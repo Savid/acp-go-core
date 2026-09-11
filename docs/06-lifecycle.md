@@ -15,21 +15,39 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
   process group, and three dedicated pipes. Native stdout and stderr never
   inherit ACP stdout and are routed to logs only after JSON-RPC separation is
   guaranteed.
-- One session owns one native process. Its cwd, model, permission state,
-  callbacks, cancellation, and persistence belong to that session alone.
+- Shared writable native state has exactly one writer. Logical-session cwd,
+  model, permission state, callbacks, cancellation, and persistence remain
+  independently routed on a multiplexed runtime.
 - Tests inject native stdout and stderr noise and prove ACP stdout stays valid.
 
-Every native event is fenced by the native-process epoch, session, and turn
-nonce. A native process exit fails the in-flight turn exactly once and
-suppresses late events from the dead epoch. The session stays addressable:
-the next prompt relaunches the process against the same native state.
+Every native event is fenced by the native-process epoch, logical session, and
+turn nonce. A native process exit fails each in-flight turn exactly once,
+suppresses late events from the dead epoch, and fences every incarnation that
+generation carried. Every session stays addressable: the next explicit
+operation binds it again on a fresh generation with a fresh incarnation.
+
+### Shared Runtime Loss
+
+A multiplexed sibling treats the loss of its shared runtime as an epoch fence:
+
+- The dead epoch is fenced, every thread bound to it is unbound, and every
+  in-flight turn fails exactly once.
+- **The next explicit operation starts one replacement.** `session/new`,
+  `session/load`, `session/resume`, and a prompt on an unbound session each
+  admit a fresh runtime generation and rebind through it. A sibling never
+  requires an adapter restart to recover from a runtime that exited, and never
+  starts a replacement speculatively.
+- A replacement that cannot start answers runtime-needing operations with
+  `<vendor>_runtime_unavailable` until one can. `session/list` and
+  `session/delete` keep working.
 
 ### Session Environment and PATH Scoping
 
 Session `env` and ordered `extraPathDirs` are per-session configuration.
 
-- **The addressed session carries them, never the Agent.** They apply to that
-  session's own process.
+- **The addressed session carries them, never the Agent.** A multiplexed
+  sibling applies them to that session's own native start or resume request;
+  a session runtime applies them to its own process.
 - Concurrent sessions carry their own values and never inherit a peer's.
 - **Both are part of resume identity.** The session record stores the ordered
   list in order; reordering is a distinct configuration.
@@ -49,14 +67,15 @@ For every native session, in order:
 3. Resolve pending elicitation requests as action `cancel` or `-32800`.
 4. Send the provider-native interrupt under a bounded background context.
 5. Signal the process group and wait for the root process through
-   `process.Process.Shutdown`.
+   `process.Process.Shutdown`, where the session owns one.
 6. Commit the durable state the boundary owes, the same rung a wire
    `session/close` runs; only diagnostics flushing is best-effort.
 7. Release scratch directories, stream readers, and goroutines. Native state
    in the home is left in place.
 
-The ladder binds `session/close`, `session/delete`, and `Agent.Close`. A
-session close never terminates peers.
+The ladder binds `session/close`, `session/delete`, and `Agent.Close`. For a
+multiplexed Agent it runs per logical session, then closes the shared process
+exactly once. A logical session close never terminates peers.
 
 ## JSON-RPC Request Cancellation
 
@@ -78,6 +97,8 @@ once with a valid result or `-32800`.
    elicitations receive action `cancel` or `-32800`.
 4. Each prompt produces exactly one terminal result.
 5. Repeated cancels for the same turn are idempotent.
+6. A shared-runtime session cancel uses only its native protocol operation and
+   never signals the shared process.
 
 ## Lifecycle Stream Fencing
 
@@ -114,8 +135,8 @@ incarnation ends the stream.
 | Concurrent prompts per session | 1 (fixed) | `acp.NewInvalidRequest({"error":"backpressure","limit":<registered token>})` |
 | Concurrent server-to-client calls per agent | 16 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"client_calls"})` |
 
-Prompt turns are serialized per session; independent sessions run
-concurrently. `WithConcurrencyLimits` may change the two configurable values;
+Prompt turns are serialized per session. Multiplexed runtimes admit concurrent
+turns on independent sessions. `WithConcurrencyLimits` may change the two configurable values;
 zero means default; negative fails construction. `wire.Backpressure` builds
 the error.
 

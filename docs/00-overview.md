@@ -78,14 +78,24 @@ translate, repair, backfill, preserve, or describe an alternate shape. Database
 creation defines the current schema directly from an empty database. Code that
 exists only to serve a prior shape is removed with its tests.
 
-### Native Runtime Strategy
+### Native Runtime Strategies
 
-Every sibling records its runtime strategy in the
-[registry](registry.md#native-surfaces-and-process-models). The proven
-strategy is the **session runtime**: one native process serves one loaded ACP
-session, is started when the session is established, is relaunched lazily
-against the same native state when it has exited, and is stopped by
-`session/close`. `Agent.Close` closes every remaining session.
+Every sibling selects exactly one strategy and records it in the
+[registry](registry.md#native-surfaces-and-process-models):
+
+- **session runtime** — one native process serves one loaded ACP session, is
+  started when the session is established, is relaunched lazily against the
+  same native state when it has exited, and is stopped by `session/close`;
+  Pi.
+- **multiplexed runtime** — one Agent-owned native process serves many
+  logical ACP sessions, is started by the first session-establishing request,
+  and is replaced by the next explicit operation after it exits; Codex.
+
+`session/close` releases only the addressed logical session. `Agent.Close`
+closes the Agent-owned runtime and every remaining session. A shared native
+runtime MUST never make callbacks, cancellation, cwd, permissions, model
+state, or store data process-global when the corresponding ACP fact is scoped
+to a logical session.
 
 ### Family-Global Reserved Literals
 
@@ -188,6 +198,7 @@ the constant `message`:
 |---|---|---|
 | `<vendor>_invalid_options` | The agent was constructed with options it will not serve under. `NewAgent` returns no error; the verdict is delivered at `initialize` and every session-establishing entry point. | Optional `field` naming the refused option. |
 | `<vendor>_restore_failed` | `session/load` or `session/resume` found a store entry and could not restore it. The entry is neither deleted nor tombstoned. | none |
+| `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([06-lifecycle.md](06-lifecycle.md#shared-runtime-loss)). | none |
 | `<vendor>_session_poisoned` | The addressed session is poisoned ([04-sessions-and-store.md](04-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
 | `<vendor>_internal_failure` | Every failure the sibling cannot classify above. | Optional `class`, a closed token the sibling documents |
 

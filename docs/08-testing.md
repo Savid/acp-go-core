@@ -94,8 +94,10 @@ Every sibling proves, against the current ACP v1 schema:
   environment reaches the harness unchanged, `WithEnv` overrides it, session
   `env` overrides that, and only the sibling's `ACP_GO_<VENDOR>_INTERNAL_*`
   markers are absent.
-- Two concurrent sessions remain independently addressable without crossing
-  cwd, callbacks, permissions, turn results, or cancel.
+- Two concurrent logical sessions remain independently addressable without
+  crossing cwd, callbacks, permissions, turn results, or cancel. On a
+  multiplexed sibling, a native crash fails both in-flight turns exactly once
+  and the next operation rebinds both through one replacement.
 - **Native resume outside ACP.** A session created over ACP leaves native
   state the harness can resume natively after the adapter closes; a later
   `session/load` of that session through the adapter adopts rows the harness
@@ -138,9 +140,11 @@ boundaries:
     content-bearing `tool_call_update` is a complete snapshot array.
 11. Invalid or oversize output is refused in place with the constant guidance,
     the turn continues, and only `storage_failed` fails the turn.
-12. Typed binary data is not duplicated into raw events or logs.
+12. Where a sibling reads output from a path, a file in `os.TempDir()` is
+    readable and a file outside every root is refused.
+13. Typed binary data is not duplicated into raw events or logs.
 
-Gates 8 to 12 bind each native output surface a sibling implements. Byte
+Gates 8 to 13 bind each native output surface a sibling implements. Byte
 limits are exercised at the boundary and one byte over, per image and
 aggregate. Animated GIF, animated WebP, two-frame APNG, and single-frame
 `acTL` PNG fixtures fail pre-turn; a non-allowlist output raster is emitted

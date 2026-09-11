@@ -98,9 +98,13 @@ A `Replace` addresses exactly one session:
 ## Store Formats
 
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format.
-The proven kind is the **append-only log**: raw native JSON rows appended
-after turns under the main subpath, plus sidecar subpaths as needed. The
-[registry](registry.md#session-stores) records each sibling's carrier record.
+The proven kind is the **append-only log** (codex, pi): raw native JSON rows
+appended after turns under the main subpath, plus sidecar subpaths as needed.
+The [registry](registry.md#session-stores) records each sibling's carrier
+record.
+
+A multiplexed runtime persists one logical session at a time and never
+snapshots or restores the shared native runtime root.
 
 A session is **poisoned** when a wrapper invariant breaks: native session-id
 drift, a conversation-reset frame, or a store generation the sibling cannot
@@ -157,7 +161,7 @@ trust. A poisoned session refuses every operation but `session/close` and
 | Identity | Scope | Wire name |
 |---|---|---|
 | ACP session id | public, stable for the conversation's life | `sessionId` |
-| Native session id | harness detail; the registry records whether it equals the ACP id | none |
+| Native session id | the ACP session id: every proven sibling adopts the harness's own identity | none |
 | Session incarnation | one native lifecycle source's lifetime | `streamId` |
 
 - Lifecycle state is keyed by ACP session id, incarnation, and entity id. An

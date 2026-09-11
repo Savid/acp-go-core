@@ -10,6 +10,7 @@ the checks that keep the siblings aligned.
 
 | Repo | Package | Vendor key | Native surface | Store format |
 |---|---|---|---|---|
+| [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
 
 [The registry](docs/registry.md) records each sibling's capabilities, options,
