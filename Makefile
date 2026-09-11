@@ -3,7 +3,7 @@
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
-.PHONY: audit build clean coverage-check fmt fmt-check help lint modernize-check test tidy vuln
+.PHONY: audit build check clean coverage-check drift-check fmt fmt-check help lint modernize-check test tidy vuln
 
 ## build: build all packages
 build:
@@ -49,6 +49,14 @@ modernize-check:
 ## audit: run local checks
 audit: fmt-check lint build coverage-check tidy vuln modernize-check
 	go mod verify
+
+## check: validate links, skill metadata, fixtures, and script syntax
+check:
+	@python3 -B scripts/check.py
+
+## drift-check: verify the family structural contract across sibling checkouts
+drift-check:
+	@bash scripts/drift-check.sh
 
 ## clean: remove build artifacts
 clean:
