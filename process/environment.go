@@ -106,7 +106,7 @@ func (e Environment) Build() ([]string, error) {
 
 	if e.InternalPrefix != "" {
 		for key := range values {
-			if strings.HasPrefix(strings.ToUpper(key), strings.ToUpper(e.InternalPrefix)) {
+			if strings.HasPrefix(key, e.InternalPrefix) {
 				delete(values, key)
 			}
 		}
@@ -116,7 +116,7 @@ func (e Environment) Build() ([]string, error) {
 		values[key] = e.Owned[key]
 	}
 
-	if len(e.ExtraPathDirs) > 0 {
+	if _, present := values["PATH"]; present || len(e.ExtraPathDirs) > 0 {
 		values["PATH"] = composePath(e.ExtraPathDirs, values["PATH"])
 	}
 

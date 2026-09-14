@@ -25,11 +25,13 @@ within the task's scope. Never weaken a rule merely to match an implementation.
 | Path | Owns |
 |---|---|
 | `store.go` | `SessionStore` types and `InMemorySessionStore` |
+| `sessionlog/` | Atomic mirror generations, record decoding, native-log reconciliation |
+| `observer/` | Shared OpenTelemetry instrumentation |
 | `storetest/` | The exported store contract battery |
 | `lifecycle/` | Capability, envelope, decoder, reducer, emitter; `testdata/fixtures/` is the canonical battery |
-| `process/` | Environment merge, executable resolution, launch, shutdown, epoch fence |
-| `wire/` | Error constructors, raw-event framing, reserved literals |
-| `image/` | Limits, media envelope, input gates, handoff, output, artifact store |
+| `process/` | Environment merge, executable resolution, launch, shutdown, seed files |
+| `wire/` | Error constructors, raw-event framing, publication ordering, reserved literals |
+| `image/` | Limits, media envelope, input gates, handoff, output gates |
 | `docs/` | The contract pages and the registry |
 | `scripts/` | `check.py` for this repo, `drift-check.sh` for the siblings |
 

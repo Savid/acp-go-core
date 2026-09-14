@@ -37,7 +37,7 @@
 `-- internal/<harness>/
 ```
 
-`LICENSE`, `.gitignore`, `.golangci.yml`, and the workflow are byte-identical
+`LICENSE`, `.gitignore`, and `.golangci.yml` are byte-identical
 across siblings. The public ACP surface lives in the root package. Native
 protocol and process details live under `internal/<harness>`. Shared behavior
 is imported from this module, never copied into `internal/`.
@@ -182,7 +182,7 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
 - the [surface presence](#surface-presence) symbols and forbidden literals;
 - that README, AGENTS.md, and doc.go name no other sibling or this
   repository;
-- byte-identical `LICENSE`, `.gitignore`, `.golangci.yml`, and workflow
+- byte-identical `LICENSE`, `.gitignore`, and `.golangci.yml`
   across siblings;
 - the Makefile audit composition and identical-class recipes;
 - that no sibling carries a copy of the lifecycle fixture battery.

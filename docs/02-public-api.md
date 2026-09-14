@@ -13,10 +13,12 @@ types that cross the sibling boundary. The module owns:
 | Package | Contents |
 |---|---|
 | `acpcore` | `SessionStore` and its types and `InMemorySessionStore` ([04-sessions-and-store.md](04-sessions-and-store.md#store-api)). |
+| `acpcore/sessionlog` | Atomic native-log and session-configuration commits, strict record decoding, and native-log reconciliation. |
+| `acpcore/observer` | OpenTelemetry spans and metrics with sibling identity supplied at construction. |
 | `acpcore/storetest` | The store contract battery a host store runs against itself. |
 | `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the emitter-side validator, and the embedded [fixture battery](08-testing.md#lifecycle-fixtures). |
-| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group and dedicated stdio pipes, signal-and-wait shutdown, and the epoch fence for late events. |
-| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, and the reserved literals with the collision check for host-supplied `_meta`. |
+| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group and dedicated stdio pipes, signal-and-wait shutdown, and seed-file writes. |
+| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, ACP transport publication ordering, and the reserved literals with the collision check for host-supplied `_meta`. |
 | `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, and the image input and output gates ([03-wire-contract.md](03-wire-contract.md#image-content)). |
 
 The exported API is the module's own Go documentation. This contract fixes

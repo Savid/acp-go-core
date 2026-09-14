@@ -109,7 +109,4 @@ func TestRawEventsSequenceAndCap(t *testing.T) {
 	require.False(t, disabled.Enabled())
 	require.NoError(t, disabled.Emit(ctx, notify, map[string]any{"n": 9}))
 	require.Len(t, delivered, 3)
-
-	require.True(t, RawEventsEnabled(map[string]any{"pi": map[string]any{"rawEvent": map[string]any{"enabled": true}}}, "pi"))
-	require.False(t, RawEventsEnabled(map[string]any{"pi": map[string]any{}}, "pi"))
 }

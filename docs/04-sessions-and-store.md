@@ -99,7 +99,7 @@ A `Replace` addresses exactly one session:
 
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format.
 The proven kind is the **append-only log** (codex, pi): raw native JSON rows
-appended after turns under the main subpath, plus sidecar subpaths as needed.
+mirrored after turns under the main subpath, plus sidecar subpaths as needed.
 The [registry](registry.md#session-stores) records each sibling's carrier
 record.
 
@@ -113,7 +113,9 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 ## Mirror Out
 
-- Append native rows after turns. The adapter reads the native file directly.
+- Read native rows after turns and publish them with the current session
+  configuration through `sessionlog.Commit`, using one atomic store generation.
+  Configuration changes commit even when no native rows were added.
 - Never commit while native input, a foreground-blocking permission or
   elicitation, or message generation is pending.
 - Preserve raw native bytes.
@@ -153,6 +155,9 @@ trust. A poisoned session refuses every operation but `session/close` and
   is what lets the operator continue the same session outside ACP.
 - Credentials are never restored from the store. Session env values are
   carrier state and may contain secrets; the host protects those rows.
+- Require the current configuration record and validate its identity, paths,
+  environment, and ordered path directories. Refuse unknown or duplicate
+  record fields and malformed native rows with `<vendor>_restore_failed`.
 - Validate restored files against path traversal and format rules.
 - Start a new native process after its initial state is hydrated.
 
@@ -179,6 +184,12 @@ trust. A poisoned session refuses every operation but `session/close` and
 |---|---|
 | `session/load` | Restores native state and replays history to the client. |
 | `session/resume` | Restores native state and returns without replaying. |
+
+## Listing
+
+`session/list` orders live and stored sessions by descending `updatedAt`,
+then ascending session id, and paginates through `wire.PaginateSessions`.
+Cursors are raw URL-base64 offsets. An empty cwd filter includes every cwd.
 
 ## Proving the Format
 

@@ -27,16 +27,6 @@ const (
 // RawEventMethod names a sibling's raw-event notification.
 func RawEventMethod(vendor string) string { return "_" + vendor + "/rawEvent" }
 
-// RawEventsEnabled reads the per-session opt-in from a session lifecycle
-// request's _meta.
-func RawEventsEnabled(meta map[string]any, vendor string) bool {
-	vendorMeta, _ := meta[vendor].(map[string]any)
-	rawEvent, _ := vendorMeta["rawEvent"].(map[string]any)
-	enabled, _ := rawEvent["enabled"].(bool)
-
-	return enabled
-}
-
 // Notifier delivers one extension notification.
 type Notifier func(ctx context.Context, method string, params map[string]any) error
 

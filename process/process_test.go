@@ -183,14 +183,3 @@ func TestStartRefusesMissingExecutable(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "start"))
 }
-
-func TestGeneration(t *testing.T) {
-	t.Parallel()
-
-	var generation Generation
-
-	first := generation.Current()
-	require.True(t, generation.IsCurrent(first))
-	require.Equal(t, first+1, generation.Next())
-	require.False(t, generation.IsCurrent(first))
-}

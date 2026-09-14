@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -259,18 +258,3 @@ func (p *pipes) closeAll() {
 		}
 	}
 }
-
-// Generation is the epoch fence for a native runtime. Events from a dead epoch
-// are dropped by checking the epoch they were bound to against the current one.
-type Generation struct {
-	current atomic.Uint64
-}
-
-// Current reports the live epoch.
-func (g *Generation) Current() uint64 { return g.current.Load() }
-
-// Next retires the live epoch and returns the new one.
-func (g *Generation) Next() uint64 { return g.current.Add(1) }
-
-// IsCurrent reports whether epoch is still the live one.
-func (g *Generation) IsCurrent(epoch uint64) bool { return g.current.Load() == epoch }

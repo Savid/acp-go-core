@@ -15,13 +15,15 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
   process group, and three dedicated pipes. Native stdout and stderr never
   inherit ACP stdout and are routed to logs only after JSON-RPC separation is
   guaranteed.
-- Shared writable native state has exactly one writer. Logical-session cwd,
+- Shared writable native state has exactly one writer. A Codex app-server
+  holds an exclusive home lock from before seeding until the process exits
+  and is waited on. Logical-session cwd,
   model, permission state, callbacks, cancellation, and persistence remain
   independently routed on a multiplexed runtime.
 - Tests inject native stdout and stderr noise and prove ACP stdout stays valid.
 
 Every native event is fenced by the native-process epoch, logical session, and
-turn nonce. A native process exit fails each in-flight turn exactly once,
+native turn identity. A native process exit fails each in-flight turn exactly once,
 suppresses late events from the dead epoch, and fences every incarnation that
 generation carried. Every session stays addressable: the next explicit
 operation binds it again on a fresh generation with a fresh incarnation.
@@ -132,9 +134,10 @@ incarnation ends the stream.
 | Limit | Value | Backpressure error |
 |---|---:|---|
 | Active sessions per agent | 32 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"active_sessions"})` |
-| Concurrent prompts per session | 1 (fixed) | `acp.NewInvalidRequest({"error":"backpressure","limit":<registered token>})` |
+| Concurrent prompts per session | 1 (fixed) | `acp.NewInvalidRequest({"error":"backpressure","limit":"session_prompt"})` |
 | Concurrent server-to-client calls per agent | 16 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"client_calls"})` |
 
+A conflicting load or resume uses the `session_restore` limit token.
 Prompt turns are serialized per session. Multiplexed runtimes admit concurrent
 turns on independent sessions. `WithConcurrencyLimits` may change the two configurable values;
 zero means default; negative fails construction. `wire.Backpressure` builds

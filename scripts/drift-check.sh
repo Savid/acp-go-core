@@ -18,7 +18,10 @@ core_released=1; rg -q '^\| Core module \|.*unreleased' "$repo_root/README.md" &
 sdk_module=${sdk_pin%@*}; sdk_version=${sdk_pin#*@}; go_version=${go_pin#go }
 core_module=${core_pin%% *}
 
-mapfile -t siblings < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/README.md")
+siblings=()
+while IFS= read -r vendor; do
+  siblings+=("$vendor")
+done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/README.md")
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
 forbidden_literals=('HostAuthority' 'acp-go.dev/route' '/rateLimits' '/auth/' '/session/fork' 'McpServerStdio{' 'WithSessionMCPServers' 'WithAmbientEnvironment' 'ProviderAuth')
@@ -95,13 +98,57 @@ if (( ${#present[@]} > 1 )); then
   first="$family_root/acp-go-${present[0]}"
   for vendor in "${present[@]:1}"; do
     repo="$family_root/acp-go-$vendor"
-    for f in LICENSE .gitignore .golangci.yml .github/workflows/check.yml; do
+    for f in LICENSE .gitignore .golangci.yml; do
       [[ -f "$first/$f" && -f "$repo/$f" ]] || continue
       cmp -s "$first/$f" "$repo/$f" || fail "acp-go-$vendor: $f differs from acp-go-${present[0]}"
     done
   done
 else
   skip "shared-file comparison needs at least two checkouts"
+fi
+
+if ! python3 - "$repo_root" "$family_root" <<'PY_CHECK'
+import pathlib
+import re
+import sys
+
+core, family = map(pathlib.Path, sys.argv[1:])
+vendors = re.findall(r"^\| \[acp-go-([a-z]+)\]", (core / "README.md").read_text(), re.M)
+repos = [core] + [family / f"acp-go-{vendor}" for vendor in vendors if (family / f"acp-go-{vendor}").is_dir()]
+failed = False
+
+def fail(message):
+    global failed
+    print(f"FAIL {message}")
+    failed = True
+
+versions = {}
+for repo in repos:
+    for line in (repo / "go.mod").read_text().splitlines():
+        match = re.fullmatch(r"\s+([^ ]+) (v[^ ]+)", line)
+        if match:
+            module, version = match.groups()
+            if module in versions and versions[module][1] != version:
+                fail(f"{repo.name}: {module} {version} differs from {versions[module]}")
+            versions[module] = (repo.name, version)
+
+recipes = {}
+for repo in repos:
+    makefile = (repo / "Makefile").read_text()
+    for target in ("test", "coverage-check", "lint", "fmt", "fmt-check", "tidy", "vuln", "modernize-check"):
+        match = re.search(rf"^{target}:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.M)
+        if not match:
+            fail(f"{repo.name}: missing {target} recipe")
+            continue
+        recipe = match[1]
+        if target in recipes and recipes[target] != recipe:
+            fail(f"{repo.name}: {target} recipe differs from core")
+        recipes.setdefault(target, recipe)
+
+sys.exit(1 if failed else 0)
+PY_CHECK
+then
+  status=1
 fi
 
 (( status == 0 )) && pass "drift-check"

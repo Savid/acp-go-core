@@ -15,12 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 
-	acpcore "github.com/savid/acp-go-core"
 	"github.com/savid/acp-go-core/wire"
 )
 
@@ -335,41 +333,4 @@ func TestOutput(t *testing.T) {
 	bmp, ok := SniffMIME([]byte("BM\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"))
 	require.True(t, ok)
 	require.Equal(t, "image/bmp", bmp)
-}
-
-func TestArtifactStore(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	store := acpcore.NewInMemorySessionStore()
-	artifacts := NewArtifactStore(store, "s")
-	now := time.Now()
-	artifacts.now = func() time.Time { return now }
-
-	data := pngBytes(t)
-
-	subpath, err := artifacts.Store(ctx, "native-1", data, MIMEPNG)
-	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(subpath, ArtifactPrefix))
-
-	again, err := artifacts.Store(ctx, "native-1", data, MIMEPNG)
-	require.NoError(t, err)
-	require.Equal(t, subpath, again)
-
-	loaded, err := artifacts.Load(ctx, subpath)
-	require.NoError(t, err)
-	require.Equal(t, MIMEPNG, loaded.MimeType)
-	require.Equal(t, base64.StdEncoding.EncodeToString(data), loaded.Data)
-
-	_, err = artifacts.Load(ctx, "other/x")
-	require.Error(t, err)
-
-	artifacts.now = func() time.Time { return now.Add(ArtifactTTL) }
-
-	_, err = artifacts.Load(ctx, subpath)
-	require.Error(t, err, "an expired artifact fails replay")
-
-	subkeys, err := store.ListSubkeys(ctx, acpcore.SessionKey{SessionID: "s"})
-	require.NoError(t, err)
-	require.Empty(t, subkeys, "an expired artifact is deleted on access")
 }

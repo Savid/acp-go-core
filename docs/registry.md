@@ -19,11 +19,8 @@ id: the Codex thread id, the Pi session UUID.
 
 | Sibling | Native surface | Process lifetime |
 |---|---|---|
-| codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
+| codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
-
-Teardown signals the process group and waits for the root process on every
-sibling.
 
 ## Native Version Probes
 
@@ -36,12 +33,8 @@ sibling.
 
 | Sibling | Kind | Carrier record |
 |---|---|---|
-| codex | Append-only rollout rows plus a `config` subpath | Each commit appends the rows the app-server wrote to the thread's rollout since the last commit, then one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, and output schema. |
-| pi | Append-only session JSONL rows plus a `config` subpath | Each commit appends the rows pi wrote since the last commit, then one session record naming pi's session file, the accepted session environment, and the ordered paths. |
-
-Adapter-authored records use closed current schemas and reject unknown or
-duplicate fields, malformed input, regressed counters, and mismatched
-identity.
+| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, and output schema. |
+| pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. |
 
 ### Mirror-Commit Ordering
 
@@ -126,7 +119,8 @@ updates under agent-origin turns.
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
 thread's `config.shell_environment_policy.set` on `thread/start` and
-`thread/resume`, with `PATH` composed ahead of the app-server's own (codex);
+`thread/resume`, with ordered extra directories prepended to the session-selected `PATH`,
+falling back to the app-server's `PATH` when omitted (codex);
 the session's pi process environment (pi).
 
 ## Session Config Options
@@ -174,8 +168,6 @@ Pi refuses a host-listed id with no provider prefix at construction.
 |---|---|
 | codex | a `data:` URL on the turn input |
 | pi | inline base64 |
-
-Both retain one root handle per prompt.
 
 ### Non-raster blobs
 
@@ -225,21 +217,6 @@ establishment (pi).
 | codex | replay decodes `image_generation_call` rows from the mirrored rollout through the output gate; a live `imageView` is an ordinary function call in the rollout, so its replay carries no image |
 | pi | replay decodes image blocks from the mirrored native rows through the output gate |
 
-## Converged Uniform Semantics
-
-- **Listing:** RawURL-base64 offset cursors. Empty cwd means no filter.
-- **Dispatch:** closed Agents fail `-32600`.
-- **Admission:** one in-flight prompt per session; contention is `-32600`
-  `{error:"backpressure",limit:<token>}` with token `session_prompt`, plus
-  `session_restore` while a load or resume is in flight.
-
-## Known Postures
-
-- **Handoff hardlinks:** no adapter checks `Nlink`; the declared digest still
-  binds accepted bytes.
-- **Decode allocation:** adapters parse raster structure without full decode
-  and impose no allocation budget.
-
 ## Known Deviations
 
 - **Codex publishes the CLI build's presets** whatever provider the home
@@ -271,5 +248,5 @@ Off-prompt `-32603` reachability:
 
 | Sibling | `_invalid_options` `field` | `_restore_failed` | `_runtime_unavailable` | `_session_poisoned` `cause` | `_internal_failure` `class` |
 |---|---|---|---|---|---|
-| codex | the refused option name | load, resume | yes, when a replacement app-server cannot start | never | `native_start`; bare token on close, delete, and list failures |
-| pi | the refused option name | load, resume | never | `native_session_identity_drift` | `native_start`; bare token on close, delete, and list failures |
+| codex | the refused option name | load, resume | yes, when a replacement app-server cannot start | never | `native_start`; bare token on close, delete, list, and config-commit failures |
+| pi | the refused option name | load, resume | never | `native_session_identity_drift` | `native_start`; bare token on close, delete, list, and config-commit failures |

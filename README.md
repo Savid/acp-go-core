@@ -21,11 +21,13 @@ native evidence, and deviations.
 | Package | Contents |
 |---|---|
 | `acpcore` | `SessionStore` and its types, `InMemorySessionStore` |
+| `acpcore/sessionlog` | Atomic native-log and configuration mirroring, strict record decoding, and reconciliation with native continuation |
+| `acpcore/observer` | ACP, prompt, dialog, store, and native-process OpenTelemetry instrumentation |
 | `acpcore/storetest` | The store contract battery a host store runs against itself |
 | `acpcore/lifecycle` | The `acp-go.dev/lifecycle` extension: capability, envelope, events, reducer, emitter, and the embedded fixture battery |
-| `acpcore/process` | Environment merge, executable resolution, child launch with its own process group and pipes, shutdown, and the epoch fence |
-| `acpcore/wire` | Uniform error shapes, raw-event framing and sequencing, and the reserved `_meta` literals |
-| `acpcore/image` | Decoded-byte limits, the media envelope, prompt image validation in both forms, output normalization, and the artifact store |
+| `acpcore/process` | Environment merge, executable resolution, child launch with its own process group and pipes, shutdown, and seed-file writes |
+| `acpcore/wire` | Uniform error shapes, raw-event framing and sequencing, publication ordering, and the reserved `_meta` literals |
+| `acpcore/image` | Decoded-byte limits, the media envelope, prompt image validation in both forms, output normalization |
 
 ```go
 import (
@@ -51,7 +53,7 @@ Every sibling moves together on these pins. Values live only in this table.
 
 A pin change covers every sibling and reruns each conformance suite. Shared
 direct dependencies such as OpenTelemetry and testify also move together;
-their versions live in sibling `go.mod` files and are compared by
+their versions live in `go.mod` files and are compared by
 `make drift-check`.
 
 ### Protocol Posture
