@@ -99,7 +99,8 @@ A `Replace` addresses exactly one session:
 
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format.
 The proven kinds are **native logs** (claude, codex, pi) and a
-**per-conversation JSON export** (hermes). Raw native rows or exports are mirrored
+**per-conversation JSON export** (hermes), and an **online native sync-event
+graph** (opencode). Raw native rows or exports are mirrored
 after turns under the main subpath, plus a configuration sidecar.
 The [registry](registry.md#session-stores) records each sibling's carrier
 record.

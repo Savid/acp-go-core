@@ -13,6 +13,7 @@ the checks that keep the siblings aligned.
 | [acp-go-claude](https://github.com/savid/acp-go-claude) | `claudeacp` | `claude` | Claude Code stream-json and control protocol | `claude-transcript-jsonl-v1` |
 | [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v1` |
 | [acp-go-hermes](https://github.com/savid/acp-go-hermes) | `hermesacp` | `hermes` | `hermes serve` WebSocket JSON-RPC and HTTP persistence | `hermes-session-json-v1` |
+| [acp-go-opencode](https://github.com/savid/acp-go-opencode) | `opencodeacp` | `opencode` | `opencode serve` HTTP and SSE | `opencode-sync-events-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
 
 [The registry](docs/registry.md) records each sibling's capabilities, options,

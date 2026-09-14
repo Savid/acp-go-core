@@ -143,9 +143,10 @@ escape, or non-regular file fails `path_not_allowed`.
 ### Replay
 
 `session/load` replay delivers the same image content as live output, decoded
-through the same output gate from the mirrored native rows, which carry the
-bytes. Replay of an artifact the
-source no longer holds fails the whole load with the closed non-prompt error
+through the same output gate from mirrored native data and captured image
+sidecars. The committed generation MUST contain admitted local image bytes
+independently of the original path. Replay of an artifact the store no longer
+holds fails the whole load with the closed non-prompt error
 vocabulary, never a silent hole. Raw events and logs carry safe metadata only,
 never a second copy of the base64.
 
