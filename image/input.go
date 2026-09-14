@@ -39,7 +39,8 @@ type Options struct {
 	Blobs BlobPolicy
 }
 
-// Decoded is one validated image ready for the native request.
+// Decoded is one validated image or admitted blob ready for the native request.
+// Index counts media blocks; text resources do not consume an index.
 type Decoded struct {
 	Data  []byte
 	MIME  string
@@ -146,7 +147,7 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 			return nil, &InputError{Code: ErrorTooLarge, Field: media.kind.field(), Index: index, SizeBytes: promptBytes, MaxBytes: maxPromptBytes}, nil
 		}
 
-		if media.kind.nativeImage() {
+		if media.kind.nativeImage() || media.kind == mediaOpaqueBlob {
 			images = append(images, Decoded{Data: data, MIME: media.mimeType, Field: media.kind.field(), Index: index})
 		}
 

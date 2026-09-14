@@ -42,4 +42,3 @@ __pycache__/
 # Personal agent overrides (per-developer, not shared)
 *.local.md
 .claude/settings.local.json
-

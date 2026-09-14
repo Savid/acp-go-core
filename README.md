@@ -10,6 +10,7 @@ the checks that keep the siblings aligned.
 
 | Repo | Package | Vendor key | Native surface | Store format |
 |---|---|---|---|---|
+| [acp-go-claude](https://github.com/savid/acp-go-claude) | `claudeacp` | `claude` | Claude Code stream-json and control protocol | `claude-transcript-jsonl-v1` |
 | [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
 

@@ -260,8 +260,10 @@ func TestResourceBlocks(t *testing.T) {
 
 	decoded, refusal := validate(t, Options{Limits: DefaultLimits()}, blob, text, imageBlock(data, MIMEPNG))
 	require.Nil(t, refusal)
-	require.Len(t, decoded, 1)
-	require.Equal(t, 1, decoded[0].Index, "a gated blob consumes an index and a text resource does not")
+	require.Len(t, decoded, 2)
+	require.Equal(t, []byte("%PDF-"), decoded[0].Data)
+	require.Equal(t, pdf, decoded[0].MIME)
+	require.Equal(t, 1, decoded[1].Index, "a gated blob consumes an index and a text resource does not")
 
 	refuse := Options{Limits: DefaultLimits(), Blobs: func(string) BlobDisposition { return BlobRefuse }}
 	_, refusal = validate(t, refuse, blob)

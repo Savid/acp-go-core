@@ -189,6 +189,14 @@ adapter that cannot determine it sets `size: 0`.
 - Several native assistant messages in one turn each produce their text once,
   in native order, deduplicated on identity.
 
+## Delegated Provenance
+
+When a native frame identifies its parent tool use, derived updates MUST
+retain that identity under `_meta.<vendor>.parentToolUseId`. The adapter MUST
+keep interleaved parent streams separate when suppressing repeated text.
+A transcript entry id and an API message id are distinct identities; replay
+MUST retain separate content entries that share a message id.
+
 ## Native Turn Failure
 
 A native turn failure is any way a turn ends other than a clean stop reason.

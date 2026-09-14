@@ -20,7 +20,6 @@
 |-- session.go
 |-- session_meta.go
 |-- session_prompt.go
-|-- scratch.go
 |-- cmd/acp-go-<vendor>/
 |   |-- main.go
 |   |-- otel.go
@@ -52,8 +51,9 @@ size-justified domain splits: `agent_<topic>.go` for ACP method handling,
 `session_<topic>.go` for session orchestration, `image_<topic>.go` for image
 behavior, and `<vendor>_<topic>.go` for thin public glue.
 
-`scratch.go` is the sole scratch accessor. No other non-test source may
-create an empty-parent temp file or directory.
+A sibling that allocates ephemeral state uses `scratch.go` as its sole
+scratch accessor. A sibling with no such allocation omits it. No other
+non-test source may create an empty-parent temp file or directory.
 
 Tests mirror production files: `<stem>_test.go` mirrors `<stem>.go`. The
 standing extras are `example_test.go`, `contract_test.go`, `helpers_test.go`,

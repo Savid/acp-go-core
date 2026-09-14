@@ -35,12 +35,15 @@ rg -q "^\s*$sdk_module $sdk_version\$" "$repo_root/go.mod" || fail "acp-go-core:
 
 check_sibling() {
   local vendor=$1 repo=$2 name="acp-go-$1" f
-  for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go scratch.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/signals_unix.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
+  for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/signals_unix.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
     [[ -e "$repo/$f" ]] || fail "$name: missing $f"
   done
   for f in examples/minimal-client examples/interactive-chat examples/resume-from-file; do
     [[ -d "$repo/$f" ]] || fail "$name: missing $f"
   done
+  if rg -q --type go -g '!*_test.go' '\.scratchDir\(' "$repo"; then
+    [[ -f "$repo/scratch.go" ]] || fail "$name: scratch allocator has no scratch.go owner"
+  fi
   compgen -G "$repo/fake*_test.go" >/dev/null || fail "$name: scripted fake native binary test file missing"
   rg -q "^module github.com/savid/$name\$" "$repo/go.mod" || fail "$name: module path is not github.com/savid/$name"
   rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from README pin"
