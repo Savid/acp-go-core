@@ -5,11 +5,43 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/coder/acp-go-sdk"
 )
 
 const sessionsPageSize = 50
+
+// SessionRequests reserves session identities while an establishing request is
+// in flight. Its zero value is ready to use.
+type SessionRequests struct {
+	mu      sync.Mutex
+	pending map[acp.SessionId]struct{}
+}
+
+// Acquire refuses a concurrent restore of the same session before either
+// request can hydrate or bind its native state. The caller releases the
+// reservation after publication has been arranged or the request has failed.
+func (r *SessionRequests) Acquire(id acp.SessionId) (func(), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.pending[id]; exists {
+		return nil, Backpressure("session_restore")
+	}
+
+	if r.pending == nil {
+		r.pending = make(map[acp.SessionId]struct{})
+	}
+
+	r.pending[id] = struct{}{}
+
+	return sync.OnceFunc(func() {
+		r.mu.Lock()
+		delete(r.pending, id)
+		r.mu.Unlock()
+	}), nil
+}
 
 // PaginateSessions orders sessions newest first, then by id, and returns the
 // page selected by a raw URL-base64 offset cursor.

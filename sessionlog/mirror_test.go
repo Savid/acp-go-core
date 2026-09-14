@@ -74,3 +74,24 @@ func TestReconcileNativeContinuation(t *testing.T) {
 	_, err = Reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
 	require.Error(t, err)
 }
+
+func TestInvalidNativeRowsNeverReplaceCommittedState(t *testing.T) {
+	t.Parallel()
+	for _, invalid := range []string{"null", "[]", "false", "{}{}", "{"} {
+		t.Run(invalid, func(t *testing.T) {
+			t.Parallel()
+			store := acpcore.NewInMemorySessionStore()
+			rows := [][]byte{[]byte(`{"text":"saved"}`)}
+			require.NoError(t, Commit(t.Context(), store, "s", rows, testRecord{Model: "one"}))
+			require.Error(t, Commit(t.Context(), store, "s", [][]byte{[]byte(invalid)}, testRecord{Model: "two"}))
+			var record testRecord
+			loaded, err := Load(t.Context(), store, "s", &record)
+			require.NoError(t, err)
+			require.Equal(t, rows, loaded)
+			require.Equal(t, "one", record.Model)
+			require.NoError(t, store.Append(t.Context(), acpcore.SessionKey{SessionID: "s"}, []acpcore.SessionStoreEntry{[]byte(invalid)}))
+			_, err = Load(t.Context(), store, "s", &record)
+			require.Error(t, err)
+		})
+	}
+}

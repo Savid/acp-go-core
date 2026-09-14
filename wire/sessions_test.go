@@ -28,3 +28,22 @@ func TestSessionPagesHaveStableOrder(t *testing.T) {
 	require.Nil(t, cursor)
 	require.Equal(t, acp.SessionId("s50"), sessions[0].SessionId)
 }
+
+func TestSessionRequestsReserveUntilReleased(t *testing.T) {
+	t.Parallel()
+	var requests SessionRequests
+	release, err := requests.Acquire("one")
+	require.NoError(t, err)
+	_, err = requests.Acquire("one")
+	require.Equal(t, Backpressure("session_restore"), err)
+	peerRelease, err := requests.Acquire("two")
+	require.NoError(t, err)
+	peerRelease()
+	release()
+	secondRelease, err := requests.Acquire("one")
+	require.NoError(t, err)
+	release()
+	_, err = requests.Acquire("one")
+	require.Equal(t, Backpressure("session_restore"), err)
+	secondRelease()
+}

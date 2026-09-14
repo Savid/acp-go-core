@@ -89,7 +89,7 @@ updates under agent-origin turns.
 | Sibling | Tolerance and remaining fences |
 |---|---|
 | claude | Unmodelled system records remain session-scoped. Invalid JSON fails the transport. A changed native session id poisons the session. Native control cancellation resolves its matching callback. |
-| codex | Usage reports, retried `error` notifications, and unmodelled methods are session-scoped and open nothing. Notifications for threads this Agent does not hold are dropped. A `turn/completed` naming a turn other than the cycle's is ignored. |
+| codex | Usage reports, retried `error` notifications, and unmodelled methods are session-scoped and open nothing. Notifications for threads this Agent does not hold are dropped. Records naming a turn other than the cycle's are ignored. Repeated text completion frames contribute only their new suffix. |
 | pi | Queue reports, compaction and retry pairs, custom messages, and unmodelled types are session-scoped and open nothing. A wrapper extension error fails the cycle with cause `extension`; an operator extension error is pi's own. |
 
 ### Opening publication

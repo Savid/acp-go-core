@@ -26,6 +26,10 @@ func Commit(ctx context.Context, store acpcore.SessionStore, sessionID string, r
 
 	entries := make([]acpcore.SessionStoreEntry, len(rows))
 	for index, row := range rows {
+		if !validRow(row) {
+			return fmt.Errorf("invalid native row %d", index)
+		}
+
 		entries[index] = row
 	}
 
@@ -60,7 +64,7 @@ func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, rec
 
 	rows := make([][]byte, len(entries))
 	for index, entry := range entries {
-		if !json.Valid(entry) {
+		if !validRow(entry) {
 			return nil, fmt.Errorf("invalid native row %d", index)
 		}
 
@@ -68,6 +72,12 @@ func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, rec
 	}
 
 	return rows, nil
+}
+
+func validRow(row []byte) bool {
+	trimmed := bytes.TrimSpace(row)
+
+	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
 }
 
 func decodeRecord(data []byte, record any) error {
