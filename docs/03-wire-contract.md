@@ -2,6 +2,10 @@
 
 ## Initialize Response
 
+Before reading ACP input, a sibling MUST install its connection, logger, and
+metadata transport. Requests available at startup use the same strict decoding
+as later requests.
+
 All siblings return this shape; only vendor `_meta` details, the media bounds,
 and the lifecycle answer vary. The top-level `_meta` block is absent when the
 host omitted the lifecycle capability.

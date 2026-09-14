@@ -250,7 +250,9 @@ establishment (claude, pi).
 ## Native Verification
 
 Claude Code `2.1.270`, verified 2026-09-14: native initialization and settings
-controls; race-enabled ACP → native `claude --resume` → ACP load and continued
+controls, permission callbacks, AskUserQuestion elicitation, raw events,
+PATH changes on resume, running-command cancellation, and deletion;
+race-enabled ACP → native `claude --resume` → ACP load and continued
 prompt, retaining the same conversation id and both earlier turns. The native
 transcript can contain multiple entries with one API message id.
 

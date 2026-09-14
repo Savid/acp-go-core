@@ -202,7 +202,8 @@ Nothing else is scrubbed, allowlisted, or refused by name. A name MUST be
 non-empty and contain neither `=` nor NUL; a value MUST contain no NUL. An
 invalid entry in `WithEnv` fails construction; one in session `env` fails the
 request with `{"error":"unsupported","field":"_meta.<vendor>.options.env.<key>"}`.
-Empty values are forwarded as `KEY=`.
+Empty values are forwarded as `KEY=`. Native home and file paths that are
+relative MUST be resolved against the native process cwd for adapter file I/O.
 
 `PATH` is composed last: the session's ordered `extraPathDirs`, then the
 `PATH` the merge produced, joined with `os.PathListSeparator` and omitting

@@ -18,8 +18,10 @@ import (
 // frame so a session's opening publication runs only after its establishing
 // response is on the wire and an action announcement only after its request.
 type Transport struct {
-	input  io.Reader
-	output io.Writer
+	input     io.Reader
+	output    io.Writer
+	started   chan struct{}
+	startOnce sync.Once
 
 	mu       sync.Mutex
 	requests map[string]inboundRequest
@@ -35,10 +37,11 @@ type inboundRequest struct {
 	sessionID acp.SessionId
 }
 
-// NewTransport wraps the streams supplied to the ACP SDK.
+// NewTransport prepares streams that remain unread until Start.
 func NewTransport(input io.Reader, output io.Writer) *Transport {
 	return &Transport{
 		input:    input,
+		started:  make(chan struct{}),
 		output:   output,
 		requests: make(map[string]inboundRequest),
 		raw:      make(map[string][]json.RawMessage),
@@ -47,6 +50,9 @@ func NewTransport(input io.Reader, output io.Writer) *Transport {
 		written:  make(map[string]chan struct{}),
 	}
 }
+
+// Start releases inbound reads after the SDK connection and its handler are configured.
+func (t *Transport) Start() { t.startOnce.Do(func() { close(t.started) }) }
 
 func (t *Transport) Reader() io.Reader {
 	return &transportReader{transport: t, lines: bufio.NewReader(t.input)}
@@ -61,6 +67,8 @@ type transportReader struct {
 }
 
 func (r *transportReader) Read(p []byte) (int, error) {
+	<-r.transport.started
+
 	if len(r.pending) == 0 {
 		line, err := r.lines.ReadBytes('\n')
 		if len(line) > 0 {

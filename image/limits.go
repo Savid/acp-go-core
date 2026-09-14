@@ -1,6 +1,5 @@
 // Package image holds the family image gates: the decoded-byte limits, the media
-// envelope, prompt image validation in both input forms, output normalization,
-// and the artifact store that backs replay.
+// envelope, prompt image validation in both input forms, and output normalization.
 package image
 
 import (

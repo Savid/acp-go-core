@@ -27,7 +27,7 @@ native evidence, and deviations.
 | `acpcore/storetest` | The store contract battery a host store runs against itself |
 | `acpcore/lifecycle` | The `acp-go.dev/lifecycle` extension: capability, envelope, events, reducer, emitter, and the embedded fixture battery |
 | `acpcore/process` | Environment merge, executable resolution, child launch with its own process group and pipes, shutdown, and seed-file writes |
-| `acpcore/wire` | Uniform error shapes, raw-event framing and sequencing, publication ordering, and the reserved `_meta` literals |
+| `acpcore/wire` | Uniform error shapes, raw-event framing and sequencing, connection startup and publication ordering, and the reserved `_meta` literals |
 | `acpcore/image` | Decoded-byte limits, the media envelope, prompt image validation in both forms, output normalization |
 
 ```go

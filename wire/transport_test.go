@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -22,6 +23,7 @@ func TestTransportOrdersHooksAfterResponse(t *testing.T) {
 	var output bytes.Buffer
 
 	tr := NewTransport(bytes.NewBufferString(input), &output)
+	tr.Start()
 	consumed, err := io.ReadAll(tr.Reader())
 	require.NoError(t, err)
 	require.Equal(t, input, string(consumed))
@@ -78,4 +80,22 @@ func TestTransportReleasesRequestWrite(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("request write not released")
 	}
+}
+
+func TestTransportWaitsForConnectionSetup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport := NewTransport(bytes.NewBufferString("request\n"), io.Discard)
+		read := make(chan []byte, 1)
+		go func() { data, err := io.ReadAll(transport.Reader()); require.NoError(t, err); read <- data }()
+		synctest.Wait()
+		select {
+		case <-read:
+			t.Fatal("input read before connection setup")
+		default:
+		}
+		transport.Start()
+		transport.Start()
+		synctest.Wait()
+		require.Equal(t, []byte("request\n"), <-read)
+	})
 }
