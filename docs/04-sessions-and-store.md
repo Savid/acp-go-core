@@ -98,8 +98,9 @@ A `Replace` addresses exactly one session:
 ## Store Formats
 
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format.
-The proven kind is the **append-only log** (codex, pi): raw native JSON rows
-mirrored after turns under the main subpath, plus sidecar subpaths as needed.
+The proven kinds are **native logs** (claude, codex, pi) and a
+**per-conversation JSON export** (hermes). Raw native rows or exports are mirrored
+after turns under the main subpath, plus a configuration sidecar.
 The [registry](registry.md#session-stores) records each sibling's carrier
 record.
 
@@ -145,10 +146,12 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 - Materialize missing native state from the store into the harness's home in
   the harness's own layout, so the harness can resume it natively.
-- **An existing native file wins.** When the home already holds the native
+- **Existing native state wins.** When the home already holds the native
   state for the session and it is at least as long as the store's copy, load
   from it and adopt its newer rows into the store. Materialize from the store
-  only when the native state is absent or shorter. A disagreement at a shared
+  when native state is absent. Replace shorter native state only when the native
+  persistence surface supports it. If it refuses replacement of an existing id,
+  shorter native state MUST fail restore. A disagreement at a shared
   position fails `<vendor>_restore_failed`.
 - **Native state is never deleted by the adapter** on close, retire, or
   runtime replacement. The store is the durability boundary; the native copy
@@ -159,14 +162,16 @@ trust. A poisoned session refuses every operation but `session/close` and
   environment, and ordered path directories. Refuse unknown or duplicate
   record fields and malformed native rows with `<vendor>_restore_failed`.
 - Validate restored files against path traversal and format rules.
-- Start a new native process after its initial state is hydrated.
+- A native runtime MUST NOT bind the conversation until its initial state is
+  hydrated. A server whose import API owns persistence may start before hydration.
 
 ## Lifecycle Stream and Incarnation Identity
 
 | Identity | Scope | Wire name |
 |---|---|---|
 | ACP session id | public, stable for the conversation's life | `sessionId` |
-| Native session id | the ACP session id: every proven sibling adopts the harness's own identity | none |
+| Native conversation id | the ACP session id: every proven sibling adopts the harness's durable identity | none |
+| Native transport session id | internal connection-local identity, when the harness separates it from the conversation id | none |
 | Session incarnation | one native lifecycle source's lifetime | `streamId` |
 
 - Lifecycle state is keyed by ACP session id, incarnation, and entity id. An
