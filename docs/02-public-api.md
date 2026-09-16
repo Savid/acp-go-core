@@ -15,11 +15,12 @@ types that cross the sibling boundary. The module owns:
 | `acpcore` | `SessionStore` and its types and `InMemorySessionStore` ([04-sessions-and-store.md](04-sessions-and-store.md#store-api)). |
 | `acpcore/sessionlog` | Atomic native-log and session-configuration commits, strict record decoding, and native-log reconciliation. |
 | `acpcore/observer` | OpenTelemetry spans and metrics with sibling identity supplied at construction. |
+| `acpcore/observer/exporters` | The `OTEL_*` exporter, propagator, and log-bridge wiring a sibling's command binary hands to its Agent; library code never imports it. |
 | `acpcore/storetest` | The store contract battery a host store runs against itself. |
-| `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the emitter-side validator, and the embedded [fixture battery](08-testing.md#lifecycle-fixtures). |
-| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group and dedicated stdio pipes, signal-and-wait shutdown, and seed-file writes. |
-| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, ACP transport publication ordering, and the reserved literals with the collision check for host-supplied `_meta`. |
-| `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, and the image input and output gates ([03-wire-contract.md](03-wire-contract.md#image-content)). |
+| `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the session publisher, and the embedded [fixture battery](08-testing.md#lifecycle-fixtures). |
+| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, the native version floor check and retryable probe cache, child launch with its own process group, dedicated stdio pipes, and a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, and the exclusive native-home file lock. |
+| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, and the reserved literals with the collision check for host-supplied `_meta`. |
+| `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, the image input gate, and output decoding ([03-wire-contract.md](03-wire-contract.md#image-content)). |
 
 The exported API is the module's own Go documentation. This contract fixes
 what belongs there and what the siblings do with it. A sibling MUST NOT
@@ -147,7 +148,10 @@ Rules:
   and probe directories. Empty means `os.TempDir()`; a missing directory is
   created `0700`. Every ephemeral path is created through the sibling's
   single scratch accessor with a stable `acp-go-<vendor>-<purpose>-*` prefix
-  so a host can sweep orphans.
+  so a host can sweep orphans. A sibling that allocates no ephemeral state
+  accepts the option and allocates nothing; the
+  [registry](registry.md#ephemeral-scratch) records which siblings allocate
+  and what they put there.
 - `WithInputHandoffRoot` is the only host-supplied read root and opts in to
   [handoff image input](05-behavior.md#image-input). It MUST be absolute; a
   relative path is a construction failure. The adapter never writes, moves, or
@@ -171,8 +175,7 @@ Rules:
   managed file whose content changes keeps its prior bytes in `.seed.bak`.
   Secrets go in `env` and are referenced from seeded files by variable
   indirection. Native config injection is preferred where the harness offers
-  it: Codex `WithCodexConfigOverrides` passes `-c key=value` and writes
-  nothing.
+  it; the [registry](registry.md#vendor-process-options) records where.
 - Construction failures use `<vendor>_invalid_options`
   ([00-overview.md](00-overview.md#uniform-error-shapes)): `NewAgent` returns
   no error, and `Initialize` and every session-establishing entry point deliver
@@ -257,8 +260,10 @@ func WithSessionVendorOptions(options VendorOptions) SessionRequestOption
 ```
 
 `Meta` returns exactly `{"<vendor>": {"options": {...}}}` with only the
-non-zero supported fields. Maps and slices are cloned before storing or
-returning. Unknown own-namespace keys fail closed with the unsupported error.
+non-zero supported fields; a boolean the caller set explicitly travels even
+when `false`, and the [registry](registry.md#vendor-session-options) records
+which fields carry explicit presence. Maps and slices are cloned before storing
+or returning. Unknown own-namespace keys fail closed with the unsupported error.
 A field that exists for symmetry but has no proven native support fails at
 session start with the unsupported error naming it; the
 [registry](registry.md#vendor-session-options) records which.
@@ -284,11 +289,12 @@ session start with the unsupported error naming it; the
 
 ## Request Builders
 
-Every sibling exports the same helpers; only the vendor option helper name
-changes.
+The vendor-free request builders live once in `wire`; a sibling exports only
+the option constructors that carry its own namespace.
 
 ```go
-type SessionRequestOption func(*sessionRequestConfig)
+// package wire
+type SessionRequestOption func(*SessionRequestConfig)
 
 func NewSessionRequest(cwd string, opts ...SessionRequestOption) acp.NewSessionRequest
 func LoadSessionRequest(sessionID acp.SessionId, cwd string, opts ...SessionRequestOption) acp.LoadSessionRequest
@@ -297,16 +303,12 @@ func DeleteSessionRequest(sessionID acp.SessionId) acp.UnstableDeleteSessionRequ
 
 func WithSessionAdditionalDirectories(paths ...string) SessionRequestOption
 func WithSessionMeta(meta map[string]any) SessionRequestOption
-func WithSessionOutputSchema(schema map[string]any) SessionRequestOption
-func WithSessionRawEvents(enabled bool) SessionRequestOption
-
-func Validate<Vendor>SessionMeta(meta map[string]any) error
+func WithSessionMetaValue(meta map[string]any) SessionRequestOption
 
 func PromptRequest(sessionID acp.SessionId, blocks ...acp.ContentBlock) acp.PromptRequest
 func TextPromptRequest(sessionID acp.SessionId, text string) acp.PromptRequest
 func CancelRequest(sessionID acp.SessionId) acp.CancelNotification
 func SetConfigOptionRequest(sessionID acp.SessionId, configID acp.SessionConfigId, value acp.SessionConfigValueId) acp.SetSessionConfigOptionRequest
-func SetModelRequest(sessionID acp.SessionId, model string) acp.SetSessionConfigOptionRequest
 
 type ListSessionsRequestOption func(*acp.ListSessionsRequest)
 
@@ -314,6 +316,13 @@ func ListSessionsRequest(opts ...ListSessionsRequestOption) acp.ListSessionsRequ
 func WithListSessionsCwd(cwd string) ListSessionsRequestOption
 func WithListSessionsCursor(cursor string) ListSessionsRequestOption
 func WithListSessionsMeta(meta map[string]any) ListSessionsRequestOption
+
+// package <vendor>acp
+func WithSession<Vendor>Options(options <Vendor>Options) wire.SessionRequestOption
+func WithSessionOutputSchema(schema map[string]any) wire.SessionRequestOption
+func WithSessionRawEvents(enabled bool) wire.SessionRequestOption
+func SetModelRequest(sessionID acp.SessionId, model string) acp.SetSessionConfigOptionRequest
+func Validate<Vendor>SessionMeta(meta map[string]any) error
 ```
 
 Rules:
@@ -322,6 +331,7 @@ Rules:
   is no MCP option ([03-wire-contract.md](03-wire-contract.md#uniform-rejections)).
 - `WithSessionMeta` and `WithListSessionsMeta` reject a caller key matching any
   `acp-go.dev/*` reserved literal, through `wire.CheckReservedMeta`, rather
-  than merge it.
+  than merge it. `WithSessionMetaValue` merges a vendor namespace the sibling
+  built itself and is what the vendor option constructors use.
 - Prompt correlation for the lifecycle extension is stamped by the host, not
   by these builders ([03-wire-contract.md](03-wire-contract.md#prompt-correlation)).

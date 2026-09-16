@@ -85,11 +85,10 @@ Every sibling selects exactly one strategy and records it in the
 
 - **session runtime** — one native process serves one loaded ACP session, is
   started when the session is established, is relaunched lazily against the
-  same native state when it has exited, and is stopped by `session/close`;
-  Pi.
+  same native state when it has exited, and is stopped by `session/close`.
 - **multiplexed runtime** — one Agent-owned native process serves many
   logical ACP sessions, is started by the first session-establishing request,
-  and is replaced by the next explicit operation after it exits; Codex.
+  and is replaced by the next explicit operation after it exits.
 
 `session/close` releases only the addressed logical session. `Agent.Close`
 closes the Agent-owned runtime and every remaining session. A shared native
@@ -167,6 +166,15 @@ When a method's session lookup finds no eligible session:
 acp.NewInvalidParams(map[string]any{"error": "unknown session", "field": "sessionId"})
 ```
 
+After `Agent.Close`, every request returns:
+
+```go
+acp.NewInvalidRequest(map[string]any{"error": "agent closed"})
+```
+
+The agent accepts no further request on that connection; the token is closed
+and carries no other member.
+
 A native turn that fails — the harness dies mid-turn, the transport breaks, the
 provider rejects the turn, or the turn deadline expires — terminates
 `session/prompt` with `-32603` and no stop reason:
@@ -188,7 +196,8 @@ provider rejects the turn, or the turn deadline expires — terminates
 `cause` is one of `process_exit`, `transport`, `provider`, `timeout`, or a
 vendor cause the [registry](registry.md#turn-failure-and-turn-timeout)
 enumerates. `message` carries the real native cause and is never a placeholder
-or a bare `EOF`. `statusCode` and `providerCode` appear only when the harness
+or a bare `EOF`; it is valid UTF-8 of at most 2048 bytes, bounded by
+`wire.TurnFailed`. `statusCode` and `providerCode` appear only when the harness
 supplies them. Semantics are in [05-behavior.md](05-behavior.md#native-turn-failure).
 
 Every other `-32603` a sibling emits carries a closed `data.error` token and
@@ -196,11 +205,11 @@ the constant `message`:
 
 | Token | Condition | Additional members |
 |---|---|---|
-| `<vendor>_invalid_options` | The agent was constructed with options it will not serve under. `NewAgent` returns no error; the verdict is delivered at `initialize` and every session-establishing entry point. | Optional `field` naming the refused option. |
-| `<vendor>_restore_failed` | `session/load` or `session/resume` found a store entry and could not restore it. The entry is neither deleted nor tombstoned. | none |
+| `<vendor>_invalid_options` | The agent was constructed with options it will not serve under. `NewAgent` returns no error; the verdict is delivered at `initialize` and every session-establishing entry point. | `field` naming the refused option. |
+| `<vendor>_restore_failed` | A stored session could not be restored: on `session/load`, `session/resume`, or a lazy relaunch that re-hydrates native state before a prompt or config-option change. The entry is neither deleted nor tombstoned. | none |
 | `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([06-lifecycle.md](06-lifecycle.md#shared-runtime-loss)). | none |
 | `<vendor>_session_poisoned` | The addressed session is poisoned ([04-sessions-and-store.md](04-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
-| `<vendor>_internal_failure` | Every failure the sibling cannot classify above. | Optional `class`, a closed token the sibling documents |
+| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`, a closed token the sibling documents |
 
 The data MUST NOT carry a bare unprefixed token, joined Go error text, native
 text, or a `message` member. [registry.md](registry.md#known-deviations)

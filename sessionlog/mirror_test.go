@@ -2,15 +2,33 @@ package sessionlog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
-	acpcore "github.com/savid/acp-go-core"
 	"github.com/stretchr/testify/require"
+
+	acpcore "github.com/savid/acp-go-core"
 )
 
 type testRecord struct {
 	Model string `json:"model"`
+}
+
+func TestLoadDistinguishesEmptyConversationFromMissing(t *testing.T) {
+	t.Parallel()
+	store := acpcore.NewInMemorySessionStore()
+	require.NoError(t, Commit(t.Context(), store, "empty", nil, testRecord{Model: "selected"}))
+	var record testRecord
+	rows, found, err := Load(t.Context(), store, "empty", &record)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Empty(t, rows)
+	require.Equal(t, "selected", record.Model)
+	rows, found, err = Load(t.Context(), store, "missing", &record)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Nil(t, rows)
 }
 
 type failingStore struct {
@@ -35,13 +53,13 @@ func TestCommitPublishesRowsAndConfigurationTogether(t *testing.T) {
 	store.fail = true
 	require.Error(t, Commit(ctx, store, "session", [][]byte{rows[0], []byte(`{"text":"next"}`)}, testRecord{Model: "two"}))
 	var record testRecord
-	loaded, err := Load(ctx, store, "session", &record)
+	loaded, _, err := Load(ctx, store, "session", &record)
 	require.NoError(t, err)
 	require.Equal(t, rows, loaded)
 	require.Equal(t, "one", record.Model)
 	store.fail = false
 	require.NoError(t, Commit(ctx, store, "session", rows, testRecord{Model: "two"}))
-	loaded, err = Load(ctx, store, "session", &record)
+	loaded, _, err = Load(ctx, store, "session", &record)
 	require.NoError(t, err)
 	require.Equal(t, rows, loaded)
 	require.Equal(t, "two", record.Model)
@@ -53,10 +71,13 @@ func TestLoadRejectsInvalidCurrentRecords(t *testing.T) {
 		t.Run(data, func(t *testing.T) {
 			t.Parallel()
 			store := acpcore.NewInMemorySessionStore()
-			require.NoError(t, store.Append(t.Context(), acpcore.SessionKey{SessionID: "s"}, []acpcore.SessionStoreEntry{[]byte(`{"type":"message"}`)}))
-			require.NoError(t, store.Append(t.Context(), acpcore.SessionKey{SessionID: "s", Subpath: ConfigSubpath}, []acpcore.SessionStoreEntry{[]byte(data)}))
+			main := acpcore.SessionKey{SessionID: "s"}
+			require.NoError(t, store.Replace(t.Context(), main, []acpcore.SessionStoreReplacement{
+				{Key: main, Entries: []acpcore.SessionStoreEntry{[]byte(`{"type":"message"}`)}},
+				{Key: acpcore.SessionKey{SessionID: "s", Subpath: ConfigSubpath}, Entries: []acpcore.SessionStoreEntry{[]byte(data)}},
+			}))
 			var record testRecord
-			_, err := Load(t.Context(), store, "s", &record)
+			_, _, err := Load(t.Context(), store, "s", &record)
 			require.Error(t, err)
 		})
 	}
@@ -65,13 +86,15 @@ func TestLoadRejectsInvalidCurrentRecords(t *testing.T) {
 func TestReconcileNativeContinuation(t *testing.T) {
 	t.Parallel()
 	rows := [][]byte{[]byte(`{"text":"ACP"}`), []byte(`{"text":"native"}`)}
-	merged, err := Reconcile(rows, rows[:1])
+	merged, nativeWins, err := Reconcile(rows, rows[:1])
 	require.NoError(t, err)
+	require.True(t, nativeWins)
 	require.Equal(t, rows, merged)
-	merged, err = Reconcile(rows[:1], rows)
+	merged, nativeWins, err = Reconcile(rows[:1], rows)
 	require.NoError(t, err)
+	require.False(t, nativeWins)
 	require.Equal(t, rows, merged)
-	_, err = Reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
+	_, _, err = Reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
 	require.Error(t, err)
 }
 
@@ -85,13 +108,48 @@ func TestInvalidNativeRowsNeverReplaceCommittedState(t *testing.T) {
 			require.NoError(t, Commit(t.Context(), store, "s", rows, testRecord{Model: "one"}))
 			require.Error(t, Commit(t.Context(), store, "s", [][]byte{[]byte(invalid)}, testRecord{Model: "two"}))
 			var record testRecord
-			loaded, err := Load(t.Context(), store, "s", &record)
+			loaded, _, err := Load(t.Context(), store, "s", &record)
 			require.NoError(t, err)
 			require.Equal(t, rows, loaded)
 			require.Equal(t, "one", record.Model)
-			require.NoError(t, store.Append(t.Context(), acpcore.SessionKey{SessionID: "s"}, []acpcore.SessionStoreEntry{[]byte(invalid)}))
-			_, err = Load(t.Context(), store, "s", &record)
+			main := acpcore.SessionKey{SessionID: "s"}
+			require.NoError(t, store.Replace(t.Context(), main, []acpcore.SessionStoreReplacement{
+				{Key: main, Entries: []acpcore.SessionStoreEntry{[]byte(invalid)}},
+				{Key: acpcore.SessionKey{SessionID: "s", Subpath: ConfigSubpath}, Entries: []acpcore.SessionStoreEntry{[]byte(`{"model":"one"}`)}},
+			}))
+			_, _, err = Load(t.Context(), store, "s", &record)
 			require.Error(t, err)
 		})
 	}
+}
+
+type interleavingStore struct {
+	acpcore.SessionStore
+	afterLoad func()
+}
+
+func (s *interleavingStore) Load(ctx context.Context, sessionID string) (map[string][]acpcore.SessionStoreEntry, error) {
+	rows, err := s.SessionStore.Load(ctx, sessionID)
+	if s.afterLoad != nil {
+		fn := s.afterLoad
+		s.afterLoad = nil
+		fn()
+	}
+
+	return rows, err
+}
+
+func TestLoadKeepsGenerationTogether(t *testing.T) {
+	t.Parallel()
+	store := &interleavingStore{SessionStore: acpcore.NewInMemorySessionStore()}
+	require.NoError(t, Commit(t.Context(), store, "s", [][]byte{[]byte(`{"model":"one"}`)}, testRecord{Model: "one"}))
+	store.afterLoad = func() {
+		require.NoError(t, Commit(t.Context(), store, "s", [][]byte{[]byte(`{"model":"two"}`)}, testRecord{Model: "two"}))
+	}
+	var record testRecord
+	rows, _, err := Load(t.Context(), store, "s", &record)
+	require.NoError(t, err)
+	var row testRecord
+	require.NoError(t, json.Unmarshal(rows[0], &row))
+	require.Equal(t, row.Model, record.Model, "Load returned native rows and configuration from different committed generations")
 }

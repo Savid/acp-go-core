@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
-	"strings"
 	"sync"
 
 	"github.com/coder/acp-go-sdk"
@@ -22,14 +23,17 @@ type Transport struct {
 	output    io.Writer
 	started   chan struct{}
 	startOnce sync.Once
+	ctx       context.Context //nolint:containedctx // Owns the opening publications the transport schedules; Close cancels it.
+	stop      context.CancelFunc
 
-	mu       sync.Mutex
-	requests map[string]inboundRequest
-	raw      map[string][]json.RawMessage
-	hooks    map[acp.SessionId]func(context.Context)
-	ready    map[acp.SessionId]chan struct{}
-	written  map[string]chan struct{}
-	partial  []byte
+	mu         sync.Mutex
+	requests   map[string]inboundRequest
+	raw        map[string][]rawParams
+	hooks      map[string]*openingPublication
+	ready      map[acp.SessionId]chan struct{}
+	written    map[actionWriteKey]chan struct{}
+	requestKey string
+	partial    []byte
 }
 
 type inboundRequest struct {
@@ -37,22 +41,44 @@ type inboundRequest struct {
 	sessionID acp.SessionId
 }
 
+type openingPublication struct {
+	sessionID acp.SessionId
+	hook      func(context.Context)
+	ready     chan struct{}
+	previous  <-chan struct{}
+}
+
+// rawParams keeps one recorded request's params with the id its response
+// carries, so the record is dropped when that response is written.
+type rawParams struct {
+	id     string
+	params json.RawMessage
+}
+
 // NewTransport prepares streams that remain unread until Start.
 func NewTransport(input io.Reader, output io.Writer) *Transport {
+	ctx, stop := context.WithCancel(context.Background())
+
 	return &Transport{
-		input:    input,
-		started:  make(chan struct{}),
-		output:   output,
-		requests: make(map[string]inboundRequest),
-		raw:      make(map[string][]json.RawMessage),
-		hooks:    make(map[acp.SessionId]func(context.Context)),
-		ready:    make(map[acp.SessionId]chan struct{}),
-		written:  make(map[string]chan struct{}),
+		input:      input,
+		started:    make(chan struct{}),
+		output:     output,
+		ctx:        ctx,
+		stop:       stop,
+		requests:   make(map[string]inboundRequest),
+		requestKey: rand.Text(),
+		raw:        make(map[string][]rawParams),
+		hooks:      make(map[string]*openingPublication),
+		ready:      make(map[acp.SessionId]chan struct{}),
+		written:    make(map[actionWriteKey]chan struct{}),
 	}
 }
 
 // Start releases inbound reads after the SDK connection and its handler are configured.
 func (t *Transport) Start() { t.startOnce.Do(func() { close(t.started) }) }
+
+// Close ends the connection's opening publications and releases every waiter.
+func (t *Transport) Close() { t.stop() }
 
 func (t *Transport) Reader() io.Reader {
 	return &transportReader{transport: t, lines: bufio.NewReader(t.input)}
@@ -73,6 +99,7 @@ func (r *transportReader) Read(p []byte) (int, error) {
 		line, err := r.lines.ReadBytes('\n')
 		if len(line) > 0 {
 			r.transport.observeInbound(line)
+			line = r.transport.bindInbound(line)
 		}
 
 		r.pending = line
@@ -109,7 +136,6 @@ type frame struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
-	Result json.RawMessage `json:"result"`
 	Error  json.RawMessage `json:"error"`
 }
 
@@ -132,13 +158,15 @@ func (t *Transport) observeInbound(line []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.requests[string(f.ID)] = inboundRequest{method: f.Method, sessionID: params.SessionID}
+	id := string(f.ID)
+	t.requests[id] = inboundRequest{method: f.Method, sessionID: params.SessionID}
 
 	switch f.Method {
 	case acp.AgentMethodInitialize:
-		t.raw[acp.AgentMethodInitialize] = append(t.raw[acp.AgentMethodInitialize], f.Params)
+		t.raw[acp.AgentMethodInitialize] = append(t.raw[acp.AgentMethodInitialize], rawParams{id: id, params: f.Params})
 	case acp.AgentMethodSessionPrompt:
-		t.raw[rawKeyPrompt(params.SessionID)] = append(t.raw[rawKeyPrompt(params.SessionID)], f.Params)
+		key := rawKeyPrompt(params.SessionID)
+		t.raw[key] = append(t.raw[key], rawParams{id: id, params: f.Params})
 	}
 }
 
@@ -158,7 +186,7 @@ func (t *Transport) TakeRaw(key string) json.RawMessage {
 
 	t.raw[key] = queue[1:]
 
-	return queue[0]
+	return queue[0].params
 }
 
 // TakeRawPrompt returns the recorded raw params of the prompt whose decoded
@@ -176,16 +204,29 @@ func (t *Transport) TakeRawPrompt(sessionID acp.SessionId, meta map[string]any) 
 			Meta map[string]any `json:"_meta"` //nolint:tagliatelle // ACP reserves this wire spelling.
 		}
 
-		_ = json.Unmarshal(raw, &envelope)
+		_ = json.Unmarshal(raw.params, &envelope)
 
 		if sameJSON(envelope.Meta[LifecycleKey], meta[LifecycleKey]) {
 			t.raw[key] = append(queue[:index:index], queue[index+1:]...)
 
-			return raw
+			return raw.params
 		}
 	}
 
 	return nil
+}
+
+// dropRaw forgets a recorded request once its response has been written, so a
+// prompt that never reached its session does not retain its params.
+func (t *Transport) dropRaw(key, id string) {
+	queue := t.raw[key]
+	for index, raw := range queue {
+		if raw.id == id {
+			t.raw[key] = append(queue[:index:index], queue[index+1:]...)
+
+			return
+		}
+	}
 }
 
 func sameJSON(left, right any) bool {
@@ -195,34 +236,84 @@ func sameJSON(left, right any) bool {
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftBytes, rightBytes)
 }
 
-// RegisterHook schedules one publication to run after the establishing
-// response for sessionID is written.
-func (t *Transport) RegisterHook(sessionID acp.SessionId, hook func(context.Context)) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+// RequestContext removes the transport's private establishing-request marker
+// from decoded metadata and binds its response identity to the handler context.
+// Establishing handlers MUST call it before inspecting or forwarding metadata.
+func (t *Transport) RequestContext(ctx context.Context, meta map[string]any) context.Context {
+	id, ok := meta[t.requestKey].(string)
+	delete(meta, t.requestKey)
 
-	ready := make(chan struct{})
-	t.ready[sessionID] = ready
-	t.hooks[sessionID] = func(ctx context.Context) {
-		defer close(ready)
-
-		hook(ctx)
+	if !ok {
+		return ctx
 	}
+
+	return context.WithValue(ctx, t, id)
 }
 
-// AwaitRequestWrite returns a channel closed once the outbound request that
-// carries actionID has been written.
-func (t *Transport) AwaitRequestWrite(actionID string) <-chan struct{} {
+// bindInbound carries the request identity through the SDK's typed dispatch.
+// The marker exists only between this reader and RequestContext.
+func (t *Transport) bindInbound(line []byte) []byte {
+	var f frame
+	if json.Unmarshal(line, &f) != nil || len(f.ID) == 0 {
+		return line
+	}
+
+	switch f.Method {
+	case acp.AgentMethodSessionNew, acp.AgentMethodSessionLoad, acp.AgentMethodSessionResume:
+	default:
+		return line
+	}
+
+	var params map[string]json.RawMessage
+	if json.Unmarshal(f.Params, &params) != nil || params == nil {
+		return line
+	}
+
+	var meta map[string]json.RawMessage
+	if raw := params["_meta"]; raw != nil && json.Unmarshal(raw, &meta) != nil {
+		return line
+	}
+
+	if meta == nil {
+		meta = make(map[string]json.RawMessage)
+	}
+
+	meta[t.requestKey], _ = json.Marshal(string(f.ID))
+	params["_meta"], _ = json.Marshal(meta)
+
+	var fields map[string]json.RawMessage
+
+	_ = json.Unmarshal(line, &fields)
+	fields["params"], _ = json.Marshal(params)
+	encoded, _ := json.Marshal(fields)
+
+	return append(encoded, '\n')
+}
+
+// RegisterHook schedules a publication after this handler's establishing
+// response is written. RequestContext supplies the identity. Successive
+// publications for one session wait for their predecessors to finish.
+func (t *Transport) RegisterHook(ctx context.Context, sessionID acp.SessionId, hook func(context.Context)) error {
+	id, _ := ctx.Value(t).(string)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	ch, ok := t.written[actionID]
-	if !ok {
-		ch = make(chan struct{})
-		t.written[actionID] = ch
+	request, ok := t.requests[id]
+	if !ok || (request.method != acp.AgentMethodSessionNew && request.method != acp.AgentMethodSessionLoad && request.method != acp.AgentMethodSessionResume) || (request.method != acp.AgentMethodSessionNew && request.sessionID != sessionID) {
+		return errors.New("opening publication has no establishing request")
 	}
 
-	return ch
+	if pending := t.hooks[id]; pending != nil {
+		pending.hook = hook
+
+		return nil
+	}
+
+	publication := &openingPublication{sessionID: sessionID, hook: hook, ready: make(chan struct{}), previous: t.ready[sessionID]}
+	t.ready[sessionID] = publication.ready
+	t.hooks[id] = publication
+
+	return nil
 }
 
 // observeOutbound watches complete frames. A response to a session-establishing
@@ -257,7 +348,9 @@ func (t *Transport) observeOutboundFrame(line []byte) {
 	}
 
 	if f.Method != "" {
-		t.releaseRequestWrite(f.Params)
+		if len(f.ID) != 0 && (f.Method == acp.ClientMethodSessionRequestPermission || f.Method == acp.ClientMethodElicitationCreate) {
+			t.releaseRequestWrite(f.Params)
+		}
 
 		return
 	}
@@ -266,80 +359,77 @@ func (t *Transport) observeOutboundFrame(line []byte) {
 		return
 	}
 
+	id := string(f.ID)
+
 	t.mu.Lock()
-	request, ok := t.requests[string(f.ID)]
-	delete(t.requests, string(f.ID))
+	request, ok := t.requests[id]
+	delete(t.requests, id)
 
-	var hook func(context.Context)
+	if !ok {
+		t.mu.Unlock()
 
-	if ok && len(f.Error) == 0 {
-		sessionID := request.sessionID
-
-		switch request.method {
-		case acp.AgentMethodSessionNew:
-			var result sessionParams
-
-			_ = json.Unmarshal(f.Result, &result)
-			sessionID = result.SessionID
-		case acp.AgentMethodSessionLoad, acp.AgentMethodSessionResume:
-		default:
-			sessionID = ""
-		}
-
-		if sessionID != "" {
-			hook = t.hooks[sessionID]
-			delete(t.hooks, sessionID)
-		}
+		return
 	}
+
+	switch request.method {
+	case acp.AgentMethodInitialize:
+		t.dropRaw(acp.AgentMethodInitialize, id)
+	case acp.AgentMethodSessionPrompt:
+		t.dropRaw(rawKeyPrompt(request.sessionID), id)
+	}
+
+	publication := t.hooks[id]
+	delete(t.hooks, id)
 	t.mu.Unlock()
 
-	if hook != nil {
-		go hook(context.Background())
+	if publication != nil {
+		go t.publishOpening(publication.sessionID, publication, len(f.Error) == 0)
 	}
 }
 
-func (t *Transport) releaseRequestWrite(params json.RawMessage) {
-	var envelope struct {
-		Meta map[string]any `json:"_meta"` //nolint:tagliatelle // ACP reserves this wire spelling.
+func (t *Transport) publishOpening(sessionID acp.SessionId, publication *openingPublication, success bool) {
+	defer func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+
+		if t.ready[sessionID] == publication.ready {
+			delete(t.ready, sessionID)
+		}
+
+		close(publication.ready)
+	}()
+
+	if publication.previous != nil {
+		select {
+		case <-publication.previous:
+		case <-t.ctx.Done():
+			return
+		}
 	}
 
-	if err := json.Unmarshal(params, &envelope); err != nil {
-		return
-	}
-
-	correlation, _ := envelope.Meta[LifecycleKey].(map[string]any)
-	action, _ := correlation["action"].(map[string]any)
-	actionID, _ := action["actionId"].(string)
-
-	if strings.TrimSpace(actionID) == "" {
-		return
-	}
-
-	t.mu.Lock()
-	ch, ok := t.written[actionID]
-	delete(t.written, actionID)
-	t.mu.Unlock()
-
-	if ok {
-		close(ch)
+	if success {
+		publication.hook(t.ctx)
 	}
 }
 
 // AwaitSession waits until the establishing response and opening publications
 // have been written, before admitting work that can produce session events.
 func (t *Transport) AwaitSession(ctx context.Context, sessionID acp.SessionId) error {
-	t.mu.Lock()
-	ready := t.ready[sessionID]
-	t.mu.Unlock()
+	for {
+		t.mu.Lock()
+		ready := t.ready[sessionID]
+		t.mu.Unlock()
 
-	if ready == nil {
-		return nil
-	}
+		if ready == nil {
+			return nil
+		}
 
-	select {
-	case <-ready:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case <-ready:
+		case <-t.ctx.Done():
+			return t.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }

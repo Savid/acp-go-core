@@ -49,10 +49,9 @@ func TestReservedMeta(t *testing.T) {
 
 	require.NoError(t, CheckReservedMeta(map[string]any{"vendor": map[string]any{}, "traceparent": "x"}))
 
-	var reserved *ReservedKeyError
-
-	require.ErrorAs(t, CheckReservedMeta(map[string]any{HandoffKey: map[string]any{}}), &reserved)
-	require.Equal(t, HandoffKey, reserved.Key)
+	err := CheckReservedMeta(map[string]any{HandoffKey: map[string]any{}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), HandoffKey)
 }
 
 func TestRawEventsSequenceAndCap(t *testing.T) {
@@ -99,7 +98,7 @@ func TestRawEventsSequenceAndCap(t *testing.T) {
 	require.True(t, ok)
 	require.Greater(t, size, RawEventMaxBytes)
 
-	unserializable, err := CapRawEvent(map[string]any{"sessionId": "s", "sequence": uint64(1), "source": "x", "event": map[string]any{"ch": make(chan int)}})
+	unserializable, err := capRawEvent(map[string]any{"sessionId": "s", "sequence": uint64(1), "source": "x", "event": map[string]any{"ch": make(chan int)}})
 	require.NoError(t, err)
 	unserializableMarker, ok := unserializable["event"].(map[string]any)
 	require.True(t, ok)

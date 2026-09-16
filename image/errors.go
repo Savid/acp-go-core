@@ -22,15 +22,15 @@ const (
 	ErrorInvalidDimensions   = "invalid_dimensions"
 	ErrorTooLarge            = "too_large"
 	ErrorUnsupportedByModel  = "unsupported_by_model"
-	ErrorNativeEnvelope      = "native_envelope_exceeded"
 	ErrorInvalidHandoff      = "invalid_handoff"
 	ErrorPathNotAllowed      = "path_not_allowed"
 	ErrorMissingFile         = "missing_file"
 	ErrorDigestMismatch      = "handoff_digest_mismatch"
 )
 
-// InputError is one input gate's refusal. Field names the inbound block type;
-// Index counts every block that entered gated-media validation.
+// InputError is one input gate's refusal. Field names the prompt or its inbound
+// block type; Index counts gated media blocks, or is negative when the refusal
+// reports no media index.
 type InputError struct {
 	Code      string
 	Field     string
@@ -48,13 +48,16 @@ func (e *InputError) Error() string {
 	return e.Code
 }
 
-// InvalidParams renders the refusal as the uniform -32602 image data.
+// InvalidParams renders the refusal as uniform -32602 data.
 func (e *InputError) InvalidParams() *acp.RequestError {
 	data := map[string]any{
 		wire.FieldField: e.Field,
 		wire.FieldError: e.Code,
-		"index":         e.Index,
 	}
+	if e.Index >= 0 {
+		data["index"] = e.Index
+	}
+
 	if e.Message != "" {
 		data[wire.FieldMessage] = e.Message
 	}

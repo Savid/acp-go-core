@@ -8,7 +8,6 @@ import (
 	"errors"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -73,7 +72,6 @@ type Observer struct {
 	acpRequestDuration metric.Float64Histogram
 
 	genAIOperationDuration        metric.Float64Histogram
-	genAITimeToFirstChunk         metric.Float64Histogram
 	genAITokenUsage               metric.Int64Histogram
 	promptCount                   metric.Int64Counter
 	promptDuration                metric.Float64Histogram
@@ -89,8 +87,8 @@ type Observer struct {
 	processExitCount              metric.Int64Counter
 }
 
-// ACPResult finishes one ACP request observation.
-type ACPResult struct {
+// acpResult finishes one ACP request observation.
+type acpResult struct {
 	Err   error
 	Extra []attribute.KeyValue
 }
@@ -160,7 +158,6 @@ func New(config Config) *Observer {
 	observer.acpRequestCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".acp.request.count", "ACP requests.")
 	observer.acpRequestDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".acp.request.duration", "ACP request duration.")
 	observer.genAIOperationDuration = mustFloat64Histogram(meter, "gen_ai.client.operation.duration", "Prompt operation duration.")
-	observer.genAITimeToFirstChunk = mustFloat64Histogram(meter, "gen_ai.client.operation.time_to_first_chunk", "Time to first ACP prompt update.")
 	observer.genAITokenUsage = mustInt64Histogram(meter, "gen_ai.client.token.usage", "{token}", "Token usage.")
 	observer.promptCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".session.prompt.count", "Prompt turns.")
 	observer.promptDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".session.prompt.duration", "Prompt turn duration.")
@@ -202,8 +199,8 @@ func mustInt64UpDownCounter(meter metric.Meter, name string, description string)
 	return instrument
 }
 
-// Extract pulls trace context from ACP _meta reserved keys into ctx.
-func (o *Observer) Extract(ctx context.Context, meta map[string]any) context.Context {
+// extract pulls trace context from ACP _meta reserved keys into ctx.
+func (o *Observer) extract(ctx context.Context, meta map[string]any) context.Context {
 	if o == nil || len(meta) == 0 {
 		return ctx
 	}
@@ -228,15 +225,15 @@ func (o *Observer) Extract(ctx context.Context, meta map[string]any) context.Con
 func (o *Observer) StartACP(ctx context.Context, meta map[string]any, method string, attrs ...attribute.KeyValue) (context.Context, func(error)) {
 	ctx, finish := o.startACP(ctx, meta, method, attrs...)
 
-	return ctx, func(err error) { finish(ACPResult{Err: err}) }
+	return ctx, func(err error) { finish(acpResult{Err: err}) }
 }
 
-func (o *Observer) startACP(ctx context.Context, meta map[string]any, method string, attrs ...attribute.KeyValue) (context.Context, func(ACPResult)) {
+func (o *Observer) startACP(ctx context.Context, meta map[string]any, method string, attrs ...attribute.KeyValue) (context.Context, func(acpResult)) {
 	if o == nil {
-		return ctx, func(ACPResult) {}
+		return ctx, func(acpResult) {}
 	}
 
-	ctx = o.Extract(ctx, meta)
+	ctx = o.extract(ctx, meta)
 	start := time.Now()
 
 	spanAttrs := make([]attribute.KeyValue, 0, 1+len(attrs))
@@ -245,12 +242,12 @@ func (o *Observer) startACP(ctx context.Context, meta map[string]any, method str
 
 	ctx, span := o.tracer.Start(ctx, spanNameForACPMethod(method), trace.WithAttributes(spanAttrs...))
 
-	return ctx, func(result ACPResult) {
+	return ctx, func(result acpResult) {
 		allAttrs := append(slicesClone(spanAttrs), result.Extra...)
 		outcome := outcomeFromError(result.Err)
 		allAttrs = append(allAttrs, attribute.String(attrOutcome, outcome))
 
-		if errType := ErrorType(result.Err); errType != "" {
+		if errType := errorType(result.Err); errType != "" {
 			allAttrs = append(allAttrs, attribute.String(attrErrorType, errType))
 
 			span.RecordError(result.Err)
@@ -274,8 +271,7 @@ func (o *Observer) StartPrompt(ctx context.Context, meta map[string]any, model s
 		return ctx, func(PromptResult) {}
 	}
 
-	state := &promptState{start: time.Now(), model: model}
-	ctx = context.WithValue(ctx, promptStateKey{}, state)
+	start := time.Now()
 
 	return ctx, func(result PromptResult) {
 		promptAttrs := []attribute.KeyValue{
@@ -299,11 +295,11 @@ func (o *Observer) StartPrompt(ctx context.Context, meta map[string]any, model s
 		outcome := outcomeFromPrompt(result)
 		metricAttrs := append(slicesClone(promptAttrs), attribute.String(attrOutcome, outcome))
 
-		if errType := ErrorType(result.Err); errType != "" {
+		if errType := errorType(result.Err); errType != "" {
 			metricAttrs = append(metricAttrs, attribute.String(attrErrorType, errType))
 		}
 
-		duration := durationSeconds(state.start)
+		duration := durationSeconds(start)
 
 		o.promptCount.Add(ctx, 1, metric.WithAttributes(metricAttrs...))
 		o.promptDuration.Record(ctx, duration, metric.WithAttributes(metricAttrs...))
@@ -314,44 +310,12 @@ func (o *Observer) StartPrompt(ctx context.Context, meta map[string]any, model s
 		}
 
 		o.recordTokenUsage(ctx, result, promptAttrs)
-		finishACP(ACPResult{Err: result.Err, Extra: promptAttrs})
+		finishACP(acpResult{Err: result.Err, Extra: promptAttrs})
 	}
 }
 
-// ObserveFirstPromptUpdate records time-to-first-chunk once per prompt turn.
-func (o *Observer) ObserveFirstPromptUpdate(ctx context.Context) {
-	if o == nil {
-		return
-	}
-
-	state, _ := ctx.Value(promptStateKey{}).(*promptState)
-	if state == nil {
-		return
-	}
-
-	state.mu.Lock()
-	if state.observed {
-		state.mu.Unlock()
-
-		return
-	}
-
-	state.observed = true
-	start := state.start
-	model := state.model
-	state.mu.Unlock()
-
-	attrs := make([]attribute.KeyValue, 0, 4)
-	attrs = append(attrs,
-		attribute.String(o.vendor+".client", o.nativeClient),
-		attribute.String(attrGenAIOperation, genAIOperationChat),
-	)
-	attrs = append(attrs, modelAttrs(model)...)
-	o.genAITimeToFirstChunk.Record(ctx, durationSeconds(start), metric.WithAttributes(attrs...))
-}
-
-// StartSpan begins one adapter span.
-func (o *Observer) StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, func(error, ...attribute.KeyValue)) {
+// startSpan begins one adapter span.
+func (o *Observer) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, func(error, ...attribute.KeyValue)) {
 	if o == nil {
 		return ctx, func(error, ...attribute.KeyValue) {}
 	}
@@ -359,7 +323,7 @@ func (o *Observer) StartSpan(ctx context.Context, name string, attrs ...attribut
 	ctx, span := o.tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 
 	return ctx, func(err error, extra ...attribute.KeyValue) {
-		if errType := ErrorType(err); errType != "" {
+		if errType := errorType(err); errType != "" {
 			extra = append(extra, attribute.String(attrErrorType, errType))
 
 			span.RecordError(err)
@@ -386,7 +350,7 @@ func (o *Observer) RecordProcessExit(ctx context.Context, outcome string, err er
 		attribute.String(attrOutcome, firstNonEmpty(outcome, outcomeFromError(err))),
 		attribute.String(o.vendor+".client", o.nativeClient),
 	}
-	if errType := ErrorType(err); errType != "" {
+	if errType := errorType(err); errType != "" {
 		attrs = append(attrs, attribute.String(attrErrorType, errType))
 	}
 
@@ -431,7 +395,7 @@ func (o *Observer) StartPermission(ctx context.Context, toolName string, mode st
 			finalAttrs = append(finalAttrs, attribute.String(attrOutcome, outcomeFromError(result.Err)))
 		}
 
-		if errType := ErrorType(result.Err); errType != "" {
+		if errType := errorType(result.Err); errType != "" {
 			finalAttrs = append(finalAttrs, attribute.String(attrErrorType, errType))
 
 			span.RecordError(result.Err)
@@ -478,7 +442,7 @@ func (o *Observer) StartElicitation(ctx context.Context) (context.Context, func(
 		}
 
 		finalAttrs := append(slicesClone(attrs), attribute.String(attrOutcome, outcome))
-		if errType := ErrorType(result.Err); errType != "" {
+		if errType := errorType(result.Err); errType != "" {
 			finalAttrs = append(finalAttrs, attribute.String(attrErrorType, errType))
 
 			span.RecordError(result.Err)
@@ -494,8 +458,8 @@ func (o *Observer) StartElicitation(ctx context.Context) (context.Context, func(
 	}
 }
 
-// RecordSessionStore records one session store operation.
-func (o *Observer) RecordSessionStore(ctx context.Context, start time.Time, operation string, err error) {
+// recordSessionStore records one session store operation.
+func (o *Observer) recordSessionStore(ctx context.Context, start time.Time, operation string, err error) {
 	if o == nil {
 		return
 	}
@@ -504,7 +468,7 @@ func (o *Observer) RecordSessionStore(ctx context.Context, start time.Time, oper
 		attribute.String(attrSessionStoreOp, operation),
 		attribute.String(attrOutcome, outcomeFromError(err)),
 	}
-	if errType := ErrorType(err); errType != "" {
+	if errType := errorType(err); errType != "" {
 		attrs = append(attrs, attribute.String(attrErrorType, errType))
 		o.sessionStoreErrorCount.Add(ctx, 1, metric.WithAttributes(attrs...))
 	}
@@ -515,11 +479,11 @@ func (o *Observer) RecordSessionStore(ctx context.Context, start time.Time, oper
 // StartSessionStore begins one session store operation observation.
 func (o *Observer) StartSessionStore(ctx context.Context, operation string) (context.Context, func(error)) {
 	start := time.Now()
-	ctx, finishSpan := o.StartSpan(ctx, "acp.session_store."+operation, attribute.String(attrSessionStoreOp, operation))
+	ctx, finishSpan := o.startSpan(ctx, "acp.session_store."+operation, attribute.String(attrSessionStoreOp, operation))
 
 	return ctx, func(err error) {
 		finishSpan(err)
-		o.RecordSessionStore(ctx, start, operation, err)
+		o.recordSessionStore(ctx, start, operation, err)
 	}
 }
 
@@ -530,7 +494,7 @@ func (o *Observer) RecordRawMessageEmitFailure(ctx context.Context, err error) {
 	}
 
 	attrs := []attribute.KeyValue{attribute.String(attrOutcome, outcomeFromError(err))}
-	if errType := ErrorType(err); errType != "" {
+	if errType := errorType(err); errType != "" {
 		attrs = append(attrs, attribute.String(attrErrorType, errType))
 	}
 
@@ -629,8 +593,8 @@ func outcomeFromError(err error) string {
 	return outcomeError
 }
 
-// ErrorType names an error for metric attributes, normalizing context errors.
-func ErrorType(err error) string {
+// errorType names an error for metric attributes, normalizing context errors.
+func errorType(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -664,13 +628,4 @@ func firstNonEmpty(values ...string) string {
 
 func slicesClone[T any](values []T) []T {
 	return append([]T(nil), values...)
-}
-
-type promptStateKey struct{}
-
-type promptState struct {
-	mu       sync.Mutex
-	model    string
-	observed bool
-	start    time.Time
 }

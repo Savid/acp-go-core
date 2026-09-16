@@ -2,51 +2,41 @@ package lifecycle
 
 import "encoding/json"
 
-// Stream is one incarnation's ordered emitter. It claims a sequence before delivery
-// is attempted, so a lost or refused event leaves a detectable gap rather than a
-// silently contiguous stream, and it reduces every event through the same reducer
-// the fixture battery drives, so a stream a sibling could not support fails at
-// the point of emission instead of at its consumers.
-//
-// A Stream is not safe for concurrent use; its session owns and serializes all
-// prompt- and activity-caused emissions for the native source incarnation.
-type Stream struct {
+// stream is one incarnation's ordered emitter. It claims a sequence before
+// delivery is attempted, so a lost or refused event leaves a detectable gap
+// rather than a silently contiguous stream, and it reduces every event through
+// the same reducer the fixture battery drives, so a stream a sibling could not
+// support fails at the point of emission instead of at its consumers.
+type stream struct {
 	id       string
 	reducer  *Reducer
 	sequence uint64
 }
 
-// NewStream opens an incarnation identified by id. The identity names one native
-// lifecycle source lifetime: it never rotates while that source survives, and it
-// never outlives it.
-func NewStream(id string, negotiated Negotiated) *Stream {
-	return &Stream{id: id, reducer: NewReducer(Options{Negotiated: negotiated})}
+// newStream opens an incarnation identified by id. The identity names one
+// native lifecycle source lifetime: it never rotates while that source
+// survives, and it never outlives it.
+func newStream(id string, negotiated Negotiated) *stream {
+	return &stream{id: id, reducer: NewReducer(Options{Negotiated: negotiated})}
 }
 
-// ID reports the incarnation this stream speaks for.
-func (s *Stream) ID() string { return s.id }
-
-// State returns the projection the emitted stream proves.
-func (s *Stream) State() State { return s.reducer.State() }
-
-// Fence ends the incarnation by recording its close on the reducer that judges
+// fence ends the incarnation by recording its close on the reducer that judges
 // every emission. A fenced stream is terminal: nothing more may be emitted on
 // it, and native source replacement opens a new incarnation with a new identity
 // and a fresh snapshot.
-func (s *Stream) Fence() { s.reducer.Close() }
+func (s *stream) fence() { s.reducer.Close() }
 
-// Fenced reports whether the incarnation has ended.
-func (s *Stream) Fenced() bool { return s.reducer.State().Closed }
+func (s *stream) fenced() bool { return s.reducer.state.Closed }
 
-// Emit claims the next sequence, validates and reduces the notification the
+// emit claims the next sequence, validates and reduces the notification the
 // envelope will ride, and returns the envelope for that notification's _meta.
-// A refused event is never handed back and its sequence stays consumed, which is
-// exactly the detectable gap the ordering rule wants.
+// A refused event is never handed back and its sequence stays consumed, which
+// is exactly the detectable gap the ordering rule wants.
 //
 // The validation runs on the rendered bytes rather than on the event value: the
 // claim being made is that what goes on the wire is well formed, and only the
 // consumer's own path of render, decode, and reduce can prove it.
-func (s *Stream) Emit(event Event) (map[string]any, error) {
+func (s *stream) emit(event Event) (map[string]any, error) {
 	s.sequence++
 
 	envelope := map[string]any{
@@ -76,30 +66,19 @@ func (s *Stream) Emit(event Event) (map[string]any, error) {
 	return envelope, nil
 }
 
-// SnapshotEvent opens a stream from the whole state a sibling can state
+// snapshotEvent opens a stream from the whole state a sibling can state
 // truthfully. The native source is idle when claimed, so the nonterminal sets
 // are empty.
-func SnapshotEvent(cycleID string) Event {
+func snapshotEvent(cycleID string) Event {
 	return Event{Type: EventSnapshot, Snapshot: &Snapshot{
 		Foreground: Foreground{State: ForegroundIdle, CycleID: cycleID},
 	}}
 }
 
-// ResumedSnapshotEvent opens a stream whose foreground is mid-turn, naming the
-// open turn and its origin, with the complete nonterminal activity and action
-// sets.
-func ResumedSnapshotEvent(foreground Foreground, activities []ActivityUpdate, actions []ActionUpdate) Event {
-	return Event{Type: EventSnapshot, Snapshot: &Snapshot{
-		Foreground: foreground,
-		Activities: activities,
-		Actions:    actions,
-	}}
-}
-
-// AcceptedEvent records that the native dispatcher took durable ownership of a
+// acceptedEvent records that the native dispatcher took durable ownership of a
 // submitted frame. The submission identity is echoed verbatim from the prompt's
 // correlation value.
-func AcceptedEvent(submission Submission, turnID string) Event {
+func acceptedEvent(submission Submission, turnID string) Event {
 	return Event{Type: EventPromptAccepted, PromptAccepted: &PromptAccepted{
 		SubmissionID: submission.SubmissionID,
 		ClientNonce:  submission.ClientNonce,
@@ -108,14 +87,9 @@ func AcceptedEvent(submission Submission, turnID string) Event {
 	}}
 }
 
-// TransitionEvent reports one foreground transition that begins or resumes work.
-func TransitionEvent(state ForegroundState, cycleID, turnID string) Event {
-	return TransitionEventWithCause(state, cycleID, turnID, CauseSubmission)
-}
-
-// TransitionEventWithCause reports a foreground transition from the exact
-// structured native cause that opened it.
-func TransitionEventWithCause(state ForegroundState, cycleID, turnID string, cause Cause) Event {
+// transitionEvent reports a foreground transition from the exact structured
+// native cause that opened it.
+func transitionEvent(state ForegroundState, cycleID, turnID string, cause Cause) Event {
 	return Event{Type: EventStateUpdate, State: &StateTransition{
 		State:   state,
 		CycleID: cycleID,
@@ -124,15 +98,9 @@ func TransitionEventWithCause(state ForegroundState, cycleID, turnID string, cau
 	}}
 }
 
-// IdleEvent ends the cycle a submission caused, carrying the turn's truthful outcome
-// and the stop reason that outcome admits.
-func IdleEvent(cycleID, turnID, stopReason string, outcome Outcome) Event {
-	return IdleEventWithCause(cycleID, turnID, CauseSubmission, stopReason, outcome)
-}
-
-// IdleEventWithCause ends a prompt- or agent-origin cycle without changing the
-// origin established when that cycle opened.
-func IdleEventWithCause(cycleID, turnID string, cause Cause, stopReason string, outcome Outcome) Event {
+// idleEvent ends a prompt- or agent-origin cycle without changing the origin
+// established when that cycle opened.
+func idleEvent(cycleID, turnID string, cause Cause, stopReason string, outcome Outcome) Event {
 	return Event{Type: EventStateUpdate, State: &StateTransition{
 		State:      ForegroundIdle,
 		CycleID:    cycleID,
@@ -143,18 +111,13 @@ func IdleEventWithCause(cycleID, turnID string, cause Cause, stopReason string, 
 	}}
 }
 
-// ActivityEvent reports one activity's first sight or later patch.
-func ActivityEvent(update ActivityUpdate) Event {
-	return Event{Type: EventActivityUpdate, Activity: &update}
-}
-
-// ActionEvent reports one permission or elicitation's first sight or later state.
-func ActionEvent(update ActionUpdate) Event {
+// actionEvent reports one permission or elicitation's first sight or later state.
+func actionEvent(update ActionUpdate) Event {
 	return Event{Type: EventActionUpdate, Action: &update}
 }
 
-// PendingAction builds one action's first sight.
-func PendingAction(actionID string, kind ActionKind, owner Owner, blocksForeground bool) ActionUpdate {
+// pendingAction builds one action's first sight.
+func pendingAction(actionID string, kind ActionKind, owner Owner, blocksForeground bool) ActionUpdate {
 	return ActionUpdate{
 		ActionID:         actionID,
 		Kind:             kind,
@@ -164,8 +127,8 @@ func PendingAction(actionID string, kind ActionKind, owner Owner, blocksForegrou
 	}
 }
 
-// ResolvedAction builds one action's terminal patch.
-func ResolvedAction(actionID string, state ActionState) ActionUpdate {
+// resolvedAction builds one action's terminal patch.
+func resolvedAction(actionID string, state ActionState) ActionUpdate {
 	return ActionUpdate{ActionID: actionID, State: state}
 }
 

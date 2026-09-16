@@ -9,8 +9,6 @@ import (
 // Raster is what a decode-free header walk learns about an image.
 type Raster struct {
 	MIME     string
-	Width    int
-	Height   int
 	Animated bool
 }
 
@@ -35,9 +33,9 @@ func Inspect(data []byte) (Raster, error) {
 	}
 }
 
-// SniffMIME reports the truthful media type of an output artifact. Output is not
+// sniffMIME reports the truthful media type of an output artifact. Output is not
 // allowlisted: any sniffable raster is emitted with its sniffed type.
-func SniffMIME(data []byte) (string, bool) {
+func sniffMIME(data []byte) (string, bool) {
 	if info, err := Inspect(data); err == nil {
 		return info.MIME, true
 	}
@@ -88,7 +86,7 @@ func inspectPNG(data []byte) (Raster, error) {
 		offset += 12 + length
 	}
 
-	return Raster{MIME: MIMEPNG, Width: width, Height: height, Animated: animated}, nil
+	return Raster{MIME: MIMEPNG, Animated: animated}, nil
 }
 
 func inspectJPEG(data []byte) (Raster, error) {
@@ -131,7 +129,7 @@ func inspectJPEG(data []byte) (Raster, error) {
 				break
 			}
 
-			return Raster{MIME: MIMEJPEG, Width: width, Height: height}, nil
+			return Raster{MIME: MIMEJPEG}, nil
 		}
 
 		offset += length
@@ -161,7 +159,7 @@ func inspectGIF(data []byte) (Raster, error) {
 		return Raster{}, errors.New("invalid GIF dimensions")
 	}
 
-	still := Raster{MIME: MIMEGIF, Width: width, Height: height}
+	still := Raster{MIME: MIMEGIF}
 
 	offset := 13
 	if data[10]&0x80 != 0 {
@@ -244,27 +242,22 @@ func inspectWebP(data []byte) (Raster, error) {
 		switch chunkType {
 		case "VP8X":
 			if size < 10 {
-				break
+				return Raster{}, errors.New("invalid WebP dimensions")
 			}
 
-			width := 1 + int(data[payload+4]) + int(data[payload+5])<<8 + int(data[payload+6])<<16
-			height := 1 + int(data[payload+7]) + int(data[payload+8])<<8 + int(data[payload+9])<<16
-
-			return Raster{MIME: MIMEWebP, Width: width, Height: height, Animated: data[payload]&0x02 != 0}, nil
+			return Raster{MIME: MIMEWebP, Animated: data[payload]&0x02 != 0}, nil
 		case "VP8 ":
 			if size >= 10 && data[payload+3] == 0x9d && data[payload+4] == 0x01 && data[payload+5] == 0x2a {
 				width := int(binary.LittleEndian.Uint16(data[payload+6:payload+8]) & 0x3fff)
 
 				height := int(binary.LittleEndian.Uint16(data[payload+8:payload+10]) & 0x3fff)
 				if width > 0 && height > 0 {
-					return Raster{MIME: MIMEWebP, Width: width, Height: height}, nil
+					return Raster{MIME: MIMEWebP}, nil
 				}
 			}
 		case "VP8L":
 			if size >= 5 && data[payload] == 0x2f {
-				bits := binary.LittleEndian.Uint32(data[payload+1 : payload+5])
-
-				return Raster{MIME: MIMEWebP, Width: 1 + int(bits&0x3fff), Height: 1 + int(bits>>14&0x3fff)}, nil
+				return Raster{MIME: MIMEWebP}, nil
 			}
 		}
 

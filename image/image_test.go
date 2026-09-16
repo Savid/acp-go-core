@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -60,6 +62,59 @@ func imageBlock(data []byte, mime string) acp.ContentBlock {
 	return acp.ContentBlock{Image: &acp.ContentBlockImage{Data: base64.StdEncoding.EncodeToString(data), MimeType: mime}}
 }
 
+func TestPromptTextBeforeImages(t *testing.T) {
+	t.Parallel()
+
+	data := pngBytes(t)
+	img := imageBlock(data, MIMEPNG)
+	imageBlob := acp.ContentBlock{Resource: &acp.ContentBlockResource{Resource: acp.EmbeddedResourceResource{
+		BlobResourceContents: &acp.BlobResourceContents{Uri: "file:///image.png", MimeType: new(MIMEPNG), Blob: base64.StdEncoding.EncodeToString(data)},
+	}}}
+	textResource := acp.ContentBlock{Resource: &acp.ContentBlockResource{Resource: acp.EmbeddedResourceResource{
+		TextResourceContents: &acp.TextResourceContents{Uri: "file:///notes.txt", Text: "notes"},
+	}}}
+	link := acp.ContentBlock{ResourceLink: &acp.ContentBlockResourceLink{Uri: "file:///notes.txt", Name: "notes"}}
+	blob := acp.ContentBlock{Resource: &acp.ContentBlockResource{Resource: acp.EmbeddedResourceResource{
+		BlobResourceContents: &acp.BlobResourceContents{Uri: "file:///notes.pdf", MimeType: new("application/pdf"), Blob: base64.StdEncoding.EncodeToString([]byte("document"))},
+	}}}
+	userOnly := acp.ContentBlock{Text: &acp.ContentBlockText{Text: "display only", Annotations: &acp.Annotations{Audience: []acp.Role{acp.RoleUser}}}}
+
+	for _, tc := range []struct {
+		name   string
+		blocks []acp.ContentBlock
+		accept bool
+	}{
+		{"text then images", []acp.ContentBlock{acp.TextBlock("caption"), img, imageBlob}, true},
+		{"images only", []acp.ContentBlock{img, imageBlob}, true},
+		{"context before images", []acp.ContentBlock{textResource, link, blob, img}, true},
+		{"display-only text after image", []acp.ContentBlock{img, userOnly}, true},
+		{"empty text after image", []acp.ContentBlock{img, acp.TextBlock("")}, true},
+		{"whitespace after image", []acp.ContentBlock{img, acp.TextBlock(" \n")}, false},
+		{"text after image", []acp.ContentBlock{acp.TextBlock("first"), img, acp.TextBlock("last")}, false},
+		{"text after image blob", []acp.ContentBlock{imageBlob, acp.TextBlock("last")}, false},
+		{"context after image", []acp.ContentBlock{img, textResource}, false},
+		{"link after image", []acp.ContentBlock{img, link}, false},
+		{"blob URI after image", []acp.ContentBlock{img, blob}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, refusal, err := ValidatePrompt(t.Context(), tc.blocks, Options{TextBeforeImages: true})
+			require.NoError(t, err)
+			if tc.accept {
+				require.Nil(t, refusal)
+			} else {
+				require.NotNil(t, refusal)
+				require.Equal(t, map[string]any{"error": "unsupported", "field": "prompt"}, refusal.InvalidParams().Data)
+			}
+
+			_, refusal, err = ValidatePrompt(t.Context(), tc.blocks, Options{})
+			require.NoError(t, err)
+			require.Nil(t, refusal, "ordered native content accepts interleaving")
+		})
+	}
+}
+
 func handoffBlock(uri, mime string, data []byte, size int64) acp.ContentBlock {
 	sum := sha256.Sum256(data)
 
@@ -95,7 +150,7 @@ func TestMediaEnvelope(t *testing.T) {
 	require.Equal(t, int64(0), disabled["maxPromptBytes"])
 	require.Equal(t, int64(8000), disabled["maxDimension"])
 
-	require.Equal(t, FrameClamp, Limits{MaxInputBytesPerImage: FrameClamp + 1}.EffectiveInputPerImage(0))
+	require.Equal(t, FrameClamp, Limits{MaxInputBytesPerImage: FrameClamp + 1}.effectiveInputPerImage(0))
 	require.Equal(t, FrameClamp, Limits{}.EffectiveOutputPerImage())
 	require.Error(t, Limits{MaxOutputBytesPerToolCall: -1}.Validate())
 	require.NoError(t, DefaultLimits().Validate())
@@ -332,7 +387,151 @@ func TestOutput(t *testing.T) {
 	_, _, verdict = ReadFile(root, []string{root}, FrameClamp)
 	require.Equal(t, ReasonPathNotAllowed, verdict.Reason)
 
-	bmp, ok := SniffMIME([]byte("BM\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"))
+	bmp, ok := sniffMIME([]byte("BM\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"))
 	require.True(t, ok)
 	require.Equal(t, "image/bmp", bmp)
+
+	output, verdict := DecodeOutput(base64.StdEncoding.EncodeToString(data), "", FrameClamp)
+	require.Nil(t, verdict)
+	require.Equal(t, MIMEPNG, output.MIME)
+	require.Equal(t, int64(len(data)), output.SizeBytes)
+	require.Equal(t, base64.StdEncoding.EncodeToString(data), output.Data)
+	digest := sha256.Sum256(data)
+	require.Equal(t, hex.EncodeToString(digest[:]), output.Fingerprint)
+
+	_, verdict = DecodeOutput(base64.StdEncoding.EncodeToString(data), MIMEJPEG, FrameClamp)
+	require.Equal(t, ReasonMediaTypeMismatch, verdict.Reason, "a declared image MIME that disagrees with the bytes is refused")
+
+	same, verdict := DecodeOutput(base64.StdEncoding.EncodeToString(data), "application/octet-stream", FrameClamp)
+	require.Nil(t, verdict, "a non-image declaration defers to the sniffed MIME")
+	require.Equal(t, MIMEPNG, same.MIME)
+}
+
+func webpBytes(chunks ...[]byte) []byte {
+	body := []byte("WEBP")
+	for _, chunk := range chunks {
+		body = append(body, chunk...)
+	}
+
+	size := make([]byte, 4)
+	binary.LittleEndian.PutUint32(size, uint32(len(body)))
+
+	return append(append([]byte("RIFF"), size...), body...)
+}
+
+func webpChunk(kind string, payload []byte) []byte {
+	size := make([]byte, 4)
+	binary.LittleEndian.PutUint32(size, uint32(len(payload)))
+
+	chunk := append(append([]byte(kind), size...), payload...)
+	if len(payload)%2 != 0 {
+		chunk = append(chunk, 0)
+	}
+
+	return chunk
+}
+
+func TestWebPInspection(t *testing.T) {
+	t.Parallel()
+
+	lossless := webpBytes(webpChunk("VP8L", []byte{0x2f, 0x09, 0x40, 0x00, 0x00}))
+	raster, err := Inspect(lossless)
+	require.NoError(t, err)
+	require.Equal(t, MIMEWebP, raster.MIME)
+	require.False(t, raster.Animated)
+
+	extended := webpBytes(webpChunk("VP8X", []byte{0x00, 0, 0, 0, 0x03, 0, 0, 0x01, 0, 0}))
+	raster, err = Inspect(extended)
+	require.NoError(t, err)
+	require.False(t, raster.Animated)
+
+	animated := webpBytes(webpChunk("VP8X", []byte{0x02, 0, 0, 0, 0x03, 0, 0, 0x01, 0, 0}))
+	raster, err = Inspect(animated)
+	require.NoError(t, err)
+	require.True(t, raster.Animated)
+
+	truncated := webpBytes(webpChunk("VP8X", []byte{0x02, 0, 0, 0}), webpChunk("VP8L", []byte{0x2f, 0x09, 0x40, 0x00, 0x00}))
+	_, err = Inspect(truncated)
+	require.Error(t, err, "a VP8X that cannot state its animation flag is refused, not read as a still")
+
+	lossy := webpBytes(webpChunk("VP8 ", []byte{0x00, 0x00, 0x00, 0x9d, 0x01, 0x2a, 0x05, 0x00, 0x03, 0x00}))
+	raster, err = Inspect(lossy)
+	require.NoError(t, err)
+	require.False(t, raster.Animated)
+
+	_, refusal := validate(t, Options{Limits: DefaultLimits()}, imageBlock(animated, MIMEWebP))
+	require.NotNil(t, refusal)
+	require.Equal(t, ErrorAnimatedUnsupported, refusal.Code, "an animated WebP is refused at the prompt gate")
+}
+
+func pngChunk(kind string, payload []byte) []byte {
+	body := append([]byte(kind), payload...)
+	chunk := make([]byte, 0, 4+len(body)+4)
+	chunk = binary.BigEndian.AppendUint32(chunk, uint32(len(payload)))
+	chunk = append(chunk, body...)
+
+	return binary.BigEndian.AppendUint32(chunk, crc32.ChecksumIEEE(body))
+}
+
+// withACTL inserts an acTL chunk declaring frames after IHDR.
+func withACTL(t *testing.T, png []byte, frames uint32) []byte {
+	t.Helper()
+
+	ihdrEnd := 8 + 4 + 4 + 13 + 4
+	require.Greater(t, len(png), ihdrEnd)
+
+	actl := make([]byte, 8)
+	binary.BigEndian.PutUint32(actl[:4], frames)
+
+	out := append([]byte{}, png[:ihdrEnd]...)
+	out = append(out, pngChunk("acTL", actl)...)
+
+	return append(out, png[ihdrEnd:]...)
+}
+
+func TestAPNGIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, frames := range []uint32{2, 1} {
+		data := withACTL(t, pngBytes(t), frames)
+		raster, err := Inspect(data)
+		require.NoError(t, err)
+		require.True(t, raster.Animated, "an acTL chunk marks the PNG animated whatever its frame count")
+
+		_, refusal := validate(t, Options{Limits: DefaultLimits()}, imageBlock(data, MIMEPNG))
+		require.NotNil(t, refusal)
+		require.Equal(t, ErrorAnimatedUnsupported, refusal.Code)
+	}
+}
+
+func TestHandoffDirectoryAliases(t *testing.T) {
+	t.Parallel()
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	root := filepath.Join(parent, "images")
+	alias := filepath.Join(parent, "alias")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	require.NoError(t, os.Symlink(root, alias))
+	data := pngBytes(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "image.png"), data, 0o600))
+	outside := filepath.Join(parent, "outside.png")
+	require.NoError(t, os.WriteFile(outside, data, 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "escape.png")))
+
+	for _, tc := range []struct{ root, directory string }{
+		{alias, root}, {root, alias}, {alias, alias},
+		{filepath.VolumeName(root) + string(filepath.Separator), root},
+	} {
+		t.Run(tc.root+"/"+tc.directory, func(t *testing.T) {
+			t.Parallel()
+			options := Options{HandoffRoot: tc.root}
+			blocks, refusal := validate(t, options, handoffBlock("file://"+filepath.Join(tc.directory, "image.png"), MIMEPNG, data, int64(len(data))))
+			require.Nil(t, refusal)
+			require.Equal(t, data, blocks[0].Data)
+			_, refusal = validate(t, options, handoffBlock("file://"+filepath.Join(tc.directory, "missing.png"), MIMEPNG, data, int64(len(data))))
+			require.Equal(t, ErrorMissingFile, refusal.Code)
+			_, refusal = validate(t, options, handoffBlock("file://"+filepath.Join(tc.directory, "escape.png"), MIMEPNG, data, int64(len(data))))
+			require.Equal(t, ErrorPathNotAllowed, refusal.Code)
+		})
+	}
 }

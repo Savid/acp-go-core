@@ -72,6 +72,16 @@ func validName(key string) bool {
 	return key != "" && !strings.ContainsAny(key, "=\x00")
 }
 
+// ValidateOptionalAbsolutePath accepts an unset path and refuses a relative
+// one. It guards the home, scratch, and executable path options.
+func ValidateOptionalAbsolutePath(path string) error {
+	if path == "" || filepath.IsAbs(path) {
+		return nil
+	}
+
+	return errors.New("path must be absolute")
+}
+
 // ValidateExtraPathDirs refuses an entry that is empty, relative, or contains
 // the platform list separator.
 func ValidateExtraPathDirs(dirs []string) error {

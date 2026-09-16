@@ -62,41 +62,38 @@ func RejectKey(meta map[string]any) *ParamError {
 	return paramError()
 }
 
-// Offer is the current initialize-offer marker returned by DecodeOffer.
-type Offer struct{}
-
-// DecodeOffer reads the offer from InitializeRequest._meta. An absent offer is
-// reported as not present rather than as a refusal: the host asked for nothing, and
-// the answer, every envelope, and every correlation read are then omitted for the
-// whole connection.
-func DecodeOffer(meta map[string]any) (Offer, bool, *ParamError) {
+// DecodeOffer reads the offer from InitializeRequest._meta and reports whether
+// one was present. An absent offer is not a refusal: the host asked for
+// nothing, and the answer, every envelope, and every correlation read are then
+// omitted for the whole connection.
+func DecodeOffer(meta map[string]any) (bool, *ParamError) {
 	raw, present := meta[MetaKey]
 	if !present {
-		return Offer{}, false, nil
+		return false, nil
 	}
 
 	fields, refusal := negotiationObject(raw)
 	if refusal != nil {
-		return Offer{}, false, refusal
+		return false, refusal
 	}
 
 	for key := range fields {
 		if key != fieldVersion {
-			return Offer{}, false, paramError(key)
+			return false, paramError(key)
 		}
 	}
 
 	version, ok := integerValue(fields[fieldVersion])
 	if !ok || version != Version {
-		return Offer{}, false, paramError(fieldVersion)
+		return false, paramError(fieldVersion)
 	}
 
-	return Offer{}, true, nil
+	return true, nil
 }
 
 // Answer stamps the accepted current version onto the facts the active
 // configuration proved.
-func (Offer) Answer(proven Negotiated) Negotiated {
+func Answer(proven Negotiated) Negotiated {
 	proven.Version = Version
 
 	return proven
@@ -294,31 +291,27 @@ func negotiationObject(raw any, members ...string) (map[string]any, *ParamError)
 	return fields, nil
 }
 
-// ActionCorrelation names one pending permission or elicitation on the stream that
-// announced it. It is lifecycle identity only: neither side may route or authorize a
-// callback with it.
-type ActionCorrelation struct {
-	StreamID string
-	ActionID string
-	Owner    Owner
-	RunID    string
+// actionCorrelation names one pending permission or elicitation on the stream
+// that announced it. It is lifecycle identity only: neither side may route or
+// authorize a callback with it.
+type actionCorrelation struct {
+	streamID string
+	actionID string
+	owner    Owner
 }
 
-// Value renders the object the sibling stamps on every session/request_permission
+// value renders the object the sibling stamps on every session/request_permission
 // and every elicitation/create while version 1 is negotiated.
-func (c ActionCorrelation) Value() map[string]any {
-	action := map[string]any{
-		fieldActionID: c.ActionID,
-		fieldOwner: map[string]any{
-			fieldType: string(c.Owner.Type),
-			fieldID:   c.Owner.ID,
-		},
-	}
-	withOptional(action, fieldRunID, c.RunID)
-
+func (c actionCorrelation) value() map[string]any {
 	return map[string]any{
 		fieldVersion:  Version,
-		fieldStreamID: c.StreamID,
-		fieldAction:   action,
+		fieldStreamID: c.streamID,
+		fieldAction: map[string]any{
+			fieldActionID: c.actionID,
+			fieldOwner: map[string]any{
+				fieldType: string(c.owner.Type),
+				fieldID:   c.owner.ID,
+			},
+		},
 	}
 }

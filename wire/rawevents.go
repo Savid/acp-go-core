@@ -14,7 +14,6 @@ const (
 	rawFieldSequence = "sequence"
 	rawFieldSource   = "source"
 	rawFieldEvent    = "event"
-	rawFieldMeta     = "_meta"
 
 	rawMarkerTruncated      = "truncated"
 	rawMarkerReason         = "reason"
@@ -24,8 +23,7 @@ const (
 	rawReasonUnserializable = "unserializable"
 )
 
-// RawEventMethod names a sibling's raw-event notification.
-func RawEventMethod(vendor string) string { return "_" + vendor + "/rawEvent" }
+func rawEventMethod(vendor string) string { return "_" + vendor + "/rawEvent" }
 
 // Notifier delivers one extension notification.
 type Notifier func(ctx context.Context, method string, params map[string]any) error
@@ -42,7 +40,7 @@ type RawEvents struct {
 
 // NewRawEvents builds the emitter for one session.
 func NewRawEvents(vendor, sessionID, source string, enabled bool) *RawEvents {
-	return &RawEvents{method: RawEventMethod(vendor), sessionID: sessionID, source: source, enabled: enabled}
+	return &RawEvents{method: rawEventMethod(vendor), sessionID: sessionID, source: source, enabled: enabled}
 }
 
 // Enabled reports whether the session opted in.
@@ -56,7 +54,7 @@ func (r *RawEvents) Emit(ctx context.Context, notify Notifier, event map[string]
 		return nil
 	}
 
-	payload, err := CapRawEvent(map[string]any{
+	payload, err := capRawEvent(map[string]any{
 		fieldSessionID:   r.sessionID,
 		rawFieldSequence: r.sequence + 1,
 		rawFieldSource:   r.source,
@@ -75,10 +73,10 @@ func (r *RawEvents) Emit(ctx context.Context, notify Notifier, event map[string]
 	return nil
 }
 
-// CapRawEvent bounds one raw-event payload. A payload whose encoding exceeds
+// capRawEvent bounds one raw-event payload. A payload whose encoding exceeds
 // RawEventMaxBytes, or cannot be encoded, keeps its identity members and
 // replaces event with the fixed truncation marker.
-func CapRawEvent(payload map[string]any) (map[string]any, error) {
+func capRawEvent(payload map[string]any) (map[string]any, error) {
 	encoded, err := json.Marshal(payload)
 	if err == nil && len(encoded) <= RawEventMaxBytes {
 		return payload, nil
@@ -103,9 +101,6 @@ func CapRawEvent(payload map[string]any) (map[string]any, error) {
 		rawFieldSequence: payload[rawFieldSequence],
 		rawFieldSource:   payload[rawFieldSource],
 		rawFieldEvent:    marker,
-	}
-	if meta, ok := payload[rawFieldMeta]; ok {
-		capped[rawFieldMeta] = meta
 	}
 
 	final, err := json.Marshal(capped)

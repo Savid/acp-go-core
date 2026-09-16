@@ -182,7 +182,8 @@ A new violation condition without a vector is a gap to close.
 **The evidence gate.** A sibling advertises `updatesOutsidePrompt` or an
 `activityKinds` entry only when a deterministic fixture in its own repository
 proves the native source that fact reads and the ordering it claims, against
-captured native frames.
+captured native frames. The fixture and its provenance live under
+`testdata/native/`.
 
 ## Integration Smoke
 
@@ -198,9 +199,12 @@ elicitation where supported, raw-event opt-in, store-backed load and resume,
 delete, and cancellation of a real long-running native process. Proves the
 [native resume outside ACP](#conformance-tests) scenario against the real
 harness. Plants a marker executable in a session-scoped directory passed
-through `extraPathDirs` and asserts the native process resolves it and that
-the first `PATH` component is that directory, then rotates the directory on a
-second turn and proves the old value is gone.
+through `extraPathDirs` and asserts the native tool resolves it and receives
+that directory first, except for native-owned prefixes explicitly recorded
+in the [registry](registry.md). Then rotates the directory on a second turn
+and proves the old value is gone. A prefix exception MUST identify the native
+directory from the installed harness; it MUST NOT accept arbitrary earlier
+`PATH` entries.
 
 ## Pin-Change Re-Verification
 

@@ -14,18 +14,19 @@ changes its public surface.
 | `acp-go-hermes` | `hermesacp` | `hermes` | `_hermes/` | `hermes-session-json-v1` | session runtime |
 | `acp-go-opencode` | `opencodeacp` | `opencode` | `_opencode/` | `opencode-sync-events-v1` | multiplexed runtime |
 
-All import paths are `github.com/savid/acp-go-<vendor>`; all binaries are
-`acp-go-<vendor>`. Each uses the native conversation id as the ACP session id: the Claude
-conversation UUID, Codex thread id, Hermes stored session key, OpenCode session ID, or Pi session UUID.
+Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
+session key, OpenCode session ID, or Pi session UUID. The
+[identity contract](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
+defines storage and wire publication.
 
 ## Native Surfaces and Process Models
 
 | Sibling | Native surface | Process lifetime |
 |---|---|---|
-| claude | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
+| claude | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume` once a transcript exists; an empty conversation retains its UUID with `--session-id`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
 | codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
-| hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. ACP uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
+| hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
 | opencode | `opencode serve` authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 
 ## Native Version Probes
@@ -35,18 +36,18 @@ conversation UUID, Codex thread id, Hermes stored session key, OpenCode session 
 | claude | `2.0.0` |
 | codex | `0.153.4` |
 | pi | `0.80.6` |
-| hermes | `0.21.2` |
+| hermes | `0.21.3` |
 | opencode | `1.18.30` |
 
 ## Session Stores
 
 | Sibling | Kind | Carrier record |
 |---|---|---|
-| claude | Native transcript rows plus a `config` subpath | The current record holds cwd, transcript location, accepted environment and paths, model, permission mode, effort, system prompt, bare mode, output schema, and output style. |
-| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, and output schema. |
-| pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. |
+| claude | Native transcript rows plus a `config` subpath | The current record holds cwd, transcript location, accepted environment and paths, model, permission mode, effort, system prompt, bare mode, output schema, and output style. Empty conversations commit configuration with an empty main record. |
+| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, output schema, and admitted image bytes keyed by native tool identity. Empty conversations commit configuration with an empty main record; restore then resumes the recorded rollout path without a native header. |
+| pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. Empty conversations commit configuration with an empty main record; restore then resumes the recorded session file without a native header. |
 | hermes | Native per-conversation JSON export plus a `config` subpath | The configuration holds cwd, additional directories, environment, ordered paths, model, and effort. An empty conversation receives a native row before establishment succeeds. Missing state imports before binding a native session. Existing shorter or divergent history fails restore. |
-| opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
+| opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
 
 ### Mirror-Commit Ordering
 
@@ -68,27 +69,15 @@ conversation UUID, Codex thread id, Hermes stored session key, OpenCode session 
 | hermes | `process_exit`, `transport`, `provider`, `timeout` | Native result status or RPC rejection supplies provider detail. Process death reports status and the final stderr line. |
 | opencode | `process_exit`, `transport`, `provider`, `timeout` | Native HTTP errors or assistant error records supply provider detail. Process death reports status and the final stderr line; explicit timeout aborts only the addressed session. |
 
-Malformed or empty records are skipped or produce a typed failure.
-
 ## Raw Events
 
 The siblings emit every admitted record on their permanent channel and log
 and continue on emit failure. Codex forwards the notification's params with
 the method added as `method`; image `result` payloads are replaced by their
-size. OpenCode replaces image data URLs with their encoded size.
+size. OpenCode replaces image data URLs with their encoded size. Pi empties
+image `data` members and adds their decoded size as `sizeBytes`.
 
 ## Lifecycle Extension
-
-| Sibling | `updatesOutsidePrompt` | `activityKinds` |
-|---|---|---|
-| claude | yes | `[]` |
-| codex | yes | `[]` |
-| pi | yes | `[]` |
-| hermes | yes | `[]` |
-| opencode | yes | `[]` |
-
-A permanent-channel sibling delivers between-prompt native work as ordinary
-updates under agent-origin turns.
 
 ### What each permanent channel delivers
 
@@ -97,7 +86,7 @@ updates under agent-origin turns.
 | claude | Assistant, user, or stream work outside a prompt opens an agent-origin cycle. Native `result` or an agent-origin `task_notification` settles it. Delegated records retain their parent tool-use provenance. |
 | codex | Work on the thread with no prompt in flight (`turn/started`, item, plan, or diff notifications) opens an agent-origin turn on the shared pump; `turn/completed` drives mirror → idle. |
 | pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage → mirror → idle. |
-| hermes | Native message, thought, tool, or dialog events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
+| hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
 
 ### What each channel tolerates
@@ -114,21 +103,21 @@ updates under agent-origin turns.
 
 | Sibling | Order after the establishing response |
 |---|---|
-| claude | snapshot, then catalog; non-stdio connections publish inline |
-| codex | snapshot only; non-stdio connections publish inline |
-| pi | catalog, then snapshot; non-stdio connections publish inline |
-| hermes | snapshot only; non-stdio connections publish inline |
-| opencode | catalog, then snapshot; non-stdio connections publish inline |
+| claude | snapshot, then catalog |
+| codex | snapshot only |
+| pi | catalog, then snapshot |
+| hermes | snapshot only |
+| opencode | catalog, then snapshot |
 
-### Close and delete boundaries
+### Close boundaries
 
-| Sibling | `session/close` | `session/delete` |
-|---|---|---|
-| claude | Cancels callbacks and the turn, signals and waits the process, commits final transcript rows, terminalizes an agent-origin cycle, and fences. | Tombstones first, then the same close. |
-| codex | Cancels the turn and its dialogs, interrupts the native turn, unsubscribes the thread, commits rollout rows and the session record, terminalizes an open agent-origin cycle, and fences. The app-server and its other threads continue. | Tombstones first, then the same close. |
-| pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. | Tombstones first, then the same close. |
-| hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. | Tombstones first, then the same close. |
-| opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. | Tombstones first, then the same close. |
+| Sibling | `session/close` |
+|---|---|
+| claude | Cancels callbacks and the turn, signals and waits the process, commits final transcript rows, terminalizes an agent-origin cycle, and fences. |
+| codex | Cancels the turn and its dialogs, interrupts the native turn, unsubscribes the thread, commits rollout rows and the session record, terminalizes an open agent-origin cycle, and fences. The app-server and its other threads continue. |
+| pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
+| hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. |
+| opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
 
 ## Usage `size`
 
@@ -138,8 +127,9 @@ updates under agent-origin turns.
 - **hermes:** native `message.complete.usage.context_max` and `context_used`.
   Session-wide token totals are not presented as per-prompt usage.
 
-- **claude:** `get_context_usage.maxTokens`, else `result.modelUsage` context
-  window, else `0`. `used` comes from native `totalTokens`.
+- **claude:** `get_context_usage.maxTokens` when nonzero, else the
+  `result.modelUsage` context window, else `0`. `used` is the native
+  context-usage total when available, else the turn's summed message usage.
 
 - **codex:** `thread/tokenUsage/updated` `modelContextWindow`, else the
   selected model's catalog `contextWindow`, else `0`. `used` is the latest
@@ -159,9 +149,9 @@ updates under agent-origin turns.
 
 | Sibling | Extra fields | Structured output |
 |---|---|---|
-| claude | `permissionMode`, `systemPrompt`, `bare`, `effort` | Native `--json-schema`; the result is `_meta.claude.structuredOutput` on `usage_update`. An empty schema is refused. |
+| claude | `permissionMode`, `systemPrompt`, `bare` (an explicit `false` travels so a resume can override a stored `true`), `effort` | Native `--json-schema`; the result is `_meta.claude.structuredOutput` on `usage_update`. An empty schema is refused. |
 | codex | `effort`, `serviceTier`, `personality`, `approvalPolicy`, `sandboxPolicy` | Native: `outputSchema` rides `turn/start`; the parsed final answer is `_meta.codex.structuredOutput` on the prompt response. Non-JSON output omits the key and the turn still succeeds. An empty `outputSchema` object is refused at parse time. |
-| pi | `thinkingLevel`, `permission` (`ask`\|`allow`), `autoRetry` | Not advertised; `outputSchema` fails at session start. |
+| pi | `thinkingLevel`, `permission` (`ask`\|`allow`), `autoRetry` (an explicit `false` travels so a resume can override a stored `true`) | Not advertised; `outputSchema` fails at session start. |
 | hermes | `effort` | Not advertised; `outputSchema` is refused. |
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`; startup requires the native `OutputFormatJsonSchema` schema. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
 
@@ -173,6 +163,13 @@ the session's native process environment (claude, hermes, pi); or a native
 `shell.env` plugin reading the addressed session’s metadata, following parent
 IDs for child sessions (opencode).
 
+Codex's local execution tools prepend the installed package's `codex-path`
+directory after applying the session environment policy. The live test
+verifies that directory against the installed package manifest before
+checking that session directories immediately follow it. Other leading
+entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
+[native runtime prepend](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core/src/tools/runtimes/mod.rs#L119).
+
 ## Session Config Options
 
 | Sibling | Advertised IDs | Value authority and read-back |
@@ -181,7 +178,7 @@ IDs for child sessions (opencode).
 | codex | `model`, `mode`, `effort`, `service_tier`, `personality` | Values forward to the next `turn/start`; only `mode`, `effort`, and `personality` reject empty. `mode` is `default` or `plan`, sent as `collaborationMode`. `service_tier` and `personality` appear only while set. |
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
 | hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
-| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. |
+| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
 
 ### How each model catalog is built
 
@@ -190,7 +187,7 @@ IDs for child sessions (opencode).
 | claude | `initialize.models`, snapshotted once per process | `modelId` and native `supportedEffortLevels`; configured and selected ids append after the native entries. Unknown full ids forward unchanged. |
 | codex | `model/list`, the presets the CLI build ships, read once per app-server generation | `modelId`, plus `contextWindow` and `supportedEffortLevels` when the row carries them; the effort menu is the selected model's `supportedReasoningEfforts`, else a fixed menu once an effort is set |
 | pi | `get_available_models`, pi's own registry filtered by its configured providers, snapshotted once at native start | `modelId`, plus `contextWindow` and `maxOutputTokens` when the row carries them |
-| hermes | `model.options` provider catalogs | Provider-qualified `modelId` and the native effort menu. Configured and selected ids append after native entries. |
+| hermes | `model.options` provider catalogs | Provider-qualified `modelId`. Configured and selected ids append after native entries. |
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
 
 Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at construction.
@@ -199,11 +196,21 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 
 | Sibling | Options | `WithHome` variable |
 |---|---|---|
-| claude | `WithClaudeSettingSources`, `WithClaudeSettingsFile`, `WithClaudeInitializeTimeout` | `CLAUDE_CONFIG_DIR` |
+| claude | `WithClaudeSettingSources`, `WithClaudeSettingsFile` | `CLAUDE_CONFIG_DIR` |
 | codex | `WithCodexConfigOverrides` (`-c key=value`; the `shell_environment_policy` keyspace fails construction) | `CODEX_HOME` |
 | pi | none | `PI_CODING_AGENT_DIR` |
 | hermes | none | `HERMES_HOME` |
 | opencode | none | `WithHome` maps `data`, `config`, `cache`, and `state` under its root to the corresponding XDG home variables. |
+
+### Ephemeral scratch
+
+| Sibling | What `WithScratchDir` parents |
+|---|---|
+| claude | nothing; accepted for family uniformity |
+| codex | the image-output read root only; the adapter writes no ephemeral files |
+| pi | the content-addressed extension directory for the wrapper bridge |
+| hermes | nothing; accepted for family uniformity |
+| opencode | the native environment-plugin root |
 
 ## Slash Commands
 
@@ -219,13 +226,13 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 
 ### Advertised media envelope
 
-| Sibling | `maxBytes` | `maxPromptBytes` | `maxDimension` | `documentFormats` |
-|---|---:|---:|---:|---|
-| claude | 6,291,456 | 6,291,456 | 0 | `["application/pdf"]` |
-| codex | 6,291,456 | 6,291,456 | 0 | `[]` |
-| pi | 6,291,456 | 6,291,456 | 0 | `[]` |
-| hermes | 6,291,456 | 6,291,456 | 0 | `[]` |
-| opencode | 6,291,456 | 6,291,456 | 0 | `[]` |
+Every sibling advertises the effective default limits with no native ceiling or
+dimension bound. Only the document formats differ:
+
+| Sibling | `documentFormats` |
+|---|---|
+| claude | `["application/pdf"]` |
+| codex, pi, hermes, opencode | `[]` |
 
 ### Handoff native form
 
@@ -237,6 +244,13 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | hermes | inline base64 through `image.attach_bytes` before `prompt.submit` |
 | opencode | A `data:` URL file part on native message and command requests |
 
+### Native input ordering
+
+| Sibling | Input shape |
+|---|---|
+| claude, codex, opencode | Ordered content arrays preserve text/image interleaving. |
+| pi, hermes | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](05-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
+
 ### Non-raster blobs
 
 | Sibling | Non-`image/` blob | Post-gate disposition |
@@ -245,9 +259,6 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | codex, pi | refuses every non-`image/` MIME before decode | nothing decoded |
 | hermes | Gates every MIME | Non-image bytes are dropped; the resource URI remains text |
 | opencode | Gates every MIME | Bytes are dropped; the resource URI is retained as text |
-
-Text resources share the aggregate: all charge raw text before XML
-expansion.
 
 ### Selected-model gate authority
 
@@ -269,7 +280,7 @@ establishment (claude, hermes, opencode, pi).
 |---|---|
 | claude | Native image source blocks in assistant or tool-result content: inline base64 is validated; remote URL-only sources become resource links without fetching. |
 | codex | `imageGeneration` and `imageView` items: inline base64 `result`, else `savedPath` bounded read → tool-call image content |
-| pi | tool-call content images via the wrapper-owned bridge; assistant image blocks one per chunk; inline base64 only |
+| pi | tool-call result content images from `tool_execution_update` and `tool_execution_end`; assistant image blocks one per chunk; inline base64 only |
 | hermes | None; image output is not advertised. |
 | opencode | Native assistant file parts and completed tool attachments: inline data URLs or bounded local reads become images; remote URLs become resource links without fetching. |
 
@@ -297,7 +308,7 @@ establishment (claude, hermes, opencode, pi).
 | Sibling | Source and validation |
 |---|---|
 | claude | Native transcript entries use their own UUID for deduplication. Entries sharing an API message id retain each content fragment; images pass through the output gate. |
-| codex | replay decodes `image_generation_call` rows from the mirrored rollout through the output gate; a live `imageView` is an ordinary function call in the rollout, so its replay carries no image |
+| codex | Replay validates native image rows and captured `config.images` through the output gate. Both generated and viewed images survive deletion of their original files; a missing or corrupt stored artifact fails load. |
 | pi | replay decodes image blocks from the mirrored native rows through the output gate |
 | hermes | The native export supplies user/assistant text parts, reasoning, tool calls, and tool results. Image output is not projected. |
 | opencode | Final native messages and parts are reduced from sync events. Local images are captured in the same generation under `config`; missing or invalid stored artifacts fail load. |
@@ -313,14 +324,23 @@ running-command cancellation, and deletion. The native CLI fixture passes
 [native timestamp layout](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/id/id.ts).
 Snapshots use the [native sync routes](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts).
 
-Hermes `0.21.2`, native source `dd497c3d`, verified 2026-09-14:
-race-enabled ACP → native `hermes chat --cli --resume` → ACP continuation,
-followed by a store-backed import into a fresh native home and a further prompt.
-Both earlier facts survive. Native permission approval, form clarification, raw
-events, PATH rotation on resume, command cancellation, and deletion also pass.
-The permission fixture selects native manual approvals in its temporary home.
-The export/import surface is defined by the
-[native session router](https://github.com/NousResearch/hermes-agent/blob/dd497c3d/hermes_cli/web_routers/sessions.py).
+Hermes `0.21.3`, native source `f5a457ad`, verified 2026-09-15:
+no-token creation/close/delete; race-enabled ACP → native
+`hermes chat --cli --resume` → ACP continuation; fresh-home import followed by
+a further prompt; native permissions, form clarification, raw events, PATH
+rotation through an `execute_code` subprocess, running-command cancellation,
+and deletion. Explicit model selection precedes the native agent build.
+Approvals and clarification use the
+[native server-request protocol](https://github.com/NousResearch/hermes-agent/blob/f5a457ad5bebd9d78bbf35ffaaf1c33866a03ca6/tui_gateway/contracts/server_requests.py).
+
+Codex `0.154.0`, verified 2026-09-15: native creation/close/delete;
+race-enabled ACP → native `codex exec resume` → ACP continuation; live prompt,
+load/resume, and PATH rotation. The installed package's verified prefix is
+recorded under [session options](#vendor-session-options).
+
+Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
+load/resume, strict native PATH prefix, PATH rotation, and ACP → native
+`pi --print --session` → ACP continuation preserving both earlier turns.
 
 Claude Code `2.1.270`, verified 2026-09-14: native initialization and settings
 controls, permission callbacks, AskUserQuestion elicitation, raw events,
@@ -332,9 +352,17 @@ transcript can contain multiple entries with one API message id.
 ## Known Deviations
 
 - **Hermes native compression:** a changed durable key at mirror time poisons
-  the session with `native_session_identity_drift`. Native approval responses
-  follow request order and preserve a request id when the native event supplies
-  one; unresolved host callbacks deny or skip the pending native input.
+  the session with `native_session_identity_drift`. Native approval and clarify
+  server requests retain their JSON-RPC ids and are answered in arrival order;
+  unresolved host callbacks deny or skip the pending input. Native
+  `request.cancel` cancels only its matching callback.
+- **Hermes terminal environment:** the native terminal bootstraps a login
+  shell; operator and system startup files can reorder `PATH`. The live
+  inheritance check uses a direct subprocess through `execute_code`.
+  Verified on macOS with `0.21.3` on 2026-09-15 against the
+  [native login bootstrap](https://github.com/NousResearch/hermes-agent/blob/f5a457ad5bebd9d78bbf35ffaaf1c33866a03ca6/tools/environments/base.py#L276).
+- **Hermes input bridges:** sudo, secret, and terminal-buffer requests receive
+  an empty value. Other desktop, vault, and setup request methods are unsupported.
 - **Hermes restore:** its native HTTP import creates missing conversations and
   refuses replacement of an existing id, so a shorter native conversation fails
   restore. The gateway process starts before import; session binding waits until
@@ -344,13 +372,15 @@ transcript can contain multiple entries with one API message id.
   routes to, and snapshots them once per app-server generation.
 - **Codex stored restore:** restore materializes
   `$CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<threadId>.jsonl`
-  from the `session_meta` row's timestamp, then resumes by thread id. A thread
-  id is letters, digits, `-`, `_`, at most 128 bytes; anything else is an
-  unknown session.
+  from the `session_meta` row's timestamp, then resumes by the recorded native
+  thread id. That native id accepts letters, digits, `-`, and `_`, at most
+  128 bytes; an invalid stored binding fails restore.
 - **Codex sandbox:** the native default workspace-write policy can refuse
-  writes outside cwd; hosts configure `sandboxPolicy` explicitly. Additional
-  directories become the thread's workspace permission profile and the turn's
-  writable roots.
+  writes outside cwd; hosts configure `sandboxPolicy` explicitly. The adapter
+  translates the option in both directions: an object policy is reduced to
+  its mode string on `thread/start`, and a string policy is expanded to the
+  native object on `turn/start`. Additional directories become the thread's
+  workspace permission profile and the turn's writable roots.
 - **Codex MCP surfaces:** the adapter configures no MCP server, but an
   operator's own `config.toml` may. An `mcpServer/elicitation/request` marked
   as a tool approval is answered as a permission; any other is relayed in the
@@ -365,12 +395,15 @@ transcript can contain multiple entries with one API message id.
   a seeded `settings.json` must parse. Turn process-exit detail retains one
   last stderr line.
 
-Off-prompt `-32603` reachability:
+Off-prompt `-32603` reachability where it differs:
 
-| Sibling | `_invalid_options` `field` | `_restore_failed` | `_runtime_unavailable` | `_session_poisoned` `cause` | `_internal_failure` `class` |
-|---|---|---|---|---|---|
-| claude | the refused option name | load, resume | never | `native_session_identity_drift` | `native_start`; bare token on close, delete, list, and config-commit failures |
-| codex | the refused option name | load, resume | yes, when a replacement app-server cannot start | never | `native_start`; bare token on close, delete, list, and config-commit failures |
-| pi | the refused option name | load, resume | never | `native_session_identity_drift` | `native_start`; bare token on close, delete, list, and config-commit failures |
-| hermes | the refused option name | load, resume | never | `native_session_identity_drift` | `native_start`; bare token on close, delete, list, and config-commit failures |
-| opencode | the refused option name | load, resume | when a replacement server cannot start | `native_session_id_drift` on native deletion | `native_start`; bare token on close, delete, list, and config-commit failures |
+| Sibling | `_runtime_unavailable` | `_session_poisoned` `cause` |
+|---|---|---|
+| claude | never | `native_session_identity_drift` |
+| codex | when a replacement app-server cannot start | never |
+| pi | never | `native_session_identity_drift` |
+| hermes | never | `native_session_identity_drift` |
+| opencode | when a replacement server cannot start | `native_session_id_drift` on native deletion |
+
+Hermes and OpenCode re-hydrate on a lazy relaunch, so `_restore_failed` is
+also reachable from `session/prompt` and `session/set_config_option` there.

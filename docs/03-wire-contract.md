@@ -7,8 +7,11 @@ metadata transport. Requests available at startup use the same strict decoding
 as later requests.
 
 All siblings return this shape; only vendor `_meta` details, the media bounds,
-and the lifecycle answer vary. The top-level `_meta` block is absent when the
-host omitted the lifecycle capability.
+the handoff key, and the lifecycle answer vary. The top-level `_meta` block is
+absent when the host omitted the lifecycle capability. `auth`,
+`mcpCapabilities`, `promptCapabilities`, and `sessionCapabilities` are
+struct-typed in the pinned SDK and are always present, empty where nothing is
+advertised.
 
 ```json
 {
@@ -21,6 +24,8 @@ host omitted the lifecycle capability.
   "authMethods": [],
   "agentCapabilities": {
     "loadSession": true,
+    "auth": {},
+    "mcpCapabilities": {},
     "promptCapabilities": {
       "embeddedContext": true,
       "image": true
@@ -59,15 +64,12 @@ Advertise only features you implement and test. Omitted means unsupported.
 Position encoding: prefer `utf8`, else `utf16`, never `utf32`; default to
 `utf16` when the client offers neither.
 
-Do not advertise:
-
-| Capability or surface | Rule |
-|---|---|
-| `authMethods` entries | Always `[]`. The harness authenticates itself in its home. |
-| `mcpCapabilities` | Omit entirely. MCP is not supported. |
-| `sessionCapabilities.fork` | Omit. There is no fork. |
-| `modes` and `session/set_mode` | Omit; `SetSessionMode` returns method-not-found. |
-| `nes`, `providers`, goals, import, document capabilities | Omit. |
+`authMethods` is always `[]`: the harness authenticates itself in its home.
+`activityKinds` is `[]` for every sibling. `updatesOutsidePrompt` is answered
+under the [evidence gate](08-testing.md#lifecycle-fixtures); a permanent-channel
+sibling answers `true` and delivers between-prompt native work as ordinary
+updates under agent-origin turns. The routes behind every absent capability are
+listed under [Banned SDK Routes](#banned-sdk-routes).
 
 ## Extension Constants
 
@@ -85,7 +87,7 @@ Raw events are off by default, enabled per session through
 `_meta.<vendor>.rawEvent.enabled`, size-capped to 64 KiB per notification, and
 non-authoritative.
 
-- **Oversize is marked, never omitted.** An event whose marshalled notification
+- **Oversize is marked, never omitted.** An event whose marshalled `params`
   exceeds 65536 bytes is sent once with `event` replaced by
   `{"truncated":true,"reason":"oversize","maxBytes":65536,"sizeBytes":<int>}`.
   An event that fails to marshal uses `reason:"unserializable"` and no
@@ -101,11 +103,15 @@ non-authoritative.
 The pinned SDK dispatches these only if a sibling implements the optional
 interface. No sibling does:
 
-- `session/fork` through `UnstableForkSession`; stable `session/fork` returns
-  `-32601`.
+- `session/fork`: no sibling implements `UnstableForkSession`, so the route is
+  never dispatched.
 - `document/*`, `nes/*`, `providers/*`.
 - `session/set_mode`: the required method returns method-not-found.
-- `mcp/message`: never implemented, advertised, or documented.
+- `mcp/message`: never implemented. `mcpCapabilities` advertises every
+  transport false: the pinned SDK types it as a struct, so the key rides as
+  `{}`, which is the ACP default and advertises nothing
+  ([watchlist](../tracking/upstream-acp.md)); no MCP server value is ever
+  accepted.
 
 The required stable routes are `initialize`, `authenticate`, `logout`,
 `session/new`, `session/load`, `session/resume`, `session/list`,
@@ -119,11 +125,11 @@ These inbound shapes are rejected identically with `acp.NewInvalidParams`
 
 - **Unsupported prompt content.** `{"error":"unsupported","field":"prompt"}`
   before native start. Image blocks use their [own gates](#canonical-input-shape).
+  Unrepresentable text/image ordering follows the
+  [image input rule](05-behavior.md#image-input).
 - **Relative `cwd`** on `session/new`, `session/load`, or `session/resume`:
   `{"error":"unsupported","field":"cwd"}` before any native process or store
   entry exists.
-- **Undecodable extension params.** `{"error":"unsupported","field":"params"}`,
-  or the offending member's name.
 - **Empty prompt**, or one whose blocks map to nothing forwardable:
   `{"error":"unsupported","field":"prompt"}`. An empty turn never reaches the
   harness.
@@ -181,7 +187,8 @@ with:
 - `message` is display-only. It is required for the four handoff verdicts and
   optional elsewhere. Handoff messages are compile-time constants with no path,
   filename, digest, size, or OS error text.
-- `index` counts every block entering gated-media validation in request order.
+- `index` counts every image and blob block in request order; text resources
+  spend the aggregate but consume no index.
 - `sizeBytes` and `maxBytes` appear only for a byte-limit failure or the
   handoff block-count cap. An aggregate failure names the first crossing block
   and reports cumulative bytes.
@@ -196,7 +203,6 @@ with:
 | `invalid_dimensions` | Recognized format with no valid dimensions |
 | `too_large` | Per-image or aggregate bytes exceed the effective limit, or the handoff count cap |
 | `unsupported_by_model` | Authoritative selected-model metadata says text-only |
-| `native_envelope_exceeded` | The native transport has a smaller known hard cap |
 | `invalid_handoff` | Handoff intent with a malformed block: unset root, absent or malformed envelope, extra field, or a URI that is not an absolute `file` path with empty or `localhost` host |
 | `path_not_allowed` | The name escapes the root, is refused by `os.Root`, or is not a regular file |
 | `missing_file` | The name is inside the root but does not exist, dangles, or cannot be read to completion |
@@ -207,7 +213,7 @@ Validation stops at the first failing block in request order.
 Handoff pre-gate order, with every no-I/O check before the file is opened:
 
 ```text
-invalid_handoff (unset root) → too_large (block count) → invalid_handoff (envelope, uri) → invalid_media_type → too_large | native_envelope_exceeded (declared size) → path_not_allowed | missing_file → read ≤ declared+1 → handoff_digest_mismatch
+invalid_handoff (unset root) → too_large (block count) → invalid_handoff (envelope, uri) → invalid_media_type → too_large (declared size) → path_not_allowed | missing_file → read ≤ declared+1 → handoff_digest_mismatch
 ```
 
 - At most **64** handoff blocks per prompt; the crossing block reports
@@ -222,11 +228,13 @@ invalid_handoff (unset root) → too_large (block count) → invalid_handoff (en
 Embedded-form gate order:
 
 ```text
-missing_data → invalid_media_type → invalid_base64 → media_type_mismatch (recognition) → invalid_dimensions → animated_not_supported → media_type_mismatch (declared vs sniffed) → too_large (per image) → too_large (per prompt) → native_envelope_exceeded (only where the harness has a native ceiling)
+missing_data → invalid_media_type → invalid_base64 → media_type_mismatch (recognition) → invalid_dimensions → animated_not_supported → media_type_mismatch (declared vs sniffed) → too_large (per image) → too_large (per prompt)
 ```
 
 Handoff bytes run the same content gates, skipping the ones the pre-gate
-already decided, and count toward the prompt aggregate identically.
+already decided, and count toward the prompt aggregate identically. Text
+resources share the aggregate and charge their raw text before any envelope
+expansion.
 
 ### Output Failure Envelope
 
@@ -541,7 +549,7 @@ While the capability is enabled, the sibling stamps exactly this on every
 `session/request_permission` and `elicitation/create`:
 
 ```json
-{"version":1,"streamId":"opaque","action":{"actionId":"opaque","owner":{"type":"turn|activity","id":"opaque"},"runId":"optional"}}
+{"version":1,"streamId":"opaque","action":{"actionId":"opaque","owner":{"type":"turn","id":"opaque"}}}
 ```
 
 The sibling registers the inbound JSON-RPC request against `actionId` before
@@ -584,7 +592,8 @@ outcome comes only from the structural outcome union or elicitation action.
   leave gaps. The opening snapshot may use any positive sequence; consumers
   never assume `1`.
 - **A stream begins with `lifecycle_snapshot`**, emitted after the establishing
-  response is written and before any other envelope. A configuration answering
+  response is written and before any other envelope; a connection that is not
+  the stdio transport publishes it inline. A configuration answering
   `updatesOutsidePrompt: false` opens one incarnation per prompt: the snapshot
   is the first notification inside the prompt, before `prompt_accepted`, and
   the stream ends when the prompt's process exits. A second snapshot on the
@@ -637,6 +646,20 @@ session rather than emit a stream it knows violates these rules. Neither side
 repairs a violation by resequencing, reordering, dropping, or synthesizing an
 event. The [fixture battery](08-testing.md#lifecycle-fixtures) pins every
 token.
+
+## Native Session Binding
+
+Successful `session/new`, `session/load`, and `session/resume` responses and
+each `session/list` entry carry:
+
+```json
+{"_meta": {"<vendor>": {"nativeSessionId": "native-conversation-id"}}}
+```
+
+`nativeSessionId` is the current native conversation id for direct native
+continuation. It is output metadata; clients MUST address ACP methods with
+the ACP `sessionId`. The [identity rules](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
+govern persistence and replacement.
 
 ## Capability `_meta.<vendor>`
 

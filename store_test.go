@@ -25,34 +25,12 @@ func TestInMemorySessionStoreCancelledContext(t *testing.T) {
 	store := acpcore.NewInMemorySessionStore()
 	key := acpcore.SessionKey{SessionID: "s"}
 
-	require.ErrorIs(t, store.Append(ctx, key, []acpcore.SessionStoreEntry{acpcore.SessionStoreEntry(`{}`)}), context.Canceled)
+	require.ErrorIs(t, store.Replace(ctx, key, []acpcore.SessionStoreReplacement{{Key: key}}), context.Canceled)
 
-	_, err := store.Load(ctx, key)
+	_, err := store.Load(ctx, key.SessionID)
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, store.Delete(ctx, key), context.Canceled)
 
 	_, err = store.ListSessions(ctx)
 	require.ErrorIs(t, err, context.Canceled)
-}
-
-func TestInMemorySessionStoreLoadReturnsCopies(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	store := acpcore.NewInMemorySessionStore()
-	key := acpcore.SessionKey{SessionID: "s"}
-	original := acpcore.SessionStoreEntry(`{"a":1}`)
-
-	require.NoError(t, store.Append(ctx, key, []acpcore.SessionStoreEntry{original}))
-	original[2] = 'z'
-
-	got, err := store.Load(ctx, key)
-	require.NoError(t, err)
-	require.Equal(t, `{"a":1}`, string(got[0]))
-
-	got[0][2] = 'z'
-
-	again, err := store.Load(ctx, key)
-	require.NoError(t, err)
-	require.Equal(t, `{"a":1}`, string(again[0]))
 }

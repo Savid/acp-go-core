@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,13 @@ import (
 	"syscall"
 	"time"
 )
+
+// stderrTailBytes bounds the stderr the process retains for diagnostics.
+const stderrTailBytes = 8 * 1024
+
+// stderrFlushWait bounds how long a reader waits for the stderr copier to
+// deliver the child's final line after the child has exited.
+const stderrFlushWait = 250 * time.Millisecond
 
 // Request describes one harness launch.
 type Request struct {
@@ -26,14 +34,18 @@ type Result struct {
 	Signal   int
 }
 
-// Process is a running harness with its three pipes. Wait may be called from
-// many goroutines; the first call begins reaping and every caller sees the same
-// result.
+// Process is a running harness with its stdin and stdout pipes and a bounded
+// stderr tail it drains itself. Wait may be called from many goroutines; the
+// first call begins reaping and every caller sees the same result.
 type Process struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	stderr io.ReadCloser
+
+	tailMu     sync.Mutex
+	tail       []byte
+	tailClosed chan struct{}
 
 	waitOnce sync.Once
 	done     chan struct{}
@@ -70,13 +82,18 @@ func Start(ctx context.Context, request Request) (*Process, error) {
 
 	pipes.closeChildEnds()
 
-	return &Process{
-		cmd:    cmd,
-		stdin:  pipes.stdin,
-		stdout: pipes.stdout,
-		stderr: pipes.stderr,
-		done:   make(chan struct{}),
-	}, nil
+	p := &Process{
+		cmd:        cmd,
+		stdin:      pipes.stdin,
+		stdout:     pipes.stdout,
+		stderr:     pipes.stderr,
+		tailClosed: make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+
+	go p.drainStderr()
+
+	return p, nil
 }
 
 // Stdin is the child's standard input.
@@ -85,11 +102,56 @@ func (p *Process) Stdin() io.WriteCloser { return p.stdin }
 // Stdout is the child's standard output.
 func (p *Process) Stdout() io.ReadCloser { return p.stdout }
 
-// Stderr is the child's standard error.
-func (p *Process) Stderr() io.ReadCloser { return p.stderr }
+// drainStderr copies the child's stderr into the bounded tail until the pipe
+// ends.
+func (p *Process) drainStderr() {
+	defer close(p.tailClosed)
 
-// PID is the child's process id.
-func (p *Process) PID() int { return p.cmd.Process.Pid }
+	buffer := make([]byte, 4096)
+
+	for {
+		n, err := p.stderr.Read(buffer)
+		if n > 0 {
+			p.tailMu.Lock()
+
+			p.tail = append(p.tail, buffer[:n]...)
+			if len(p.tail) > stderrTailBytes {
+				p.tail = p.tail[len(p.tail)-stderrTailBytes:]
+			}
+			p.tailMu.Unlock()
+		}
+
+		if err != nil {
+			return
+		}
+	}
+}
+
+// StderrLastLine is the final non-empty stderr line, which is where a dying
+// harness names its reason. After the child has exited it waits briefly for
+// the copier to deliver the last bytes.
+func (p *Process) StderrLastLine() string {
+	select {
+	case <-p.done:
+		select {
+		case <-p.tailClosed:
+		case <-time.After(stderrFlushWait):
+		}
+	default:
+	}
+
+	p.tailMu.Lock()
+	defer p.tailMu.Unlock()
+
+	lines := bytes.Split(bytes.TrimSpace(p.tail), []byte("\n"))
+	for index := len(lines) - 1; index >= 0; index-- {
+		if line := bytes.TrimSpace(lines[index]); len(line) > 0 {
+			return string(line)
+		}
+	}
+
+	return ""
+}
 
 func (p *Process) beginWait() {
 	p.waitOnce.Do(func() {
@@ -172,8 +234,13 @@ func (p *Process) Shutdown(ctx context.Context, grace time.Duration) error {
 	}
 }
 
-// Kill sends SIGKILL to the process group.
-func (p *Process) Kill() error { return p.signalGroup(syscall.SIGKILL) }
+// Kill sends SIGKILL to the process group and begins reaping the root, so a
+// killed child never lingers as a zombie.
+func (p *Process) Kill() error {
+	p.beginWait()
+
+	return p.signalGroup(syscall.SIGKILL)
+}
 
 func (p *Process) signalGroup(signal syscall.Signal) error {
 	if p.cmd.Process == nil {
@@ -191,8 +258,10 @@ func (p *Process) signalGroup(signal syscall.Signal) error {
 	return nil
 }
 
-// Close closes the parent ends of the three pipes. A pipe already closed by
-// its reader or writer is not an error.
+// Close closes the parent ends of the three pipes and then joins the stderr
+// copier; the close is what returns the copier's blocked read, so it must
+// precede the join. A pipe already closed by its reader or writer is not an
+// error.
 func (p *Process) Close() error {
 	var errs []error
 
@@ -201,6 +270,8 @@ func (p *Process) Close() error {
 			errs = append(errs, err)
 		}
 	}
+
+	<-p.tailClosed
 
 	return errors.Join(errs...)
 }

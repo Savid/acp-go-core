@@ -39,7 +39,9 @@
 `LICENSE`, `.gitignore`, and `.golangci.yml` are byte-identical
 across siblings. The public ACP surface lives in the root package. Native
 protocol and process details live under `internal/<harness>`. Shared behavior
-is imported from this module, never copied into `internal/`.
+is imported from this module, never copied into `internal/` or into a root
+file; the layout above fixes where a sibling's own code lives and never
+requires a sibling to hold a copy of shared behavior.
 
 `doc.go` explains embedding through `Serve`; `example_test.go` proves
 initialize behavior.
@@ -55,9 +57,11 @@ A sibling that allocates ephemeral state uses `scratch.go` as its sole
 scratch accessor. A sibling with no such allocation omits it. No other
 non-test source may create an empty-parent temp file or directory.
 
-Tests mirror production files: `<stem>_test.go` mirrors `<stem>.go`. The
-standing extras are `example_test.go`, `contract_test.go`, `helpers_test.go`,
-and the scripted fake native binary `fake<harness>_test.go`. Contract pins
+The Go file-structure rules in this section bind every sibling; this module
+organizes its packages by package. Tests mirror production files:
+`<stem>_test.go` mirrors `<stem>.go`. The standing extras are
+`example_test.go`, `contract_test.go`, `helpers_test.go`, and the scripted
+fake native binary `fake<vendor>_test.go`. Contract pins
 assert public and wire shape; mirror tests assert construction and internal
 branches. Never name a test file after development history or a topic no
 production file carries.
@@ -76,20 +80,20 @@ The structural gate checks these symbols and literals in every sibling:
 - The reserved literals `acp-go.dev/mediaEnvelope`, `acp-go.dev/handoff`,
   and `acp-go.dev/lifecycle` used in non-test Go, through the `wire`
   constants.
-- No `HostAuthority`, `acp-go.dev/route`, `_<vendor>/auth/`,
-  `_<vendor>/rateLimits`, `_<vendor>/session/fork`, or
-  `WithSessionMCPServers` symbol or literal anywhere in the module, and no
-  MCP server value constructed outside a refusal test.
-- A registry row for the sibling in every per-sibling table.
+- `cmd/acp-go-<vendor>/otel.go` obtains its providers from
+  `observer/exporters.Configure`.
+- The native version probe and floor use `process.Executable.Resolve`;
+  `internal/<harness>` declares only its `MinimumVersion` and its own probe.
+- `request_builders.go` declares only the vendor option constructors, each
+  returning `wire.SessionRequestOption`.
+- Native process death reports its last stderr line through
+  `process.(*Process).StderrLastLine`.
 
 ## Dot Files
 
 The tracked dot files are `.github/`, `.gitignore`, and `.golangci.yml`.
-Agent scratch directories are never committed. `.gitignore` covers the
-standard Go entries, env files, IDE and OS noise, build artifacts, and
-`*.local.md` plus `.claude/settings.local.json`. `.golangci.yml` uses the
-strictest configuration in the family; a sibling-specific relaxation is a
-path-scoped exclusion with a comment naming the native constraint.
+Agent scratch directories are never committed. `.golangci.yml` uses the
+strictest configuration in the family.
 
 ## Command Binary
 
@@ -107,8 +111,7 @@ Binary name `acp-go-<vendor>`. Go `flag` single-dash syntax. Common flags:
 
 `version.go` carries `var buildVersion = "dev"`, overridden by
 `-X main.buildVersion=$(VERSION)`. Vendor flags use `-<vendor>-...`. Native
-mode and agent selection are session config options, never flags. The binary
-exposes no identity, ownership, containment, or isolation flag.
+mode and agent selection are session config options, never flags.
 
 ## Makefile Targets
 
@@ -124,7 +127,7 @@ exposes no identity, ownership, containment, or isolation flag.
 | `tidy` | Verify `go mod tidy`. |
 | `vuln` | Run the pinned vulnerability scanner. |
 | `modernize-check` | `go fix -diff ./...`. |
-| `audit` | Exactly `fmt-check lint build coverage-check tidy vuln modernize-check`, in that order. |
+| `audit` | Exactly `fmt-check lint build coverage-check tidy vuln modernize-check`, in that order, then `go mod verify`. |
 | `clean`, `help` | Remove artifacts; list targets. |
 
 `GO_TEST_TIMEOUT ?= 40m` is declared once. Identical-class recipes are
@@ -132,9 +135,10 @@ byte-identical across siblings and this module; integration recipes may vary
 in timeouts, package lists, and selectors. Integration recipes build with
 `-tags=integration` and set `ACP_GO_<VENDOR>_RUN_INTEGRATION=1`; only
 `test-integration-live` sets `ACP_GO_<VENDOR>_RUN_LIVE_TOKENS=1`, and every
-recipe clears the gate it does not select. Tool versions are pinned in exactly
-one place; `@latest` is forbidden in build tooling. Every sibling uses the
-family Go directive and never commits a `toolchain` line.
+recipe clears the gate it does not select. `@latest` is forbidden in build
+tooling; pinned tool versions live in the Makefile and are byte-identical
+across siblings and this module. Every sibling uses the family Go directive
+and never commits a `toolchain` line.
 
 ## Continuous Integration
 
@@ -152,11 +156,12 @@ three examples. There is no docs site.
 `README.md` states what the sibling wraps, how to install and run the binary,
 how to embed `Serve`, every process option and command flag, the session
 options and config options the sibling supports, and its store format. It
-describes only the current shape and names no other sibling, this repository,
-or any host; this module is an ordinary dependency and may be named.
+describes only the current shape and names no other sibling, this
+repository's contract, or any host; this module is an ordinary dependency and
+may be named.
 `doc.go` mirrors the embedding section.
 
-`AGENTS.md` carries, in order: purpose, domain map, working commands, coding
+`AGENTS.md` carries, in order: purpose, project map, working commands, coding
 rules, verification, and boundaries. `CLAUDE.md` is only the heading and the
 `@AGENTS.md` import. Sibling instructions are self-contained and mention no
 other repository.
@@ -176,17 +181,22 @@ Keep it simple.
 or under `ACP_GO_FAMILY_ROOT`. It verifies:
 
 - required files, identity constants, the module path, and the exported
-  `SessionStoreFormat`;
+  `SessionStoreFormat` and `RawEventMethod`;
 - the Go directive, ACP SDK pin, and this module's pin against the README, in
   every sibling and in this module's own `go.mod`;
-- the [surface presence](#surface-presence) symbols and forbidden literals;
+- the [surface presence](#surface-presence) symbols;
 - that README, AGENTS.md, and doc.go name no other sibling or this
   repository;
 - byte-identical `LICENSE`, `.gitignore`, and `.golangci.yml`
   across siblings;
-- the Makefile audit composition and identical-class recipes;
+- the Makefile audit composition, identical-class recipes, and integration gates;
+- CLAUDE.md import shape, AGENTS.md section order, permitted root file
+  stems, matching test stems, and scratch allocation ownership;
+- README process-option and flag coverage, tracked dot-file names, and CI
+  matrix, triggers, permissions, and action pins;
 - that no sibling carries a copy of the lifecycle fixture battery.
 
 A missing checkout is reported and skipped. A pass proves the enumerated
-structure, not behavior. Every structural rule on this page has an assertion
-in the script; a rule change and its assertion land together.
+structure, not behavior. Every rule the list above names has an assertion in
+the script, and a rule change and its assertion land together; the remaining
+rules on this page are proved by each sibling's own `make audit` or by review.

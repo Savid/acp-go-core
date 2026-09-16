@@ -32,14 +32,17 @@ func TestSessionPagesHaveStableOrder(t *testing.T) {
 func TestSessionRequestsReserveUntilReleased(t *testing.T) {
 	t.Parallel()
 	var requests SessionRequests
+	require.False(t, requests.Pending("one"))
 	release, err := requests.Acquire("one")
 	require.NoError(t, err)
+	require.True(t, requests.Pending("one"))
 	_, err = requests.Acquire("one")
 	require.Equal(t, Backpressure("session_restore"), err)
 	peerRelease, err := requests.Acquire("two")
 	require.NoError(t, err)
 	peerRelease()
 	release()
+	require.False(t, requests.Pending("one"))
 	secondRelease, err := requests.Acquire("one")
 	require.NoError(t, err)
 	release()

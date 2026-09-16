@@ -93,8 +93,8 @@ func TestFixtureManifestListsEveryVector(t *testing.T) {
 	require.Len(t, listed, len(entries)-1)
 }
 
-// TestFixtureBatteryPinsEveryViolationToken proves the battery discharges the whole
-// closed vocabulary in both directions.
+// The battery discharges the whole closed violation vocabulary in both
+// directions: every token has a vector and every vector's token is known.
 func TestFixtureBatteryPinsEveryViolationToken(t *testing.T) {
 	t.Parallel()
 

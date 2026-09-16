@@ -100,7 +100,11 @@ shape and output surfaces.
   checks never decode a raster and allocate nothing proportional to declared
   size. No decode-allocation gate: large declared rasters are the harness's
   responsibility.
-- Preserve relative text and image order; multiple images never collapse.
+- Preserve relative text and image order; multiple images never collapse. A
+  prompt whose order cannot be represented by the native input surface MUST
+  fail with `{"error":"unsupported","field":"prompt"}` before any native
+  image upload or prompt dispatch. User-only text excluded from native input
+  does not participate in this check.
 
 ### Typed Image Output
 
@@ -321,9 +325,10 @@ catalogs.
   snapshot for every established session, explicitly empty when the catalog is
   empty, after the establishing response has been written. A sibling with no
   native surface emits nothing. A relaunch re-fetches and re-emits.
-- One shared sanitizer rejects empty names, names containing `/`, invalid
-  UTF-8, and Unicode whitespace, control, or format runes. Names are emitted
-  without a leading `/`.
+- One shared sanitizer, `wire.ValidCommandName`, rejects empty names, names
+  containing `/`, invalid UTF-8, and Unicode whitespace, control, or format
+  runes. Names are emitted without a leading `/`, and the same predicate gates
+  `/name` invocation routing.
 - Invocation enters as `/name args` prompt text and reaches the harness as
   that text. The adapter does only the routing a documented native command
   API requires. Unrecognized `/text` is plain prompt text.

@@ -24,7 +24,6 @@ while IFS= read -r vendor; do
 done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/README.md")
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
-forbidden_literals=('HostAuthority' 'acp-go.dev/route' '/rateLimits' '/auth/' '/session/fork' 'McpServerStdio{' 'WithSessionMCPServers' 'WithAmbientEnvironment' 'ProviderAuth')
 forbidden_names=('acp-go' 'coordination repo')
 
 rg -q "^module $core_module\$" "$repo_root/go.mod" || fail "acp-go-core: module path differs from README pin"
@@ -44,23 +43,33 @@ check_sibling() {
   if rg -q --type go -g '!*_test.go' '\.scratchDir\(' "$repo"; then
     [[ -f "$repo/scratch.go" ]] || fail "$name: scratch allocator has no scratch.go owner"
   fi
-  compgen -G "$repo/fake*_test.go" >/dev/null || fail "$name: scripted fake native binary test file missing"
+  [[ -f "$repo/fake${vendor}_test.go" ]] || fail "$name: fake${vendor}_test.go missing"
+  for f in "$repo"/*.go; do
+    case $(basename "$f") in
+      *_test.go|agent.go|options.go|request_builders.go|session.go|session_meta.go|session_prompt.go|doc.go|scratch.go) ;;
+      agent_*.go|session_*.go|image_*.go|"$vendor"_*.go) ;;
+      *) fail "$name: root file $(basename "$f") is not a permitted domain split" ;;
+    esac
+  done
   rg -q "^module github.com/savid/$name\$" "$repo/go.mod" || fail "$name: module path is not github.com/savid/$name"
   rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from README pin"
   rg -q '^toolchain ' "$repo/go.mod" && fail "$name: toolchain line present"
   rg -q "^\s*$sdk_module $sdk_version\$" "$repo/go.mod" || fail "$name: ACP SDK pin differs from README"
-  if (( core_released == 0 )); then skip "$name: core module pin not yet released"; else
-    rg -q "^\s*$core_module " "$repo/go.mod" || fail "$name: core module dependency missing"; fi
+  rg -q "^\s*$core_module " "$repo/go.mod" || fail "$name: core module dependency missing"
+  if (( core_released == 0 )); then
+    rg -q "^replace $core_module => \.\./acp-go-core\$" "$repo/go.mod" || fail "$name: unreleased core module is not resolved through replace => ../acp-go-core"
+  fi
   rg -q "^package ${vendor}acp\$" "$repo/agent.go" || fail "$name: root package is not ${vendor}acp"
   rg -q "SessionStoreFormat = \"$vendor-[a-z-]+-v1\"" "$repo"/*.go || fail "$name: SessionStoreFormat is not <vendor>-<kind>-v1"
   rg -q "RawEventMethod = \"_$vendor/rawEvent\"" "$repo"/*.go || fail "$name: RawEventMethod is not canonical"
+  rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
+  rg -q 'executable +process\.Executable' "$repo/agent.go" && rg -q --type go -g '!*_test.go' 'a\.executable\.Resolve\(' "$repo" || fail "$name: version probing is not coordinated through core"
+  rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
+  rg -q --type go -g '!*_test.go' 'StderrLastLine\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
   rg -q 'ConfiguredModels +\[\]string' "$repo/options.go" && rg -q 'func WithConfiguredModels\(ids \[\]string\) Option' "$repo/options.go" || fail "$name: WithConfiguredModels surface missing"
   for f in 'wire.MediaEnvelopeKey|acp-go.dev/mediaEnvelope' 'wire.HandoffKey|acp-go.dev/handoff' 'wire.LifecycleKey|acp-go.dev/lifecycle'; do
     rg -q --type go -g '!*_test.go' -e "$f" "$repo" || fail "$name: reserved literal ${f#*|} unused in production Go"
-  done
-  for f in "${forbidden_literals[@]}"; do
-    if rg -q --type go -F "$f" "$repo"; then fail "$name: forbidden literal $f present"; fi
   done
   for f in README.md AGENTS.md doc.go; do
     for n in "${forbidden_names[@]}"; do
@@ -77,6 +86,7 @@ check_sibling() {
   rg -q 'var buildVersion = "dev"' "$repo/cmd/$name/version.go" || fail "$name: buildVersion default is not dev"
   rg -q '^GO_TEST_TIMEOUT \?= 40m$' "$repo/Makefile" || fail "$name: GO_TEST_TIMEOUT not declared once as 40m"
   rg -q '^audit: fmt-check lint build coverage-check tidy vuln modernize-check$' "$repo/Makefile" || fail "$name: audit prerequisites are not canonical"
+  rg -A1 '^audit: ' "$repo/Makefile" | rg -q '^\tgo mod verify$' || fail "$name: audit recipe does not end with go mod verify"
   rg -q 'go test -race -shuffle=on -timeout=\$\(GO_TEST_TIMEOUT\) \./\.\.\.' "$repo/Makefile" || fail "$name: test recipe is not canonical"
   rg -q 'go fix -diff \./\.\.\.' "$repo/Makefile" || fail "$name: modernize-check recipe is not canonical"
   rg -q '@latest' "$repo/Makefile" && fail "$name: @latest in Makefile"
@@ -84,8 +94,6 @@ check_sibling() {
   [[ -d "$repo/docs" ]] && fail "$name: docs site directory present"
   [[ -e "$repo/docs.json" ]] && fail "$name: docs.json present"
   [[ -d "$repo/testdata/lifecycle" || -d "$repo/fixtures/lifecycle" ]] && fail "$name: sibling carries a lifecycle fixture copy"
-  [[ -f "$repo/host_authority.go" ]] && fail "$name: host_authority.go present"
-  [[ -f "$repo/auth.go" ]] && fail "$name: auth.go present"
 
   return 0
 }
@@ -113,6 +121,7 @@ fi
 if ! python3 - "$repo_root" "$family_root" <<'PY_CHECK'
 import pathlib
 import re
+import subprocess
 import sys
 
 core, family = map(pathlib.Path, sys.argv[1:])
@@ -124,6 +133,83 @@ def fail(message):
     global failed
     print(f"FAIL {message}")
     failed = True
+
+for repo in repos[1:]:
+    vendor = repo.name.removeprefix("acp-go-")
+    readme = (repo / "README.md").read_text()
+    if (repo / "CLAUDE.md").read_text().strip() != "# CLAUDE.md\n\n@AGENTS.md":
+        fail(f"{repo.name}: CLAUDE.md must contain only its heading and AGENTS.md import")
+    headings = re.findall(r"^## (.+)$", (repo / "AGENTS.md").read_text(), re.M)
+    if headings != ["Purpose", "Project Map", "Commands", "Coding Rules", "Verification", "Boundaries"]:
+        fail(f"{repo.name}: AGENTS.md sections are not in the required order")
+    for option in re.findall(r"^func (With\w+)\(", (repo / "options.go").read_text(), re.M):
+        if option not in readme:
+            fail(f"{repo.name}: README omits process option {option}")
+    for token in ("Serve", "go install"):
+        if token not in readme:
+            fail(f"{repo.name}: README omits {token}")
+    formats = re.findall(r'SessionStoreFormat = "([^"]+)"', "\n".join(p.read_text() for p in repo.glob("*.go") if not p.name.endswith("_test.go")))
+    if len(formats) != 1 or formats[0] not in readme:
+        fail(f"{repo.name}: README omits its store format")
+    if "Serve" not in (repo / "doc.go").read_text():
+        fail(f"{repo.name}: doc.go omits Serve embedding")
+    main = (repo / f"cmd/{repo.name}/main.go").read_text()
+    common_flags = {"path", "home", "scratch-dir", "model", "seed-file", "debug", "version"}
+    for flag in re.findall(r'flags\.(?:String|Bool|Int|Duration|Var)\([^\n]*?"([a-z][a-z-]*)"', main):
+        if flag not in common_flags and not flag.startswith(vendor + "-"):
+            fail(f"{repo.name}: flag -{flag} lacks vendor prefix")
+        if "-" + flag not in readme:
+            fail(f"{repo.name}: README omits flag -{flag}")
+
+    extras = {"example_test.go", "contract_test.go", "helpers_test.go"}
+    for test in repo.rglob("*_test.go"):
+        relative = test.relative_to(repo)
+        if test.name in extras or test.name == f"fake{vendor}_test.go" or relative == pathlib.Path("integration/binary_test.go"):
+            continue
+        if not test.with_name(test.name.replace("_test.go", ".go")).is_file():
+            fail(f"{repo.name}: {relative} has no production stem")
+    for source in repo.rglob("*.go"):
+        if source.name.endswith("_test.go") or source.name == "scratch.go":
+            continue
+        if re.search(r'os\.(?:MkdirTemp|CreateTemp)\(\s*""\s*,', source.read_text()):
+            fail(f"{repo.name}: {source.relative_to(repo)} allocates system scratch outside scratch.go")
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo, text=True).split("\0")
+    for path in tracked:
+        if path.startswith(".") and path.split("/")[0] not in {".github", ".gitignore", ".golangci.yml"}:
+            fail(f"{repo.name}: unsupported tracked dot file {path}")
+
+    workflows = sorted((repo / ".github/workflows").glob("*"))
+    if [path.name for path in workflows] != ["check.yml"]:
+        fail(f"{repo.name}: check.yml must be the only workflow")
+    workflow = (repo / ".github/workflows/check.yml").read_text()
+    for pattern, description in (
+        (r"^  push:\s*$", "push trigger"),
+        (r"^  pull_request:\s*$", "pull request trigger"),
+        (r"^  contents: read$", "read-only contents permission"),
+        (r"^  group:.*github\.ref", "concurrency grouped by ref"),
+        (r"^  cancel-in-progress: true$", "concurrency cancellation"),
+        (r"^        os: \[ubuntu-latest, macos-latest\]$", "Linux and macOS matrix"),
+        (r"^    runs-on: \$\{\{ matrix\.os \}\}$", "matrix runner"),
+        (r"^      - run: make audit$", "audit step"),
+    ):
+        if not re.search(pattern, workflow, re.M):
+            fail(f"{repo.name}: workflow missing {description}")
+    for action in re.findall(r"uses: ([^\s]+)", workflow):
+        if not re.fullmatch(r"[^@]+@[0-9a-f]{40}", action):
+            fail(f"{repo.name}: action {action} is not pinned to a full commit SHA")
+
+    makefile = (repo / "Makefile").read_text()
+    if len(re.findall(r"^GO_TEST_TIMEOUT \?= 40m$", makefile, re.M)) != 1:
+        fail(f"{repo.name}: GO_TEST_TIMEOUT must be declared exactly once")
+    for target in ("build", "test-integration-smoke", "test-integration-live", "clean", "help"):
+        if not re.search(rf"^{target}:", makefile, re.M):
+            fail(f"{repo.name}: missing {target} target")
+    for tier, tokens in (("smoke", "0"), ("live", "1")):
+        match = re.search(rf"^test-integration-{tier}:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.M)
+        recipe = match[1] if match else ""
+        for token in ("-tags=integration", f"ACP_GO_{vendor.upper()}_RUN_INTEGRATION=1", f"ACP_GO_{vendor.upper()}_RUN_LIVE_TOKENS={tokens}"):
+            if token not in recipe:
+                fail(f"{repo.name}: integration {tier} recipe omits {token}")
 
 versions = {}
 for repo in repos:

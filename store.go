@@ -20,7 +20,7 @@ var ErrSessionIDRequired = errors.New("session id is required")
 
 // SessionStoreEntry is one JSON object in a session's main record or one of its
 // subrecords. Implementations preserve the raw bytes; the sibling validates
-// entries before appending them.
+// entries before publishing them.
 type SessionStoreEntry = json.RawMessage
 
 // SessionKey addresses one session-store record.
@@ -35,9 +35,6 @@ type SessionKey struct {
 type SessionSummary struct {
 	SessionID          string
 	UpdatedAtUnixMilli int64
-	Cwd                string
-	Title              string
-	Meta               map[string]any
 }
 
 // SessionStoreReplacement is one record written during an atomic replace.
@@ -46,15 +43,16 @@ type SessionStoreReplacement struct {
 	Entries []SessionStoreEntry
 }
 
-// SessionStore is the durability boundary a host provides. Append is durable
-// before it returns. Load returns entries the caller may retain or trim.
+// SessionStore is the durability boundary a host provides. Replace publishes
+// one complete generation and is durable before it returns; it copies the
+// entries it receives, so the caller keeps them. Load atomically reads every
+// live subpath of one session; the returned map, slices, and bytes belong to
+// the caller.
 type SessionStore interface {
-	Append(ctx context.Context, key SessionKey, entries []SessionStoreEntry) error
-	Load(ctx context.Context, key SessionKey) ([]SessionStoreEntry, error)
+	Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error)
 	Replace(ctx context.Context, main SessionKey, replacements []SessionStoreReplacement) error
 	Delete(ctx context.Context, key SessionKey) error
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
-	ListSubkeys(ctx context.Context, key SessionKey) ([]string, error)
 }
 
 // InMemorySessionStore is the default store when a host provides none, and the
@@ -77,39 +75,9 @@ func NewInMemorySessionStore() *InMemorySessionStore {
 	}
 }
 
-// Append stores entries under key. An append to a tombstoned key writes nothing
-// and returns success.
-func (s *InMemorySessionStore) Append(ctx context.Context, key SessionKey, entries []SessionStoreEntry) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	if len(entries) == 0 {
-		return nil
-	}
-
-	if key.SessionID == "" {
-		return ErrSessionIDRequired
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.isTombstonedLocked(key) {
-		return nil
-	}
-
-	for _, entry := range entries {
-		s.entries[key] = append(s.entries[key], cloneEntry(entry))
-	}
-
-	s.updatedAt[key] = time.Now().UnixMilli()
-
-	return nil
-}
-
-// Load returns a copy of the entries for key, or nil when missing or tombstoned.
-func (s *InMemorySessionStore) Load(ctx context.Context, key SessionKey) ([]SessionStoreEntry, error) {
+// Load returns one complete session generation keyed by subpath. A live empty
+// main record is present under the empty key; a missing session returns nil.
+func (s *InMemorySessionStore) Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -117,11 +85,25 @@ func (s *InMemorySessionStore) Load(ctx context.Context, key SessionKey) ([]Sess
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.isTombstonedLocked(key) {
-		return nil, nil
+	if sessionID == "" || s.isTombstonedLocked(SessionKey{SessionID: sessionID}) {
+		return nil, nil //nolint:nilnil // Missing or tombstoned sessions have no generation.
 	}
 
-	return cloneEntries(s.entries[key]), nil
+	var generation map[string][]SessionStoreEntry
+
+	for key, entries := range s.entries {
+		if key.SessionID != sessionID || s.isTombstonedLocked(key) {
+			continue
+		}
+
+		if generation == nil {
+			generation = make(map[string][]SessionStoreEntry)
+		}
+
+		generation[key.Subpath] = cloneEntries(entries)
+	}
+
+	return generation, nil
 }
 
 // Replace atomically publishes one session's complete generation.
@@ -275,31 +257,6 @@ func (s *InMemorySessionStore) Delete(ctx context.Context, key SessionKey) error
 	}
 
 	return nil
-}
-
-// ListSubkeys lists committed, non-tombstoned subpaths for a session, sorted
-// bytewise.
-func (s *InMemorySessionStore) ListSubkeys(ctx context.Context, key SessionKey) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	subpaths := make([]string, 0)
-
-	for candidate := range s.entries {
-		if candidate.SessionID != key.SessionID || candidate.Subpath == SessionStoreMainSubpath || s.isTombstonedLocked(candidate) {
-			continue
-		}
-
-		subpaths = append(subpaths, candidate.Subpath)
-	}
-
-	slices.Sort(subpaths)
-
-	return subpaths, nil
 }
 
 func keyLabel(key SessionKey) string {

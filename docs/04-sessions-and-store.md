@@ -34,9 +34,6 @@ type SessionKey struct {
 type SessionSummary struct {
     SessionID          string
     UpdatedAtUnixMilli int64
-    Cwd                string
-    Title              string
-    Meta               map[string]any
 }
 
 type SessionStoreReplacement struct {
@@ -45,12 +42,10 @@ type SessionStoreReplacement struct {
 }
 
 type SessionStore interface {
-    Append(ctx context.Context, key SessionKey, entries []SessionStoreEntry) error
-    Load(ctx context.Context, key SessionKey) ([]SessionStoreEntry, error)
+    Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error)
     Replace(ctx context.Context, main SessionKey, replacements []SessionStoreReplacement) error
     Delete(ctx context.Context, key SessionKey) error
     ListSessions(ctx context.Context) ([]SessionSummary, error)
-    ListSubkeys(ctx context.Context, key SessionKey) ([]string, error)
 }
 
 type InMemorySessionStore struct { /* unexported fields only */ }
@@ -67,16 +62,13 @@ beside its own scoped key, never inside `SessionKey`.
 
 | Method | Required behavior |
 |---|---|
-| `Append` | Durable before return; preserves input order; empty append is a no-op. A key tombstoned by `Delete` is final: an append to it writes nothing and returns success. |
-| `Load` | Returns the latest committed complete generation in append order; nil when missing or tombstoned. |
-| `Replace` | Atomically publishes one session's complete generation. Uncommitted generations are invisible; failure preserves the previous generation. |
+| `Load` | Atomically returns the latest complete session generation as subpath → entries, preserving row order; nil when missing or tombstoned. A live empty main record is present at key `""`. Returned maps, slices, and bytes belong to the caller. |
+| `Replace` | Atomically publishes one session's complete generation and is durable before return. It copies the entries it receives; the caller keeps ownership and may reuse them. Uncommitted generations are invisible; failure preserves the previous generation. |
 | `Delete` | Durable tombstone first. Deleting main cascades to all subpaths; deleting a subpath deletes only it. Missing keys succeed. |
 | `ListSessions` | Committed, non-tombstoned main keys, newest `UpdatedAtUnixMilli` first, then `SessionID`. |
-| `ListSubkeys` | Committed, non-tombstoned subpaths, bytewise ascending, excluding main. |
 
-All timestamps are Unix milliseconds. An empty `SessionID` makes append and
-delete no-ops; a nonempty append and every replace fail
-`ErrSessionIDRequired`.
+All timestamps are Unix milliseconds. An empty `SessionID` makes delete a
+no-op and load return nil; every replace fails `ErrSessionIDRequired`.
 
 ### Replacement Shape
 
@@ -91,25 +83,22 @@ A `Replace` addresses exactly one session:
 - A main key tombstoned by `Delete` never revives: replacement writes nothing
   and returns success. The store enforces this itself.
 - External stores stage generation entries and publish a final commit marker;
-  reads ignore uncommitted generations.
+  reads pin one committed generation for every returned subpath and ignore uncommitted generations.
 
 `storetest.Run` proves these rules against any implementation.
 
 ## Store Formats
 
-Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format.
-The proven kinds are **native logs** (claude, codex, pi) and a
-**per-conversation JSON export** (hermes), and an **online native sync-event
-graph** (opencode). Raw native rows or exports are mirrored
-after turns under the main subpath, plus a configuration sidecar.
-The [registry](registry.md#session-stores) records each sibling's carrier
-record.
+Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format. Raw
+native rows or exports are mirrored after turns under the main subpath, plus a
+configuration sidecar. The [registry](registry.md#session-stores) records each
+sibling's kind and carrier record.
 
 A multiplexed runtime persists one logical session at a time and never
 snapshots or restores the shared native runtime root.
 
-A session is **poisoned** when a wrapper invariant breaks: native session-id
-drift, a conversation-reset frame, or a store generation the sibling cannot
+A session is **poisoned** when a wrapper invariant breaks: unexpected native
+session-id drift, a conversation-reset frame, or a store generation the sibling cannot
 trust. A poisoned session refuses every operation but `session/close` and
 `session/delete` with `<vendor>_session_poisoned`.
 
@@ -117,7 +106,7 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 - Read native rows after turns and publish them with the current session
   configuration through `sessionlog.Commit`, using one atomic store generation.
-  Configuration changes commit even when no native rows were added.
+  Configuration changes commit even when no native rows were added. A successfully established empty conversation commits an empty main record with its configuration.
 - Never commit while native input, a foreground-blocking permission or
   elicitation, or message generation is pending.
 - Preserve raw native bytes.
@@ -145,8 +134,8 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 ## Hydrate In
 
-- Materialize missing native state from the store into the harness's home in
-  the harness's own layout, so the harness can resume it natively.
+- Restore missing native state from the store through the harness's native
+  persistence surface. The restored conversation MUST remain usable natively.
 - **Existing native state wins.** When the home already holds the native
   state for the session and it is at least as long as the store's copy, load
   from it and adopt its newer rows into the store. Materialize from the store
@@ -165,16 +154,33 @@ trust. A poisoned session refuses every operation but `session/close` and
 - Validate restored files against path traversal and format rules.
 - A native runtime MUST NOT bind the conversation until its initial state is
   hydrated. A server whose import API owns persistence may start before hydration.
+  An observer MAY attach without submitting input to verify an imported conversation.
 
 ## Lifecycle Stream and Incarnation Identity
 
 | Identity | Scope | Wire name |
 |---|---|---|
 | ACP session id | public, stable for the conversation's life | `sessionId` |
-| Native conversation id | the ACP session id: every proven sibling adopts the harness's durable identity | none |
+| Native conversation id | the currently bound native conversation, recorded with its backup | `_meta.<vendor>.nativeSessionId` |
 | Native transport session id | internal connection-local identity, when the harness separates it from the conversation id | none |
 | Session incarnation | one native lifecycle source's lifetime | `streamId` |
 
+- The ACP session id MUST remain stable across load, resume, and native recovery.
+  ACP requests, notifications, and store keys MUST use it. Native commands and
+  native identity checks MUST use the recorded native conversation id.
+- Every configuration record MUST contain `sessionId` and `nativeSessionId`.
+  The latter MUST identify the native history in the same atomic generation.
+  The values MAY be equal. An ACP session MUST have one current native binding.
+- Recovery MAY replace a missing native conversation with a new native id.
+  Before load or resume succeeds, the sibling MUST verify the restored history
+  and atomically commit it with the new binding under the original ACP key.
+  A failed commit MUST preserve the previous generation. Recovery MUST NOT
+  submit a user prompt, replace conflicting history, or treat an authentication,
+  authorization, or transport failure as proof that native state is missing.
+- A binding change MUST fence the previous lifecycle incarnation and its native
+  deliveries. An unexpected id change during normal operation MUST fail.
+- New, load, and resume responses and each session-list entry MUST publish the
+  current native id through the [session metadata](03-wire-contract.md#native-session-binding).
 - Lifecycle state is keyed by ACP session id, incarnation, and entity id. An
   incarnation is never reused and never adopts a prior incarnation's entities.
 - A stream's first event is a whole-state assertion. A sibling that cannot
@@ -193,6 +199,8 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 ## Listing
 
+A session's title is its first prompt's first non-empty text, whitespace
+collapsed and bounded to 256 runes by `wire.NormalizeTitle`.
 `session/list` orders live and stored sessions by descending `updatedAt`,
 then ascending session id, and paginates through `wire.PaginateSessions`.
 Cursors are raw URL-base64 offsets. An empty cwd filter includes every cwd.
@@ -209,6 +217,7 @@ format restores after deleting all native state:
 | Model settings | Provider id, model id, mode, and relevant config restore. |
 | Pending-input absence | Commit is blocked while a foreground-blocking action or message generation is pending. |
 | Native state deletion | The proof deletes the native state before hydrating. |
+| Native binding | Different ACP and native ids route load, resume, prompts, events, and native continuation correctly. Replacement recovery retains the ACP id and commits the verified history with its new native id. |
 | Lifecycle snapshot | The restored state reconstructs a truthful `lifecycle_snapshot`, or the sibling resumes only at an idle boundary. |
 
 A format that fails any required proof MUST NOT enter the package.

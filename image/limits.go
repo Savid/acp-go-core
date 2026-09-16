@@ -74,10 +74,10 @@ func (l Limits) Validate() error {
 	return nil
 }
 
-// EffectiveInputPerImage is the per-image decoded bound the input gates
+// effectiveInputPerImage is the per-image decoded bound the input gates
 // enforce: the policy limit clamped to the frame bound and to nativeCeiling
 // when one is set. Both the gate and the advertisement read it.
-func (l Limits) EffectiveInputPerImage(nativeCeiling int64) int64 {
+func (l Limits) effectiveInputPerImage(nativeCeiling int64) int64 {
 	effective := l.MaxInputBytesPerImage
 	if effective <= 0 || effective > FrameClamp {
 		effective = FrameClamp
@@ -90,9 +90,9 @@ func (l Limits) EffectiveInputPerImage(nativeCeiling int64) int64 {
 	return effective
 }
 
-// EffectiveInputPerPrompt is the aggregate decoded bound across one prompt. Zero
+// effectiveInputPerPrompt is the aggregate decoded bound across one prompt. Zero
 // bounds no total.
-func (l Limits) EffectiveInputPerPrompt() int64 { return l.MaxInputBytesPerPrompt }
+func (l Limits) effectiveInputPerPrompt() int64 { return l.MaxInputBytesPerPrompt }
 
 // EffectiveOutputPerImage clamps the per-image output limit to the frame bound.
 func (l Limits) EffectiveOutputPerImage() int64 { return clampOutput(l.MaxOutputBytesPerImage) }
@@ -130,8 +130,8 @@ func MediaEnvelope(limits Limits, envelope Envelope) map[string]any {
 	}
 
 	return map[string]any{
-		"maxBytes":        limits.EffectiveInputPerImage(envelope.NativeCeiling),
-		"maxPromptBytes":  limits.EffectiveInputPerPrompt(),
+		"maxBytes":        limits.effectiveInputPerImage(envelope.NativeCeiling),
+		"maxPromptBytes":  limits.effectiveInputPerPrompt(),
 		"maxDimension":    envelope.MaxDimension,
 		"imageFormats":    slices.Clone(Formats),
 		"documentFormats": slices.Clone(documents),

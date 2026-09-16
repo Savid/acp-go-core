@@ -42,36 +42,39 @@ func Commit(ctx context.Context, store acpcore.SessionStore, sessionID string, r
 }
 
 // Load reads the native rows and decodes the required configuration into
-// record. No native rows means the session has no recoverable conversation.
-func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, record any) ([][]byte, error) {
-	entries, err := store.Load(ctx, acpcore.SessionKey{SessionID: sessionID})
-	if err != nil || len(entries) == 0 {
-		return nil, err
+// record. found is false when the session is missing or tombstoned; a found
+// session with no rows is a committed conversation whose native history is
+// still empty.
+func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, record any) (rows [][]byte, found bool, err error) {
+	generation, err := store.Load(ctx, sessionID)
+	if err != nil || generation == nil {
+		return nil, false, err
 	}
 
-	records, err := store.Load(ctx, acpcore.SessionKey{SessionID: sessionID, Subpath: ConfigSubpath})
-	if err != nil {
-		return nil, err
+	entries, present := generation[acpcore.SessionStoreMainSubpath]
+	if !present {
+		return nil, false, errors.New("session requires a main record")
 	}
 
+	records := generation[ConfigSubpath]
 	if len(records) != 1 {
-		return nil, errors.New("session requires one configuration record")
+		return nil, false, errors.New("session requires one configuration record")
 	}
 
 	if err := decodeRecord(records[0], record); err != nil {
-		return nil, fmt.Errorf("decode session record: %w", err)
+		return nil, false, fmt.Errorf("decode session record: %w", err)
 	}
 
-	rows := make([][]byte, len(entries))
+	rows = make([][]byte, len(entries))
 	for index, entry := range entries {
 		if !validRow(entry) {
-			return nil, fmt.Errorf("invalid native row %d", index)
+			return nil, false, fmt.Errorf("invalid native row %d", index)
 		}
 
 		rows[index] = bytes.Clone(entry)
 	}
 
-	return rows, nil
+	return rows, true, nil
 }
 
 func validRow(row []byte) bool {
@@ -144,18 +147,20 @@ func uniqueValue(decoder *json.Decoder) error {
 	return err
 }
 
-// Reconcile returns the longer log when both agree at every shared position.
-// The native log may contain rows written outside ACP.
-func Reconcile(native, stored [][]byte) ([][]byte, error) {
+// Reconcile returns the longer log when both agree at every shared position
+// and reports whether the native log is the one to keep. The native log may
+// contain rows written outside ACP; a shorter native log is replaced by the
+// store's copy.
+func Reconcile(native, stored [][]byte) (rows [][]byte, nativeWins bool, err error) {
 	for index := 0; index < len(native) && index < len(stored); index++ {
 		if !bytes.Equal(native[index], stored[index]) {
-			return nil, fmt.Errorf("native row %d disagrees with the store", index)
+			return nil, false, fmt.Errorf("native row %d disagrees with the store", index)
 		}
 	}
 
 	if len(native) >= len(stored) {
-		return native, nil
+		return native, true, nil
 	}
 
-	return stored, nil
+	return stored, false, nil
 }

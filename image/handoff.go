@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 
 	"github.com/savid/acp-go-core/wire"
@@ -107,7 +106,7 @@ func handoffIntent(media promptMedia) bool {
 // verdict the request decides on its own comes first and opens nothing; the
 // filesystem answers the rest. The read is bounded by the declared size plus
 // one byte, so a file that differs from its declaration fails verification.
-func readHandoff(ctx context.Context, root string, media promptMedia, maxBytes, nativeCeiling int64) ([]byte, *handoffVerdict, error) {
+func readHandoff(ctx context.Context, root string, media promptMedia, maxBytes int64) ([]byte, *handoffVerdict, error) {
 	if root == "" {
 		return nil, &handoffVerdict{code: ErrorInvalidHandoff, message: handoffCauseRootUnset}, nil
 	}
@@ -124,10 +123,6 @@ func readHandoff(ctx context.Context, root string, media promptMedia, maxBytes, 
 
 	if !slices.Contains(Formats, media.mimeType) {
 		return nil, &handoffVerdict{code: ErrorInvalidMediaType}, nil
-	}
-
-	if nativeCeiling > 0 && envelope.sizeBytes > nativeCeiling && envelope.sizeBytes <= maxBytes {
-		return nil, &handoffVerdict{code: ErrorNativeEnvelope, sizeBytes: envelope.sizeBytes, maxBytes: nativeCeiling}, nil
 	}
 
 	if envelope.sizeBytes > maxBytes {
@@ -188,22 +183,30 @@ func openHandoff(root, path string) (io.ReadCloser, *handoffVerdict) {
 	return file, nil
 }
 
-// handoffRelativeName expresses the block's path relative to the root. A name
-// spelled outside the root is handed over as one that climbs out of it, and
-// the root refuses it atomically with the open.
+// handoffRelativeName expresses the block's path relative to the root, resolving
+// directory aliases when the spellings differ. The final component stays
+// unresolved so the root owns its symlink and file-type checks.
 func handoffRelativeName(dir, path string) string {
-	cleanDir := filepath.Clean(dir)
-
-	cleanPath := filepath.Clean(path)
-	if cleanPath == cleanDir {
-		return "."
-	}
-
-	if relative, under := strings.CutPrefix(cleanPath, cleanDir+string(filepath.Separator)); under {
+	if relative, err := filepath.Rel(dir, path); err == nil && filepath.IsLocal(relative) {
 		return relative
 	}
 
-	return handoffParentName
+	resolvedRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return handoffParentName
+	}
+
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return handoffParentName
+	}
+
+	relative, err := filepath.Rel(resolvedRoot, filepath.Join(resolvedParent, filepath.Base(path)))
+	if err != nil {
+		return handoffParentName
+	}
+
+	return relative
 }
 
 func parseHandoffEnvelope(meta map[string]any) (handoffEnvelope, string) {

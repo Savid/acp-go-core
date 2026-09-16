@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,6 +29,45 @@ type SeedFileError struct {
 
 func (e *SeedFileError) Error() string {
 	return fmt.Sprintf("invalid seed file %q", e.Name)
+}
+
+// SeedFileFlag collects repeatable -seed-file <relpath>=<hostpath> values,
+// reading each host file's contents into Files keyed by the relative path.
+type SeedFileFlag struct {
+	Files map[string]string
+}
+
+func (s *SeedFileFlag) String() string {
+	if s == nil || len(s.Files) == 0 {
+		return ""
+	}
+
+	return strings.Join(slices.Sorted(maps.Keys(s.Files)), ",")
+}
+
+// Set parses one flag value and reads the named host file.
+func (s *SeedFileFlag) Set(value string) error {
+	relPath, hostPath, ok := strings.Cut(value, "=")
+
+	relPath = strings.TrimSpace(relPath)
+	hostPath = strings.TrimSpace(hostPath)
+
+	if !ok || relPath == "" || hostPath == "" {
+		return fmt.Errorf("invalid -seed-file %q: expected <relpath>=<hostpath>", value)
+	}
+
+	contents, err := os.ReadFile(hostPath)
+	if err != nil {
+		return fmt.Errorf("read seed file %q: %w", hostPath, err)
+	}
+
+	if s.Files == nil {
+		s.Files = make(map[string]string)
+	}
+
+	s.Files[relPath] = string(contents)
+
+	return nil
 }
 
 // WriteSeedFiles writes each file into dir under an ownership manifest so the

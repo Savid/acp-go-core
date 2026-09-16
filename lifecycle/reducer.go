@@ -66,9 +66,6 @@ func (r *Reducer) Negotiated() Negotiated { return r.negotiated }
 // State returns the projection proved so far.
 func (r *Reducer) State() State { return r.state.clone() }
 
-// Failed reports the latched refusal, if any.
-func (r *Reducer) Failed() *ViolationError { return r.failed }
-
 // Close records that the addressed session's close completed. The session is
 // over: every later event bearing its identity is stale, a would-be new
 // incarnation of it included.

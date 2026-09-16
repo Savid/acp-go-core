@@ -111,20 +111,13 @@ func TestStartWaitAndShutdown(t *testing.T) {
 		out <- string(data)
 	}()
 
-	errOut := make(chan string, 1)
-
-	go func() {
-		data, _ := io.ReadAll(child.Stderr())
-		errOut <- string(data)
-	}()
-
 	require.NoError(t, child.Stdin().Close())
 
 	result, err := child.Wait(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, result.ExitCode)
 	require.Equal(t, "hello\n", <-out)
-	require.Equal(t, "err\n", <-errOut)
+	require.Equal(t, "err", child.StderrLastLine())
 	require.NoError(t, child.Close())
 }
 
@@ -141,7 +134,6 @@ func TestShutdownSignalsTheGroup(t *testing.T) {
 	require.NoError(t, err)
 
 	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
-	go func() { _, _ = io.Copy(io.Discard, child.Stderr()) }()
 
 	start := time.Now()
 	require.NoError(t, child.Shutdown(ctx, 5*time.Second))
@@ -160,7 +152,6 @@ func TestWaitDetachesOnCancel(t *testing.T) {
 	require.NoError(t, err)
 
 	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
-	go func() { _, _ = io.Copy(io.Discard, child.Stderr()) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -174,6 +165,79 @@ func TestWaitDetachesOnCancel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, result.Signal)
 	require.NoError(t, child.Close())
+}
+
+func TestKillReapsTheChild(t *testing.T) {
+	t.Parallel()
+
+	child, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "echo dying >&2; sleep 5"}, Env: []string{"PATH=/bin"}})
+	require.NoError(t, err)
+
+	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
+
+	require.Eventually(t, func() bool { return child.StderrLastLine() == "dying" }, 5*time.Second, 10*time.Millisecond)
+	require.NoError(t, child.Kill())
+
+	// Kill itself must begin the reap: nothing here calls Wait or Done.
+	select {
+	case <-child.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("killed child was not reaped")
+	}
+
+	require.Equal(t, "dying", child.StderrLastLine())
+	require.NoError(t, child.Close())
+}
+
+func TestStderrTailKeepsTheLastLine(t *testing.T) {
+	t.Parallel()
+
+	child, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 2000 ]; do echo line-$i >&2; i=$((i+1)); done; echo final >&2"}, Env: []string{"PATH=/bin"}})
+	require.NoError(t, err)
+
+	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
+
+	_, err = child.Wait(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "final", child.StderrLastLine())
+	require.NoError(t, child.Close())
+}
+
+func TestMinimumVersion(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, checkMinimumVersion("acme", "v1.2.3", "1.2.3"))
+	require.NoError(t, checkMinimumVersion("acme", "1.10.0-beta", "1.9.9"))
+	require.Error(t, checkMinimumVersion("acme", "1.2", "1.2.1"))
+	require.Error(t, checkMinimumVersion("acme", "", "1.0.0"))
+	require.Error(t, checkMinimumVersion("acme", "1.x", "1.0.0"))
+}
+
+func TestValidateOptionalAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, ValidateOptionalAbsolutePath(""))
+	require.NoError(t, ValidateOptionalAbsolutePath("/abs"))
+	require.Error(t, ValidateOptionalAbsolutePath("relative"))
+}
+
+func TestSeedFileFlag(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	host := filepath.Join(dir, "config.toml")
+	require.NoError(t, os.WriteFile(host, []byte("key = 1"), 0o600))
+
+	var flag SeedFileFlag
+
+	require.Equal(t, "", flag.String())
+	require.Error(t, flag.Set("no-equals"))
+	require.Error(t, flag.Set("=/x"))
+	require.Error(t, flag.Set("a="+filepath.Join(dir, "missing")))
+	require.NoError(t, flag.Set("b/config.toml="+host))
+	require.NoError(t, flag.Set("a.toml="+host))
+	require.Equal(t, "a.toml,b/config.toml", flag.String())
+	require.Equal(t, "key = 1", flag.Files["a.toml"])
 }
 
 func TestStartRefusesMissingExecutable(t *testing.T) {

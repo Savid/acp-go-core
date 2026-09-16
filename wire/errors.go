@@ -3,8 +3,17 @@
 package wire
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/coder/acp-go-sdk"
+
+	"github.com/savid/acp-go-core/lifecycle"
+	"github.com/savid/acp-go-core/process"
 )
+
+// nativeCauseMaxBytes bounds the native cause text a turn failure carries.
+const nativeCauseMaxBytes = 2048
 
 // Data member names shared by every uniform error.
 const (
@@ -22,7 +31,9 @@ const (
 	VerdictMissing        = "missing"
 	verdictUnknownSession = "unknown session"
 	verdictBackpressure   = "backpressure"
+	verdictAgentClosed    = "agent closed"
 	fieldSessionID        = "sessionId"
+	fieldSeedFiles        = "seedFiles"
 )
 
 // Turn failure causes.
@@ -64,6 +75,47 @@ func Backpressure(limit string) *acp.RequestError {
 	return acp.NewInvalidRequest(map[string]any{FieldError: verdictBackpressure, FieldLimit: limit})
 }
 
+// AgentClosed refuses a request that arrived after the agent stopped serving.
+func AgentClosed() *acp.RequestError {
+	return acp.NewInvalidRequest(map[string]any{FieldError: verdictAgentClosed})
+}
+
+// ParamRefusal maps a lifecycle negotiation or correlation refusal to the
+// uniform invalid-params shape.
+func ParamRefusal(err *lifecycle.ParamError) *acp.RequestError {
+	if err.Verdict == lifecycle.VerdictMissing {
+		return Missing(err.Field)
+	}
+
+	return Unsupported(err.Field)
+}
+
+// SeedFileRefusal maps an invalid seed file to the uniform refusal naming
+// seedFiles. Any other error yields nil so the caller classifies it.
+func SeedFileRefusal(err error) *acp.RequestError {
+	var seedErr *process.SeedFileError
+	if errors.As(err, &seedErr) {
+		return Unsupported(fieldSeedFiles)
+	}
+
+	return nil
+}
+
+// CancelledResponse answers a prompt whose turn ended by cancellation.
+func CancelledResponse(params acp.PromptRequest) acp.PromptResponse {
+	return acp.PromptResponse{StopReason: acp.StopReasonCancelled, UserMessageId: params.MessageId}
+}
+
+// boundNativeCause is the one gate every native cause text passes through
+// before it reaches a client.
+func boundNativeCause(message string) string {
+	if len(message) > nativeCauseMaxBytes {
+		message = message[:nativeCauseMaxBytes]
+	}
+
+	return strings.TrimSpace(strings.ToValidUTF8(message, ""))
+}
+
 // TurnFailure describes a native turn that ended without a stop reason.
 type TurnFailure struct {
 	Cause        string
@@ -79,12 +131,12 @@ type TurnFailure struct {
 }
 
 // TurnFailed renders the <vendor>_turn_failed error. Message carries the real
-// native cause.
+// native cause, bounded to nativeCauseMaxBytes of valid UTF-8.
 func TurnFailed(vendor string, failure TurnFailure) *acp.RequestError {
 	data := map[string]any{
 		FieldError:   vendor + "_" + TokenTurnFailed,
 		FieldCause:   failure.Cause,
-		FieldMessage: failure.Message,
+		FieldMessage: boundNativeCause(failure.Message),
 	}
 
 	if failure.StatusCode > 0 {

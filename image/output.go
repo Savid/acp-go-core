@@ -1,7 +1,9 @@
 package image
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +11,38 @@ import (
 )
 
 const outputTooLargeMessage = "image output exceeds the configured per-image limit"
+
+// Output is one validated emitted image: the base64 payload, the sniffed
+// MIME, its decoded size, and the SHA-256 fingerprint siblings deduplicate on.
+type Output struct {
+	Data        string
+	MIME        string
+	SizeBytes   int64
+	Fingerprint string
+}
+
+// DecodeOutput validates one native inline image for emission. Output is not
+// format-allowlisted: any sniffable raster is emitted with its sniffed MIME,
+// but a declared image MIME that disagrees with the bytes is refused.
+func DecodeOutput(encoded, declaredMIME string, limit int64) (Output, *OutputError) {
+	data, mime, size, failure := DecodeInline(encoded, limit)
+	if failure != nil {
+		return Output{}, failure
+	}
+
+	if declaredMIME != "" && declaredMIME != mime && IsImageMIME(declaredMIME) {
+		return Output{}, &OutputError{Reason: ReasonMediaTypeMismatch, Message: "declared media type does not match the image"}
+	}
+
+	digest := sha256.Sum256(data)
+
+	return Output{
+		Data:        base64.StdEncoding.EncodeToString(data),
+		MIME:        mime,
+		SizeBytes:   size,
+		Fingerprint: hex.EncodeToString(digest[:]),
+	}, nil
+}
 
 // boundedDecoder retains at most limit bytes while counting the full decoded
 // size, so an oversize image is rejected without allocating its whole body.
@@ -42,7 +76,7 @@ func DecodeInline(data string, limit int64) ([]byte, string, int64, *OutputError
 		return nil, "", decoded.size, &OutputError{Reason: ReasonTooLarge, Message: outputTooLargeMessage, SizeBytes: decoded.size, MaxBytes: limit}
 	}
 
-	mimeType, ok := SniffMIME(decoded.data)
+	mimeType, ok := sniffMIME(decoded.data)
 	if !ok {
 		return nil, "", 0, &OutputError{Reason: ReasonNotRaster, Message: "image output bytes are not a raster"}
 	}
@@ -63,7 +97,7 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be resolved safely"}
 	}
 
-	if !WithinRoots(resolved, roots) {
+	if !withinRoots(resolved, roots) {
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path is outside the allowed roots"}
 	}
 
@@ -91,12 +125,12 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 
 	defer func() { _ = file.Close() }()
 
-	return ReadContents(file, limit)
+	return readContents(file, limit)
 }
 
-// ReadContents reads an already-opened artifact bounded by limit and sniffs its
+// readContents reads an already-opened artifact bounded by limit and sniffs its
 // MIME.
-func ReadContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
+func readContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file cannot be read"}
@@ -106,7 +140,7 @@ func ReadContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
 		return nil, "", &OutputError{Reason: ReasonTooLarge, Message: outputTooLargeMessage, SizeBytes: int64(len(data)), MaxBytes: limit}
 	}
 
-	mimeType, ok := SniffMIME(data)
+	mimeType, ok := sniffMIME(data)
 	if !ok {
 		return nil, "", &OutputError{Reason: ReasonNotRaster, Message: "image output file is not a raster"}
 	}
@@ -114,9 +148,9 @@ func ReadContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
 	return data, mimeType, nil
 }
 
-// WithinRoots reports whether an already-resolved path sits under any root.
+// withinRoots reports whether an already-resolved path sits under any root.
 // Each root is resolved before the lexical comparison.
-func WithinRoots(resolved string, roots []string) bool {
+func withinRoots(resolved string, roots []string) bool {
 	for _, root := range roots {
 		if withinRoot(resolved, root) {
 			return true

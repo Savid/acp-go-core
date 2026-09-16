@@ -10,13 +10,39 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
+// NativeSessionMeta names the native conversation backing an ACP session.
+func NativeSessionMeta(vendor, nativeID string) map[string]any {
+	return map[string]any{vendor: map[string]any{"nativeSessionId": nativeID}}
+}
+
 const sessionsPageSize = 50
+
+// AcquireSessionGate excludes prompts and restores while an operation owns
+// the session. Its release function is safe to call more than once.
+func AcquireSessionGate(gate chan struct{}, limit string) (func(), error) {
+	select {
+	case gate <- struct{}{}:
+		return sync.OnceFunc(func() { <-gate }), nil
+	default:
+		return nil, Backpressure(limit)
+	}
+}
 
 // SessionRequests reserves session identities while an establishing request is
 // in flight. Its zero value is ready to use.
 type SessionRequests struct {
 	mu      sync.Mutex
 	pending map[acp.SessionId]struct{}
+}
+
+// Pending reports whether an establishing request still owns the session.
+func (r *SessionRequests) Pending(id acp.SessionId) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, pending := r.pending[id]
+
+	return pending
 }
 
 // Acquire refuses a concurrent restore of the same session before either

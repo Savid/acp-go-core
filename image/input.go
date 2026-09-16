@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+
+	"github.com/savid/acp-go-core/wire"
 )
 
 // BlobPolicy decides what a sibling does with an embedded resource blob whose
@@ -37,14 +39,19 @@ type Options struct {
 	NativeCeiling int64
 	// Blobs decides non-image resource blobs. Nil gates every blob.
 	Blobs BlobPolicy
+	// TextBeforeImages requires all forwarded text to precede the images when
+	// the native prompt carries separate text and image fields.
+	TextBeforeImages bool
 }
 
 // Decoded is one validated image or admitted blob ready for the native request.
-// Index counts media blocks; text resources do not consume an index.
+// Block is its position in the prompt; Index counts media blocks, so text
+// resources consume no index.
 type Decoded struct {
 	Data  []byte
 	MIME  string
 	Field string
+	Block int
 	Index int
 }
 
@@ -81,14 +88,15 @@ type promptMedia struct {
 // ValidatePrompt runs the pinned input gate order over every media-bearing
 // block in request order and stops at the first failure. Image and blob blocks
 // consume media indexes; text resources only spend the aggregate byte budget.
+// The native text/image ordering constraint is checked after the media gates.
 //
 // A refusal and an abort are different answers: the refusal describes a block
 // the host can fix, while the error return means the caller stopped waiting.
 func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Options) ([]Decoded, *InputError, error) {
 	images := make([]Decoded, 0)
 
-	maxImageBytes := options.Limits.EffectiveInputPerImage(options.NativeCeiling)
-	maxPromptBytes := options.Limits.EffectiveInputPerPrompt()
+	maxImageBytes := options.Limits.effectiveInputPerImage(options.NativeCeiling)
+	maxPromptBytes := options.Limits.effectiveInputPerPrompt()
 
 	var (
 		promptBytes   int64
@@ -96,7 +104,7 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 		index         int
 	)
 
-	for _, block := range blocks {
+	for position, block := range blocks {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
@@ -107,7 +115,7 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 		}
 
 		if media.kind == mediaOpaqueBlob && options.Blobs != nil && options.Blobs(normalizeMIME(media.mimeType)) == BlobRefuse {
-			return nil, &InputError{Code: "unsupported", Field: FieldPromptResource, Index: -1}, nil
+			return nil, &InputError{Code: wire.VerdictUnsupported, Field: FieldPromptResource, Index: -1}, nil
 		}
 
 		// The count sits behind the unset-root refusal: an adapter with no
@@ -138,17 +146,13 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 			return nil, &InputError{Code: ErrorTooLarge, Field: media.kind.field(), Index: index, SizeBytes: size, MaxBytes: maxImageBytes}, nil
 		}
 
-		if media.kind.nativeImage() && options.NativeCeiling > 0 && size > options.NativeCeiling {
-			return nil, &InputError{Code: ErrorNativeEnvelope, Field: media.kind.field(), Index: index, SizeBytes: size, MaxBytes: options.NativeCeiling}, nil
-		}
-
 		promptBytes += size
 		if maxPromptBytes > 0 && promptBytes > maxPromptBytes {
 			return nil, &InputError{Code: ErrorTooLarge, Field: media.kind.field(), Index: index, SizeBytes: promptBytes, MaxBytes: maxPromptBytes}, nil
 		}
 
 		if media.kind.nativeImage() || media.kind == mediaOpaqueBlob {
-			images = append(images, Decoded{Data: data, MIME: media.mimeType, Field: media.kind.field(), Index: index})
+			images = append(images, Decoded{Data: data, MIME: media.mimeType, Field: media.kind.field(), Block: position, Index: index})
 		}
 
 		if media.kind != mediaTextResource {
@@ -156,7 +160,48 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 		}
 	}
 
+	if options.TextBeforeImages && !textBeforeImages(blocks) {
+		return nil, &InputError{Code: wire.VerdictUnsupported, Field: "prompt", Index: -1}, nil
+	}
+
 	return images, nil, nil
+}
+
+func textBeforeImages(blocks []acp.ContentBlock) bool {
+	seenImage := false
+
+	for _, block := range blocks {
+		if media, ok := promptMediaBlock(block); ok && media.kind.nativeImage() {
+			seenImage = true
+
+			continue
+		}
+
+		if !seenImage {
+			continue
+		}
+
+		switch {
+		case block.Text != nil:
+			if !wire.AudienceIsUserOnly(block.Text.Annotations) && block.Text.Text != "" {
+				return false
+			}
+		case block.ResourceLink != nil:
+			if strings.TrimSpace(block.ResourceLink.Uri) != "" {
+				return false
+			}
+		case block.Resource != nil:
+			if block.Resource.Resource.TextResourceContents != nil {
+				return false
+			}
+
+			if blob := block.Resource.Resource.BlobResourceContents; blob != nil && strings.TrimSpace(blob.Uri) != "" {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func handoffForm(media promptMedia) bool {
@@ -208,7 +253,7 @@ func decodeEmbedded(media promptMedia, index int) ([]byte, *InputError) {
 func decodeHandoff(ctx context.Context, media promptMedia, index int, maxImageBytes int64, options Options) ([]byte, *InputError, error) {
 	field := media.kind.field()
 
-	data, verdict, err := readHandoff(ctx, options.HandoffRoot, media, maxImageBytes, options.NativeCeiling)
+	data, verdict, err := readHandoff(ctx, options.HandoffRoot, media, maxImageBytes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -294,20 +339,4 @@ func promptMediaBlock(block acp.ContentBlock) (promptMedia, bool) {
 	}
 
 	return promptMedia{kind: kind, data: blob.Blob, mimeType: declared, uri: blob.Uri}, true
-}
-
-// Extension returns the file extension for an allowlisted MIME.
-func Extension(mimeType string) string {
-	switch mimeType {
-	case MIMEPNG:
-		return ".png"
-	case MIMEJPEG:
-		return ".jpg"
-	case MIMEGIF:
-		return ".gif"
-	case MIMEWebP:
-		return ".webp"
-	default:
-		return ""
-	}
 }

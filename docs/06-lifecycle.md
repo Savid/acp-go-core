@@ -15,9 +15,11 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
   process group, and three dedicated pipes. Native stdout and stderr never
   inherit ACP stdout and are routed to logs only after JSON-RPC separation is
   guaranteed.
-- Shared writable native state has exactly one writer. A Codex app-server
-  holds an exclusive home lock from before seeding until the process exits
-  and is waited on. Logical-session cwd,
+- Shared writable native state has exactly one writer. A sibling that owns
+  shared writable native state holds an exclusive lock on it from before
+  seeding until the process exits and is waited on; the
+  [registry](registry.md#native-surfaces-and-process-models) records which.
+  Logical-session cwd,
   model, permission state, callbacks, cancellation, and persistence remain
   independently routed on a multiplexed runtime.
 - Tests inject native stdout and stderr noise and prove ACP stdout stays valid.
@@ -89,6 +91,13 @@ elicitation, and client requests receive their owning turn context rather than
 a detached background context. The original request still completes exactly
 once with a valid result or `-32800`.
 
+A prompt's native turn is not cancelled by its own handler context. Only
+`session/cancel`, `session/close`, `session/delete`, or incarnation loss
+cancels a turn. The pinned SDK cancels the previous prompt's handler context
+when a second `session/prompt` arrives for the same session
+([watchlist](../tracking/upstream-acp.md)); a refused second prompt MUST NOT
+end the first.
+
 ## Cancel Determinism
 
 1. `session/cancel` cancels local turn state immediately. It is
@@ -114,10 +123,13 @@ incarnation ends the stream.
   sibling emits the cancelled cycle's terminal `idle` with outcome `cancelled`
   and admits no further prompt until it has.
 - **`session/close` ends the addressed session.** After the ladder's native
-  cleanup succeeds, close terminalizes every nonterminal owned activity and
-  action as `cancelled`, emits those updates and any open turn's terminal
-  `idle`, commits owed state, fences the stream, and returns. A failed commit
-  fails the close with the stream fenced.
+  cleanup succeeds, close commits owed state, then terminalizes every
+  nonterminal owned activity and action as `cancelled`, emits those updates
+  and any open turn's terminal `idle`, fences the stream, and returns. A
+  failed commit fails the close with the stream fenced and no terminal `idle`
+  ([commit points](04-sessions-and-store.md#lifecycle-commit-points)). A
+  failed close still releases the session: its id is detached and no longer
+  counts against `active_sessions`.
 - **Incarnation loss terminalizes as `failed`, close and cancel as
   `cancelled`.**
 - **A fenced stream is terminal.** Later conversation reuse resumes stored
