@@ -13,9 +13,10 @@ changes its public surface.
 | `acp-go-pi` | `piacp` | `pi` | `_pi/` | `pi-session-jsonl-v1` | session runtime |
 | `acp-go-hermes` | `hermesacp` | `hermes` | `_hermes/` | `hermes-session-json-v1` | session runtime |
 | `acp-go-opencode` | `opencodeacp` | `opencode` | `_opencode/` | `opencode-sync-events-v1` | multiplexed runtime |
+| `acp-go-amp` | `ampacp` | `amp` | `_amp/` | `amp-thread-json-v1` | prompt runtime |
 
 Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
-session key, OpenCode session ID, or Pi session UUID. The
+session key, OpenCode session ID, Pi session UUID, or Amp thread id. The
 [identity contract](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
 defines storage and wire publication.
 
@@ -28,6 +29,7 @@ defines storage and wire publication.
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
 | hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
 | opencode | `opencode serve` authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
+| amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed uniquely under the native plugin directory and removed after its process is reaped. |
 
 ## Native Version Probes
 
@@ -38,6 +40,7 @@ defines storage and wire publication.
 | pi | `0.80.6` |
 | hermes | `0.21.3` |
 | opencode | `1.18.30` |
+| amp | `0.0.1789432613` |
 
 ## Session Stores
 
@@ -48,6 +51,7 @@ defines storage and wire publication.
 | pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. Empty conversations commit configuration with an empty main record; restore then resumes the recorded session file without a native header. |
 | hermes | Native per-conversation JSON export plus a `config` subpath | The configuration holds cwd, additional directories, environment, ordered paths, model, and effort. An empty conversation receives a native row before establishment succeeds. Missing state imports before binding a native session. Existing shorter or divergent history fails restore. |
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
+| amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
 
 ### Mirror-Commit Ordering
 
@@ -58,6 +62,7 @@ defines storage and wire publication.
 | pi | Settlement reads pi's session file after `agent_settled` and commits the new rows before the terminal idle and the response. Close aborts any turn, stops the process, commits, then fences. |
 | hermes | `message.complete` settles the turn; callbacks finish before HTTP export, atomic mirror, idle, and response. Close interrupts pending work, exports while the gateway is available, then stops it. |
 | opencode | Native prompt HTTP completion refetches every owned assistant step; callbacks join before the stable sync snapshot, atomic mirror, idle, and response. Close snapshots while HTTP remains available, then releases the binding. |
+| amp | The plugin's `agent.end` receipt and a quiet thread view settle the turn; the process is reaped, then the export must match the observed conversation, retried with backoff under a 30-second deadline, before the atomic mirror, idle, and response. Close joins the prompt process, commits, then fences; the remote thread stays. |
 
 ## Turn Failure and Turn Timeout
 
@@ -68,6 +73,7 @@ defines storage and wire publication.
 | pi | `process_exit`, `transport`, `provider`, `timeout`, `extension` | Command rejection preserves native text; process death reports status plus the last stderr line. Wrapper extension failure uses fixed `a pi extension failed`. |
 | hermes | `process_exit`, `transport`, `provider`, `timeout` | Native result status or RPC rejection supplies provider detail. Process death reports status and the final stderr line. |
 | opencode | `process_exit`, `transport`, `provider`, `timeout` | Native HTTP errors or assistant error records supply provider detail. Process death reports status and the final stderr line; explicit timeout aborts only the addressed session. |
+| amp | `process_exit`, `transport`, `provider`, `timeout` | A native receipt status `error` or an error stream record supplies provider detail. Process death reports status and the last stderr line. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
 
 ## Raw Events
 
@@ -75,7 +81,9 @@ The siblings emit every admitted record on their permanent channel and log
 and continue on emit failure. Codex forwards the notification's params with
 the method added as `method`; image `result` payloads are replaced by their
 size. OpenCode replaces image data URLs with their encoded size. Pi empties
-image `data` members and adds their decoded size as `sizeBytes`.
+image `data` members and adds their decoded size as `sizeBytes`. Amp has no
+permanent channel: it emits the admitted stream-json records of the current
+prompt process and removes image payloads.
 
 ## Lifecycle Extension
 
@@ -88,6 +96,7 @@ image `data` members and adds their decoded size as `sizeBytes`.
 | pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage → mirror → idle. |
 | hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
+| amp | None. `updatesOutsidePrompt` is `false`; each prompt process opens its own incarnation with a snapshot and ends it after the terminal idle. |
 
 ### What each channel tolerates
 
@@ -98,6 +107,7 @@ image `data` members and adds their decoded size as `sizeBytes`.
 | pi | Queue reports, compaction and retry pairs, custom messages, and unmodelled types are session-scoped and open nothing. A wrapper extension error fails the cycle with cause `extension`; an operator extension error is pi's own. |
 | hermes | `streaming` owns the current turn; `queued` waits for the next native start after its response. `redirected` and `steered` keep work with the running native turn and return a non-retry failure. Unknown dispositions fail the generation. Events use one bounded 256-record queue; unbound live ids are dropped. |
 | opencode | Only held native session IDs reach a binding. Message parent IDs correlate prompt ownership; completed submissions reject late frames. Unknown event kinds are inert. Each binding has a bounded 256-event queue; overflow ends that binding. |
+| amp | A frame naming another thread poisons the session; a frame without identity fails the turn. Unmodelled stream records open nothing. Compaction summaries are info messages the plugin view does not expose; verification compares the conversation around them. |
 
 ### Opening publication
 
@@ -108,6 +118,7 @@ image `data` members and adds their decoded size as `sizeBytes`.
 | pi | catalog, then snapshot |
 | hermes | snapshot only |
 | opencode | catalog, then snapshot |
+| amp | none; the snapshot is the first notification inside each prompt |
 
 ### Close boundaries
 
@@ -118,6 +129,7 @@ image `data` members and adds their decoded size as `sizeBytes`.
 | pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
 | hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. |
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
+| amp | Cancels the native turn through the thread API, waits for the acknowledgement and a settled thread, joins the process, commits the captured export, and fences. The remote thread stays. |
 
 ## Usage `size`
 
@@ -136,13 +148,15 @@ image `data` members and adds their decoded size as `sizeBytes`.
   model request's total.
 - **pi:** `get_session_stats.contextUsage.contextWindow`, else the selected
   model's catalog `contextWindow`, else `0`.
+- **amp:** the native assistant message `usage.maxInputTokens`; `used` is that
+  message's input, output, cache-read, and cache-creation tokens.
 
 ## Delegated Agents
 
 - **Tagged (claude).** Native `parent_tool_use_id` is retained as
   `_meta.claude.parentToolUseId` on derived updates.
 
-- **Not applicable (codex, hermes, opencode, pi).** No subscribed provenance channel; nothing is
+- **Not applicable (amp, codex, hermes, opencode, pi).** No subscribed provenance channel; nothing is
   synthesized.
 
 ## Vendor Session Options
@@ -154,12 +168,13 @@ image `data` members and adds their decoded size as `sizeBytes`.
 | pi | `thinkingLevel`, `permission` (`ask`\|`allow`), `autoRetry` (an explicit `false` travels so a resume can override a stored `true`) | Not advertised; `outputSchema` fails at session start. |
 | hermes | `effort` | Not advertised; `outputSchema` is refused. |
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`; startup requires the native `OutputFormatJsonSchema` schema. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
+| amp | `mode` | Not advertised; `outputSchema` and `model` are refused. |
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
 thread's `config.shell_environment_policy.set` on `thread/start` and
 `thread/resume`, with ordered extra directories prepended to the session-selected `PATH`,
 falling back to the app-server's `PATH` when omitted (codex);
-the session's native process environment (claude, hermes, pi); or a native
+the session's native process environment (amp, claude, hermes, pi); or a native
 `shell.env` plugin reading the addressed session’s metadata, following parent
 IDs for child sessions (opencode).
 
@@ -179,6 +194,7 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
 | hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
 | opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
+| amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
 
 ### How each model catalog is built
 
@@ -189,6 +205,7 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | pi | `get_available_models`, pi's own registry filtered by its configured providers, snapshotted once at native start | `modelId`, plus `contextWindow` and `maxOutputTokens` when the row carries them |
 | hermes | `model.options` provider catalogs | Provider-qualified `modelId`. Configured and selected ids append after native entries. |
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
+| amp | none | No catalog: Amp selects models through modes. `WithDefaultModel` and `WithConfiguredModels` refuse nonempty values. |
 
 Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at construction.
 
@@ -201,6 +218,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | none | `PI_CODING_AGENT_DIR` |
 | hermes | none | `HERMES_HOME` |
 | opencode | none | `WithHome` maps `data`, `config`, `cache`, and `state` under its root to the corresponding XDG home variables. |
+| amp | none | `WithHome` refuses nonempty values; native home selection uses the inherited environment. |
 
 ### Ephemeral scratch
 
@@ -211,6 +229,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | the content-addressed extension directory for the wrapper bridge |
 | hermes | nothing; accepted for family uniformity |
 | opencode | the native environment-plugin root |
+| amp | the lifecycle bridge directory of each native process |
 
 ## Slash Commands
 
@@ -221,18 +240,21 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | `get_commands` at session setup, re-fetched on relaunch | Native list minus names the shared sanitizer rejects | none |
 | hermes | none | Nothing; slash text reaches `prompt.submit`. | n/a |
 | opencode | `GET /command` at binding setup; re-fetched on relaunch | Native names, descriptions, and hints; exact matches dispatch through the native command endpoint | none |
+| amp | none | Nothing; slash text reaches the prompt as text. | n/a |
 
 ## Image Input and Output
 
 ### Advertised media envelope
 
-Every sibling advertises the effective default limits with no native ceiling or
-dimension bound. Only the document formats differ:
+Every sibling advertises the effective default limits. Amp clamps the per-image
+bound to its native ceiling and declares the native dimension bound; the others
+declare neither.
 
-| Sibling | `documentFormats` |
-|---|---|
-| claude | `["application/pdf"]` |
-| codex, pi, hermes, opencode | `[]` |
+| Sibling | `maxBytes` | `maxDimension` | `documentFormats` |
+|---|---:|---:|---|
+| claude | default | 0 | `["application/pdf"]` |
+| codex, pi, hermes, opencode | default | 0 | `[]` |
+| amp | 5,138,022 | 8,000 | `[]` |
 
 ### Handoff native form
 
@@ -243,12 +265,13 @@ dimension bound. Only the document formats differ:
 | pi | inline base64 |
 | hermes | inline base64 through `image.attach_bytes` before `prompt.submit` |
 | opencode | A `data:` URL file part on native message and command requests |
+| amp | Inline base64 image blocks in the stream-json user message |
 
 ### Native input ordering
 
 | Sibling | Input shape |
 |---|---|
-| claude, codex, opencode | Ordered content arrays preserve text/image interleaving. |
+| amp, claude, codex, opencode | Ordered content arrays preserve text/image interleaving. |
 | pi, hermes | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](05-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
 
 ### Non-raster blobs
@@ -256,7 +279,7 @@ dimension bound. Only the document formats differ:
 | Sibling | Non-`image/` blob | Post-gate disposition |
 |---|---|---|
 | claude | Gates `application/pdf`; refuses other non-image MIME types | PDF becomes a native document block |
-| codex, pi | refuses every non-`image/` MIME before decode | nothing decoded |
+| amp, codex, pi | refuses every non-`image/` MIME before decode | nothing decoded |
 | hermes | Gates every MIME | Non-image bytes are dropped; the resource URI remains text |
 | opencode | Gates every MIME | Bytes are dropped; the resource URI is retained as text |
 
@@ -269,6 +292,7 @@ dimension bound. Only the document formats differ:
 | pi | `get_available_models` per-model `input` list | yes |
 | hermes | No authoritative native modality field | never; unknown forwards |
 | opencode | Provider catalog `capabilities.input.image` | yes; missing metadata remains unknown |
+| amp | No authoritative native modality field | never; unknown forwards |
 
 An absent model, absent field, or empty list resolves to `unknown`. A failed
 catalog call fails the app-server generation start (codex) or session
@@ -283,6 +307,7 @@ establishment (claude, hermes, opencode, pi).
 | pi | tool-call result content images from `tool_execution_update` and `tool_execution_end`; assistant image blocks one per chunk; inline base64 only |
 | hermes | None; image output is not advertised. |
 | opencode | Native assistant file parts and completed tool attachments: inline data URLs or bounded local reads become images; remote URLs become resource links without fetching. |
+| amp | Native inline tool-result images are validated; remote image URLs become resource links without fetching. |
 
 ### Output refusal placement
 
@@ -292,6 +317,7 @@ establishment (claude, hermes, opencode, pi).
 | codex | the image tool call reports `failed` with the guidance as content |
 | pi | the tool call reports `failed` with the guidance as content; an assistant image is replaced by the guidance as agent text |
 | opencode | Tool attachments report failed tool status with guidance in the refused slot; assistant image refusal becomes agent text. |
+| amp | the tool call carries the guidance as text content in the refused slot |
 
 ### Local read roots
 
@@ -302,6 +328,7 @@ establishment (claude, hermes, opencode, pi).
 | pi | none |
 | hermes | none |
 | opencode | cwd, session additional directories, configured scratch parent, and `os.TempDir()` |
+| amp | none |
 
 ### Replay source
 
@@ -312,6 +339,7 @@ establishment (claude, hermes, opencode, pi).
 | pi | replay decodes image blocks from the mirrored native rows through the output gate |
 | hermes | The native export supplies user/assistant text parts, reasoning, tool calls, and tool results. Image output is not projected. |
 | opencode | Final native messages and parts are reduced from sync events. Local images are captured in the same generation under `config`; missing or invalid stored artifacts fail load. |
+| amp | User and assistant messages of the mirrored export are projected with their tool calls and inline images through the output gate; compaction summaries are not projected. Historic usage comes from the configuration record. |
 
 ## Native Verification
 
@@ -341,6 +369,17 @@ recorded under [session options](#vendor-session-options).
 Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
 load/resume, strict native PATH prefix, PATH rotation, and ACP → native
 `pi --print --session` → ACP continuation preserving both earlier turns.
+
+Amp `0.0.1789432613-gd97f0d`, verified 2026-09-16 in `low` mode: no-token
+creation, export, close, and delete; a prompt that read a file through a native
+tool, native deletion of the thread, load into a private replacement under the
+original ACP id with retained usage, native `amp threads continue --execute`
+recalling the file, and a fresh resume; ACP → native continuation → ACP load;
+session PATH prefix and rotation through a native tool; remote cancellation of a
+running command; deletion. Two successive native compactions on one thread
+settled their turns and kept the mirror consistent; recovery of a compacted
+thread after native deletion is refused because the importer rejects summary
+blocks. A failed recovery deleted the destination it created.
 
 Claude Code `2.1.270`, verified 2026-09-14: native initialization and settings
 controls, permission callbacks, AskUserQuestion elicitation, raw events,
@@ -395,6 +434,16 @@ transcript can contain multiple entries with one API message id.
   a seeded `settings.json` must parse. Turn process-exit detail retains one
   last stderr line.
 
+- **Amp models and permissions:** modes select the model; no model catalog,
+  permission, elicitation, or slash-command surface exists. Native tool
+  permissions stay native.
+- **Amp compaction:** the remote thread actor compacts on its own and inserts an
+  `info` summary message the plugin message API does not expose. Verification
+  compares the conversation around such messages. A compacted thread cannot be
+  recovered after native deletion.
+- **Amp recovery cleanup:** a failed recovery deletes the private destination it
+  created and never bound. This is the only native state the adapter deletes.
+
 Off-prompt `-32603` reachability where it differs:
 
 | Sibling | `_runtime_unavailable` | `_session_poisoned` `cause` |
@@ -404,6 +453,7 @@ Off-prompt `-32603` reachability where it differs:
 | pi | never | `native_session_identity_drift` |
 | hermes | never | `native_session_identity_drift` |
 | opencode | when a replacement server cannot start | `native_session_id_drift` on native deletion |
+| amp | never | `native_session_identity_drift` |
 
 Hermes and OpenCode re-hydrate on a lazy relaunch, so `_restore_failed` is
 also reachable from `session/prompt` and `session/set_config_option` there.

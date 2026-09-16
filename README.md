@@ -15,6 +15,7 @@ the checks that keep the siblings aligned.
 | [acp-go-hermes](https://github.com/savid/acp-go-hermes) | `hermesacp` | `hermes` | `hermes serve` WebSocket JSON-RPC and HTTP persistence | `hermes-session-json-v1` |
 | [acp-go-opencode](https://github.com/savid/acp-go-opencode) | `opencodeacp` | `opencode` | `opencode serve` HTTP and SSE | `opencode-sync-events-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
+| [acp-go-amp](https://github.com/savid/acp-go-amp) | `ampacp` | `amp` | `amp threads continue` stream-json with a native lifecycle plugin | `amp-thread-json-v1` |
 
 [The registry](docs/registry.md) records each sibling's capabilities, options,
 and deviations, with native verification where a run has been recorded.

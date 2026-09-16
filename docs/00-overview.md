@@ -89,6 +89,10 @@ Every sibling selects exactly one strategy and records it in the
 - **multiplexed runtime** — one Agent-owned native process serves many
   logical ACP sessions, is started by the first session-establishing request,
   and is replaced by the next explicit operation after it exits.
+- **prompt runtime** — one native process serves one prompt: it attaches to
+  the remote conversation, submits the prompt, and is reaped before terminal
+  publication. Restore and observation attach without input. Nothing runs
+  between prompts, so `updatesOutsidePrompt` is `false`.
 
 `session/close` releases only the addressed logical session. `Agent.Close`
 closes the Agent-owned runtime and every remaining session. A shared native
