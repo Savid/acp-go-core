@@ -105,9 +105,9 @@ non-authoritative.
 ## Account Usage
 
 `_<vendor>/accountUsage` reads the allowance windows the harness reports for
-the account it is authenticated as. It spends no model tokens and reads only
-through the harness's own protocol; a sibling never contacts a provider API
-itself. A sibling advertises it under
+the account it is authenticated as. Except for the [Claude setup-token
+probes](#claude-setup-token-probes), it MUST spend no model tokens and MUST
+read only through the harness protocol. A sibling advertises it under
 [`_meta.<vendor>.accountUsage`](#capability-_metavendor) with its `scope`; a
 sibling without the advertisement answers the method with method-not-found.
 The [registry](registry.md#account-usage) records each sibling's scope and
@@ -133,12 +133,11 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 ```json
 {
   "available": true,
-  "observedAt": "2026-09-17T02:41:03Z",
   "plan": "pro",
   "usageAllowed": true,
   "limits": [
-    {"id": "session", "windowSeconds": 18000, "usedPercent": 4, "resetsAt": "2026-09-17T03:30:00Z"},
-    {"id": "weekly", "label": "Weekly", "usedPercent": 22, "resetsAt": "2026-09-19T08:00:00Z"}
+    {"id": "session", "observedAt": "2026-09-17T02:41:03Z", "staleAt": "2026-09-17T02:42:03Z", "windowSeconds": 18000, "usedPercent": 4, "resetsAt": "2026-09-17T03:30:00Z"},
+    {"id": "weekly", "observedAt": "2026-09-17T02:41:03Z", "staleAt": "2026-09-17T02:42:03Z", "label": "Weekly", "usedPercent": 22, "resetsAt": "2026-09-19T08:00:00Z"}
   ]
 }
 ```
@@ -147,7 +146,12 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 {"available": false, "reason": "not_authenticated"}
 ```
 
-- `observedAt` and every `resetsAt` are RFC 3339 UTC instants with whole
+- Every limit MUST carry `observedAt` and `staleAt`. `observedAt` is when its
+  measurement was received; `staleAt` is its freshness expiry or invalidation
+  time. Serving cached data MUST NOT renew either timestamp. Uncached reads
+  expire after one minute. A consumer MUST also expire a window at `resetsAt`
+  when it is earlier.
+- `observedAt`, `staleAt`, and every `resetsAt` are RFC 3339 UTC instants with whole
   seconds and the `Z` suffix, as `wire.AccountUsageTime` renders them; it
   renders an instant outside years 0001 through 9999 as the empty string, and
   the member is then omitted. `windowSeconds` and `resetsAt` appear only when
@@ -170,17 +174,55 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 - The native read is bounded by `wire.AccountUsageReadTimeout`. A read that
   exceeds it, or fails for any other cause, is the `account_usage` class of
   [`<vendor>_internal_failure`](00-overview.md#uniform-error-shapes); a
-  response is never assembled from a partial read. A native version without
+  response MUST NOT contain an incomplete native observation. Independently
+  observed cached windows MUST retain their individual timestamps. A native version without
   the read answers the same class; the registry's verification record names
   the version each read was verified on.
   `wire.AccountUsageResponse.Validate` gates every available response a
   sibling assembles.
-- The usage figures are a snapshot: never cached, replayed, or delivered as a
-  session update, and unrelated to [usage updates](05-behavior.md#usage-updates).
+- Except for Claude setup-token probes, observations MUST NOT be cached.
+  Account usage MUST NOT be replayed or delivered as a session update, and is
+  unrelated to [usage updates](05-behavior.md#usage-updates).
   A session-scoped read that launches a process publishes that incarnation's
   opening updates, as every launch does.
 - The response represents utilization windows only. It MUST NOT carry money,
   credit, balance, or spend-control figures, whatever the harness reports.
+
+### Claude Setup-Token Probes
+
+When native `get_usage` reports no windows for an effective setup token,
+Claude MAY obtain quota headers by relaying bounded native inference requests.
+Calling `_claude/accountUsage` authorizes these requests; they consume input
+and output tokens. No other sibling has this exception.
+
+- The adapter MUST use the addressed runtime's captured credentials and route,
+  verify them against native effective settings, and discard results if that
+  identity changes. It MUST NOT discover, refresh, or substitute credentials.
+- Probes MUST use an empty temporary conversation with no tools, project
+  settings, or session persistence. They MUST NOT modify the user conversation.
+- Each refresh MUST forward at most one native Haiku request and one native
+  Fable request, each with `max_tokens: 1`. The relay MUST refuse retries and
+  redirects. The complete read remains bounded by `wire.AccountUsageReadTimeout`.
+- Haiku observations expire after five minutes; Fable observations after thirty
+  minutes. A Fable request is required to observe its scoped allowance. Haiku
+  headers MUST NOT establish Fable availability or refresh its scoped window.
+- An unavailable model result is retained for six hours. Transient probe
+  failures back off for five minutes, fifteen minutes, then one hour. Provider
+  retry deadlines MUST be honored. A 429 with usable quota headers is an
+  observation, not a failed read.
+- Cache keys MUST distinguish effective credentials and probe routes. Concurrent
+  reads of one key MUST share one refresh. Expiry MUST NOT start work without
+  a consumer request. Credential changes MUST select a different cache entry.
+- Native turn quota observations MUST update their reported windows. A scoped
+  quota error without measurements MUST invalidate only its identified window;
+  an unclassified quota error invalidates the account's windows once until new
+  evidence arrives. Invalidation MUST NOT bypass a failure cooldown.
+- Repeated exhaustion reports MUST NOT cause repeated probes. A reported reset
+  bounds exhaustion suppression. An older in-flight probe MUST NOT overwrite
+  a newer turn observation or invalidation.
+- Failed refreshes MAY return retained measurements with their existing
+  timestamps. An invalidated percentage MUST NOT be presented as fresh or
+  replaced by an inferred percentage.
 
 ## Banned SDK Routes
 

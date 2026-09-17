@@ -170,6 +170,10 @@ func decodeAccountUsageMembers(params json.RawMessage) (map[string]json.RawMessa
 
 // AccountUsageLimit is one allowance window as the harness reports it.
 type AccountUsageLimit struct {
+	// ObservedAt is when the harness supplied this window.
+	ObservedAt string `json:"observedAt"`
+	// StaleAt is when this observation expires or was invalidated.
+	StaleAt string `json:"staleAt"`
 	// ID is unique within one response and stable across reads of the same
 	// account.
 	ID string `json:"id"`
@@ -188,9 +192,6 @@ type AccountUsageResponse struct {
 	Available bool `json:"available"`
 	// Reason is present only when Available is false.
 	Reason string `json:"reason,omitempty"`
-	// ObservedAt is the RFC 3339 UTC instant the read completed; present only
-	// when Available is true.
-	ObservedAt string `json:"observedAt,omitempty"`
 	// Plan is the harness's plan or subscription name, when it reports one.
 	Plan string `json:"plan,omitempty"`
 	// UsageAllowed is the harness's own statement of whether the account may
@@ -228,10 +229,6 @@ func (r AccountUsageResponse) Validate() error {
 		return errors.New("an available response carries no reason")
 	}
 
-	if err := validateAccountUsageTime(r.ObservedAt, "observedAt"); err != nil {
-		return err
-	}
-
 	if r.Plan != strings.TrimSpace(r.Plan) {
 		return errors.New("plan carries surrounding whitespace")
 	}
@@ -264,7 +261,7 @@ func (r AccountUsageResponse) validateUnavailable() error {
 		return fmt.Errorf("reason %q is not a contract token", r.Reason)
 	}
 
-	if r.ObservedAt != "" || r.Plan != "" || r.UsageAllowed != nil || len(r.Limits) != 0 {
+	if r.Plan != "" || r.UsageAllowed != nil || len(r.Limits) != 0 {
 		return errors.New("an unavailable response carries only its reason")
 	}
 
@@ -272,6 +269,14 @@ func (r AccountUsageResponse) validateUnavailable() error {
 }
 
 func (l AccountUsageLimit) validate() error {
+	if err := validateAccountUsageTime(l.ObservedAt, "observedAt"); err != nil {
+		return err
+	}
+
+	if err := validateAccountUsageTime(l.StaleAt, "staleAt"); err != nil {
+		return err
+	}
+
 	if l.ID == "" || l.ID != strings.TrimSpace(l.ID) {
 		return errors.New("id is empty or carries surrounding whitespace")
 	}

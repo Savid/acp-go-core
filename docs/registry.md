@@ -146,7 +146,7 @@ prompt process and removes image payloads.
 
 | Sibling | Scope | Native source and mapping | `plan` | `usageAllowed` |
 |---|---|---|---|---|
-| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; `windowSeconds` is absent. Nothing beside the list is read. `rate_limits_available: false`, a null `rate_limits`, or an empty `limits[]` is `not_reported`; the CLI reports a logged-out home the same way. The CLI is logged out whenever `CLAUDE_CONFIG_DIR` is set, so an Agent with `WithHome` answers `not_reported`; the windows are observable only on the default home the CLI itself logged into. | `subscription_type` | absent |
+| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; `windowSeconds` is absent. Nothing beside the list is read. `rate_limits_available: false`, a null `rate_limits`, or an empty `limits[]` is `not_reported`; the CLI reports a logged-out home the same way. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`. Native turn quota events update or invalidate those cached windows. Each window carries its own `observedAt` and `staleAt`. | `subscription_type` | absent |
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `none` | | | |
 | hermes | `none` | | | |
@@ -226,7 +226,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 
 | Sibling | What `WithScratchDir` parents |
 |---|---|
-| claude | nothing; accepted for family uniformity |
+| claude | temporary native quota-probe conversations and config directories |
 | codex | the image-output read root only; the adapter writes no ephemeral files |
 | pi | the content-addressed extension directory for the wrapper bridge |
 | hermes | nothing; accepted for family uniformity |
