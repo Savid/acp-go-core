@@ -62,8 +62,7 @@ their versions live in `go.mod` files and are compared by
   cutover across the family and its hosts.
 - Protocol claims come from the published spec and schema. The pinned Go SDK is
   evidence for its own generated types and transport bounds only.
-- Extension methods and enum values require the `_` prefix; `_meta` keys do
-  not. The three reserved family literals are defined in
+- The three reserved family literals are defined in
   [docs/00](docs/00-overview.md#family-global-reserved-literals).
 - Current upstream status and adoption triggers live in the
   [watchlist](tracking/upstream-acp.md).
@@ -90,24 +89,15 @@ not behavior.
 
 ## Core Principles
 
-- **Interface, not isolation.** A sibling translates ACP to a harness protocol
-  and back. It inherits the environment it was started in and does no
-  isolation; whoever executes the sibling owns that.
-- **Harness security features stay.** Sandbox and approval policies are the
-  harness's own and pass through as options.
-- **One shape, one core.** Shared behavior lives once here. A sibling holds
-  only what is vendor-specific.
-- **Current shape only.** No compatibility code, migrations, or alternate wire
-  shapes. Database creation defines the current schema from empty.
-- **Store-backed durability.** `SessionStore` owns session recovery; native
-  state is a cache.
+The family principles are stated once, in
+[docs/00](docs/00-overview.md#family-principles).
+
 
 ## Documentation
 
 | Page | Scope |
 |---|---|
 | [00 · Overview](docs/00-overview.md) | Ownership, identity, reserved literals, error vocabulary |
-| [01 · Getting started](docs/01-getting-started.md) | Source order and native-surface research |
 | [02 · Public API](docs/02-public-api.md) | This module, agent surface, options, builders |
 | [03 · Wire contract](docs/03-wire-contract.md) | Capabilities, methods, metadata, envelopes |
 | [04 · Sessions and store](docs/04-sessions-and-store.md) | Persistence, commit ordering, restore, identity |

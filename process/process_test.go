@@ -203,16 +203,6 @@ func TestStderrTailKeepsTheLastLine(t *testing.T) {
 	require.NoError(t, child.Close())
 }
 
-func TestMinimumVersion(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, checkMinimumVersion("acme", "v1.2.3", "1.2.3"))
-	require.NoError(t, checkMinimumVersion("acme", "1.10.0-beta", "1.9.9"))
-	require.Error(t, checkMinimumVersion("acme", "1.2", "1.2.1"))
-	require.Error(t, checkMinimumVersion("acme", "", "1.0.0"))
-	require.Error(t, checkMinimumVersion("acme", "1.x", "1.0.0"))
-}
-
 func TestValidateOptionalAbsolutePath(t *testing.T) {
 	t.Parallel()
 

@@ -41,7 +41,6 @@ const (
 	CauseProcessExit = "process_exit"
 	CauseTransport   = "transport"
 	CauseProvider    = "provider"
-	CauseTimeout     = "timeout"
 )
 
 // Off-prompt -32603 token suffixes. A sibling prefixes each with its vendor key.

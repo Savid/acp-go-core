@@ -11,7 +11,7 @@ that binds them. Vendor-specific code never lives here.
 | Source | Authority |
 |---|---|
 | [README.md](README.md) | Family membership and shared version pins |
-| `docs/00`–`docs/08` | Current family contract |
+| `docs/*.md` other than the registry | Current family contract |
 | [docs/registry.md](docs/registry.md) | Per-sibling facts that differ between siblings |
 | [lifecycle/testdata/fixtures/manifest.json](lifecycle/testdata/fixtures/manifest.json) | Canonical lifecycle reducer battery |
 | [.agents/skills](.agents/skills) | Audit and alignment workflows |
@@ -24,13 +24,13 @@ within the task's scope. Never weaken a rule merely to match an implementation.
 
 | Path | Owns |
 |---|---|
-| `store.go` | `SessionStore` types and `InMemorySessionStore` |
+| `store.go` | `SessionStore` types, `InMemorySessionStore`, and the store call bound |
 | `sessionlog/` | Atomic mirror generations, record decoding, native-log reconciliation |
 | `observer/` | Shared OpenTelemetry instrumentation; `exporters/` is the command-binary bootstrap |
 | `storetest/` | The exported store contract battery |
 | `lifecycle/` | Capability, envelope, decoder, reducer, emitter, publisher; `testdata/fixtures/` is the canonical battery |
-| `process/` | Environment merge, executable resolution, version floor, launch, stderr tail, shutdown, seed files, file lock |
-| `wire/` | Error constructors, raw-event framing, request builders, session metadata and gates, text rules, publication ordering, reserved literals |
+| `process/` | Environment merge, executable resolution, launch, stderr tail, shutdown, seed files, file lock |
+| `wire/` | Error constructors, raw-event framing, request builders, session metadata and gates, text rules, publication ordering, reserved literals, account-usage decoder and response shape |
 | `image/` | Limits, media envelope, input gates, handoff, output gates |
 | `docs/` | The contract pages and the registry |
 | `scripts/` | `check.py` for this repo, `drift-check.sh` for the siblings |
@@ -68,7 +68,12 @@ make drift-check     # family structural contract across sibling checkouts
   for targeted discovery; follow call paths and tests beyond symbol presence.
 - Use web search to verify mutable ACP, SDK, and native-harness claims. Prefer
   the published protocol, official documentation, upstream source, schemas,
-  and release notes.
+  and release notes. Read in this order: the
+  [ACP v1 protocol](https://agentclientprotocol.com/protocol/v1/overview) and
+  [schema](https://agentclientprotocol.com/protocol/v1/schema), the README's
+  protocol posture and the upstream watchlist, the pinned
+  [Go SDK](https://github.com/coder/acp-go-sdk), then this module and the
+  sibling's registry entry.
 - Protocol truth comes from the published spec and schema. The pinned Go SDK
   establishes its own types and transport behavior, not the protocol.
 - Distinguish contract, observed behavior, and inference. Record a source,

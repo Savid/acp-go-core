@@ -25,6 +25,7 @@ done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/RE
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
 forbidden_names=('acp-go' 'coordination repo')
+account_usage_rows=$(awk '/^## Account Usage$/{f=1;next} /^## /{f=0} f' "$repo_root/docs/registry.md")
 
 rg -q "^module $core_module\$" "$repo_root/go.mod" || fail "acp-go-core: module path differs from README pin"
 rg -q "^go $go_version\$" "$repo_root/go.mod" || fail "acp-go-core: go directive differs from README pin"
@@ -36,9 +37,6 @@ check_sibling() {
   local vendor=$1 repo=$2 name="acp-go-$1" f
   for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/signals_unix.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
     [[ -e "$repo/$f" ]] || fail "$name: missing $f"
-  done
-  for f in examples/minimal-client examples/interactive-chat examples/resume-from-file; do
-    [[ -d "$repo/$f" ]] || fail "$name: missing $f"
   done
   if rg -q --type go -g '!*_test.go' '\.scratchDir\(' "$repo"; then
     [[ -f "$repo/scratch.go" ]] || fail "$name: scratch allocator has no scratch.go owner"
@@ -62,8 +60,26 @@ check_sibling() {
   rg -q "^package ${vendor}acp\$" "$repo/agent.go" || fail "$name: root package is not ${vendor}acp"
   rg -q "SessionStoreFormat = \"$vendor-[a-z-]+-v1\"" "$repo"/*.go || fail "$name: SessionStoreFormat is not <vendor>-<kind>-v1"
   rg -q "RawEventMethod = \"_$vendor/rawEvent\"" "$repo"/*.go || fail "$name: RawEventMethod is not canonical"
+  if rg -q --type go -g '!*_test.go' 'AccountUsageMethod += ' "$repo"; then
+    rg -q --type go -g '!*_test.go' "AccountUsageMethod += \"_$vendor/accountUsage\"" "$repo" || fail "$name: AccountUsageMethod is not canonical"
+    rg -q --type go -g '!*_test.go' 'wire\.DecodeAccountUsageRequest\(' "$repo" || fail "$name: account usage request is not decoded through core"
+    rg -q --type go -g '!*_test.go' 'wire\.AccountUsageCapabilityKey' "$repo" || fail "$name: account usage is not advertised through core's key"
+    assembling=$(rg -l --type go -g '!*_test.go' 'wire\.AccountUsageResponse\{[^}]' "$repo" || true)
+    [[ -n "$assembling" ]] || fail "$name: no non-test file assembles a wire.AccountUsageResponse"
+    while IFS= read -r f; do
+      [[ -z "$f" ]] || rg -q '\.Validate\(\)' "$f" || fail "$name: $(basename "$f") assembles an account-usage response without Validate"
+    done <<< "$assembling"
+    printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`(session|agent)\` \|" || fail "$name: registry Account Usage row does not record a scope"
+  else
+    rg -q --type go -g '!*_test.go' -e 'accountUsage' -e 'AccountUsage' "$repo" && fail "$name: account usage code without AccountUsageMethod"
+    printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`none\` \|" || fail "$name: registry Account Usage row is not none"
+  fi
   rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
-  rg -q 'executable +process\.Executable' "$repo/agent.go" && rg -q --type go -g '!*_test.go' 'a\.executable\.Resolve\(' "$repo" || fail "$name: version probing is not coordinated through core"
+  resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\(cmp\.Or\(a\.options\.ExecutablePath, vendor\), base\)' "$repo" || true)
+  [[ -n "$resolving" ]] || fail "$name: executable resolution is not core's on the vendor default"
+  while IFS= read -r f; do
+    [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
+  done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
   rg -q --type go -g '!*_test.go' 'StderrLastLine\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
@@ -214,7 +230,7 @@ for repo in repos[1:]:
 versions = {}
 for repo in repos:
     for line in (repo / "go.mod").read_text().splitlines():
-        match = re.fullmatch(r"\s+([^ ]+) (v[^ ]+)", line)
+        match = re.fullmatch(r"\s+([^ ]+) (v[^ ]+)(?: // indirect)?", line)
         if match:
             module, version = match.groups()
             if module in versions and versions[module][1] != version:

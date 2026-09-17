@@ -33,10 +33,21 @@ Every sibling proves, against the current ACP v1 schema:
 - Position-encoding selection.
 - Stable `session/fork` returns method-not-found; `session/set_mode` returns
   method-not-found; `authenticate` echoes the method id; `logout` returns
-  method-not-found; every extension method returns method-not-found.
-- `_meta.<vendor>` strictness: unknown own-namespace keys rejected, foreign
-  namespaces ignored, trace keys preserved, `acp-go.dev/lifecycle` refused on
-  session lifecycle requests.
+  method-not-found; every extension method the sibling does not advertise
+  returns method-not-found.
+- **Account usage**, on a sibling that advertises it: the scripted fake's
+  allowance is answered in the [contract shape](03-wire-contract.md#account-usage)
+  and the advertisement carries the method and scope; an unknown request
+  member is refused naming it; a session-scoped sibling refuses a missing
+  `sessionId` as `missing`, and an unknown one is refused as unknown session;
+  a read that holds the gate refuses a concurrent prompt, and a prompt that
+  holds it refuses a concurrent read; the fake's
+  no-credential and no-allowance answers map to `not_authenticated` or
+  `not_reported`; a native refusal is `<vendor>_internal_failure` with
+  `class: "account_usage"`.
+- `_meta.<vendor>` strictness: unknown own-namespace keys rejected on session
+  lifecycle requests, foreign namespaces ignored, trace keys preserved,
+  `acp-go.dev/lifecycle` refused on session lifecycle requests.
 - A non-empty `mcpServers` is refused naming `mcpServers`.
 - Config options are select-only with the contract categories.
 - `session/delete` tombstones and hides list, load, and resume, including the
@@ -86,8 +97,8 @@ Every sibling proves, against the current ACP v1 schema:
   the exact indexed field. A test captures the environment the native process
   actually receives and asserts the directories appear first, in order, ahead
   of the merged `PATH`, joined with the platform separator and carrying no
-  empty component. Executable resolution and version probing ignore session
-  directories, so a planted fixture binary never shadows the harness. An
+  empty component. Executable resolution ignores session directories, so a
+  planted fixture binary never shadows the harness. An
   empty-valued key reaches the native process as `KEY=`. Two sessions with
   distinct values both succeed and never cross.
 - **Environment inheritance.** A variable set in the adapter's own process
@@ -188,8 +199,11 @@ captured native frames. The fixture and its provenance live under
 ## Integration Smoke
 
 Runs against an installed native binary, skips cleanly when the binary is
-absent, spends no tokens, and proves version probing, initialization, session
-creation, and deterministic close and delete paths.
+absent, spends no tokens, and proves initialization, session creation,
+deterministic close and delete paths, and, on a sibling that
+advertises it, an [account-usage](03-wire-contract.md#account-usage) read
+whose answer passes `Validate` and, when the isolated home cannot report
+windows, is asserted to be the `not_reported` answer.
 
 ## Integration Live
 
@@ -205,13 +219,6 @@ in the [registry](registry.md). Then rotates the directory on a second turn
 and proves the old value is gone. A prefix exception MUST identify the native
 directory from the installed harness; it MUST NOT accept arbitrary earlier
 `PATH` entries.
-
-## Pin-Change Re-Verification
-
-Version-pinned facts — native item names, store paths, line grammars, catalog
-shapes — are re-verified by gated live tests whenever a harness pin moves. A
-pin change with no such run is a release blocker. The pinned values live in
-[registry.md](registry.md).
 
 ## Integration Practices
 

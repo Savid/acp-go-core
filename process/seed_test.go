@@ -28,9 +28,15 @@ func TestWriteSeedFiles(t *testing.T) {
 	files["config.toml"] = "a = 2\n"
 	require.NoError(t, WriteSeedFiles(dir, files))
 
-	backup, err := os.ReadFile(filepath.Join(dir, "config.toml"+seedBackupSuffix))
+	settings, err = os.ReadFile(filepath.Join(dir, "config.toml"))
 	require.NoError(t, err)
-	require.Equal(t, "a = 1\n", string(backup))
+	require.Equal(t, "a = 2\n", string(settings), "a managed file follows the seed")
+
+	blocked := map[string]string{"first.txt": "1", "nested/second.txt": "2"}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "nested"), []byte("not a directory"), 0o600))
+	require.Error(t, WriteSeedFiles(dir, blocked), "the second file cannot be written under a regular file")
+	require.NoError(t, os.Remove(filepath.Join(dir, "nested")))
+	require.NoError(t, WriteSeedFiles(dir, blocked), "the first file was recorded as managed before it was written")
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "operator.json"), []byte("{}"), 0o600))
 
@@ -40,7 +46,7 @@ func TestWriteSeedFiles(t *testing.T) {
 	require.Equal(t, "operator.json", seedErr.Name)
 	require.EqualError(t, seedErr, `invalid seed file "operator.json"`)
 
-	for _, bad := range []string{"", "/abs", "../up", "a/../b", "./x", ".seed-manifest.json", "x.seed.bak", "a\x00b"} {
+	for _, bad := range []string{"", "/abs", "../up", "a/../b", "./x", ".seed-manifest.json", "a\x00b"} {
 		require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{bad: "x"}), &seedErr, bad)
 	}
 }

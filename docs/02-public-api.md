@@ -12,14 +12,14 @@ types that cross the sibling boundary. The module owns:
 
 | Package | Contents |
 |---|---|
-| `acpcore` | `SessionStore` and its types and `InMemorySessionStore` ([04-sessions-and-store.md](04-sessions-and-store.md#store-api)). |
+| `acpcore` | `SessionStore` and its types, `InMemorySessionStore`, and `SessionStoreTimeout`, the bound on one store call ([04-sessions-and-store.md](04-sessions-and-store.md#store-api)). |
 | `acpcore/sessionlog` | Atomic native-log and session-configuration commits, strict record decoding, and native-log reconciliation. |
 | `acpcore/observer` | OpenTelemetry spans and metrics with sibling identity supplied at construction. |
 | `acpcore/observer/exporters` | The `OTEL_*` exporter, propagator, and log-bridge wiring a sibling's command binary hands to its Agent; library code never imports it. |
 | `acpcore/storetest` | The store contract battery a host store runs against itself. |
 | `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the session publisher, and the embedded [fixture battery](08-testing.md#lifecycle-fixtures). |
-| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, the native version floor check and retryable probe cache, child launch with its own process group, dedicated stdio pipes, and a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, and the exclusive native-home file lock. |
-| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, and the reserved literals with the collision check for host-supplied `_meta`. |
+| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group, dedicated stdio pipes, and a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, and the exclusive native-home file lock. |
+| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, the reserved literals with the collision check for host-supplied `_meta`, and the [account-usage](03-wire-contract.md#account-usage) request decoder, response shape, and read bound. |
 | `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, the image input gate, and output decoding ([03-wire-contract.md](03-wire-contract.md#image-content)). |
 
 The exported API is the module's own Go documentation. This contract fixes
@@ -28,8 +28,9 @@ re-export a core type under its own name.
 
 ## Agent Surface
 
-Every sibling exports this exact agent surface. `Agent` has unexported fields
-only.
+Every sibling exports this agent surface, plus the
+[extension constants](03-wire-contract.md#extension-constants) its reads
+require. `Agent` has unexported fields only.
 
 ```go
 package vendoracp
@@ -76,8 +77,10 @@ Rules:
   harness authenticates itself in its own home, outside ACP.
 - No exported `Session` type and no session methods outside `Agent`.
 - No fork method of any kind. Stable `session/fork` returns method-not-found.
-- `HandleExtensionMethod` returns method-not-found for every method; the only
-  extension surface is the outbound `RawEventMethod` notification.
+- `HandleExtensionMethod` answers only the inbound extension methods the
+  sibling advertises under [`_meta.<vendor>`](03-wire-contract.md#capability-_metavendor)
+  and returns method-not-found for every other method. The only outbound
+  extension surface is the `RawEventMethod` notification.
 - Unsupported methods and option fields use the
   [uniform error shapes](00-overview.md#uniform-error-shapes).
 
@@ -125,8 +128,6 @@ func WithTracerProvider(provider trace.TracerProvider) Option
 func WithMeterProvider(provider metric.MeterProvider) Option
 func WithTextMapPropagator(propagator propagation.TextMapPropagator) Option
 func WithSessionStore(store acpcore.SessionStore) Option
-func WithSessionStoreLoadTimeout(timeout time.Duration) Option
-func WithTurnTimeout(timeout time.Duration) Option
 func WithConcurrencyLimits(limits ConcurrencyLimits) Option
 func WithImageLimits(limits ImageLimits) Option
 func WithSeedFiles(files map[string]string) Option
@@ -144,8 +145,8 @@ Rules:
   [registry](registry.md#vendor-process-options). Unset, the harness resolves
   its home from the inherited environment exactly as it would from a shell.
   `Home` never acts as a scratch parent.
-- `WithScratchDir` is the parent for all ephemeral state: extension staging
-  and probe directories. Empty means `os.TempDir()`; a missing directory is
+- `WithScratchDir` is the parent for all ephemeral state, such as extension
+  staging. Empty means `os.TempDir()`; a missing directory is
   created `0700`. Every ephemeral path is created through the sibling's
   single scratch accessor with a stable `acp-go-<vendor>-<purpose>-*` prefix
   so a host can sweep orphans. A sibling that allocates no ephemeral state
@@ -159,9 +160,6 @@ Rules:
 - `WithConfiguredModels` names the models the host lists explicitly. Each id
   is a configured entry under [catalog membership](05-behavior.md#catalog-membership).
   An empty, whitespace, or duplicate id fails construction.
-- `WithTurnTimeout` bounds one prompt turn; `0` means no deadline. On expiry
-  the adapter aborts the native turn and returns the turn-failure error with
-  `cause:"timeout"`, never `cancelled`.
 - `WithImageLimits` counts **decoded** bytes. Omitted, every field is 6 MiB
   (6,291,456). A field set to zero disables that policy limit and never
   bypasses the frame clamp or a native ceiling. A negative field is a
@@ -171,8 +169,7 @@ Rules:
   before launch. Absolute paths, `..` escapes, and empty keys fail at session
   start with the unsupported error naming `seedFiles`. Each seed root keeps
   `.seed-manifest.json` listing the files the adapter manages; an existing file
-  not in the manifest is never overwritten and fails with the same error. A
-  managed file whose content changes keeps its prior bytes in `.seed.bak`.
+  not in the manifest is never overwritten and fails with the same error.
   Secrets go in `env` and are referenced from seeded files by variable
   indirection. Native config injection is preferred where the harness offers
   it; the [registry](registry.md#vendor-process-options) records where.
@@ -184,7 +181,7 @@ Rules:
   never credentials, session state, or transcripts. They live under scratch,
   are content-addressed and immutable, and are recorded in the registry.
 - Vendor-specific process options are prefixed `With<Vendor>...`. No sibling
-  exposes a native-version option; verified floors are adapter constants.
+  exposes a native-version option.
 - Common options mean the same thing in every sibling. `Options` may add
   vendor fields, but common fields are named and typed exactly as above.
 
@@ -210,8 +207,7 @@ relative MUST be resolved against the native process cwd for adapter file I/O.
 
 `PATH` is composed last: the session's ordered `extraPathDirs`, then the
 `PATH` the merge produced, joined with `os.PathListSeparator` and omitting
-empty components. Executable resolution and version probing use steps 1 and 2
-only.
+empty components. Executable resolution uses steps 1 and 2 only.
 
 On a multiplexed runtime the shared process receives steps 1, 2, and 4; each
 logical session's `env` and `extraPathDirs` travel on that session's own
@@ -290,7 +286,9 @@ session start with the unsupported error naming it; the
 ## Request Builders
 
 The vendor-free request builders live once in `wire`; a sibling exports only
-the option constructors that carry its own namespace.
+the option constructors that carry its own namespace, and
+`WithSessionOutputSchema` only where its
+[registry](registry.md#vendor-session-options) row records structured output.
 
 ```go
 // package wire

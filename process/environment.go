@@ -133,9 +133,9 @@ func (e Environment) Build() ([]string, error) {
 	return list(values), nil
 }
 
-// Base is the environment executable resolution and version probing use: the
-// process environment and the agent overlay, with internal markers dropped and
-// no session or owned keys applied.
+// Base is the environment executable resolution uses: the process environment
+// and the agent overlay, with internal markers dropped and no session or owned
+// keys applied.
 func (e Environment) Base() ([]string, error) {
 	base := Environment{Process: e.Process, Agent: e.Agent, InternalPrefix: e.InternalPrefix}
 

@@ -183,6 +183,10 @@ correlates usage to a streamed message.
 `size` is the model's true context window in tokens, never fabricated. An
 adapter that cannot determine it sets `size: 0`.
 
+Account allowance is a separate on-demand read,
+[`_<vendor>/accountUsage`](03-wire-contract.md#account-usage); it never rides
+`usage_update`.
+
 ## Assistant Text Streaming
 
 `agent_message_chunk` and `agent_thought_chunk` are append-only deltas:
@@ -223,8 +227,6 @@ A native turn failure is any way a turn ends other than a clean stop reason.
 - **Cancellation stays distinct.** A native error observed while the turn is
   cancelled maps to stop reason `cancelled`; the cancel guard runs before
   failure mapping.
-- **Turn deadline.** `WithTurnTimeout` expiry aborts the native turn and
-  returns `cause:"timeout"`.
 
 ## Lifecycle State Machines
 

@@ -25,10 +25,6 @@
 |   |-- otel.go
 |   |-- signals_unix.go
 |   `-- version.go
-|-- examples/
-|   |-- minimal-client/
-|   |-- interactive-chat/
-|   `-- resume-from-file/
 |-- integration/
 |   |-- binary_test.go
 |   |-- doc.go
@@ -82,12 +78,19 @@ The structural gate checks these symbols and literals in every sibling:
   constants.
 - `cmd/acp-go-<vendor>/otel.go` obtains its providers from
   `observer/exporters.Configure`.
-- The native version probe and floor use `process.Executable.Resolve`;
-  `internal/<harness>` declares only its `MinimumVersion` and its own probe.
+- The executable is resolved through `process.ResolveExecutable` against the
+  base environment.
 - `request_builders.go` declares only the vendor option constructors, each
   returning `wire.SessionRequestOption`.
 - Native process death reports its last stderr line through
   `process.(*Process).StderrLastLine`.
+- A sibling that exports `AccountUsageMethod` in non-test Go spells it
+  `"_<vendor>/accountUsage"`, decodes through
+  `wire.DecodeAccountUsageRequest`, advertises
+  `wire.AccountUsageCapabilityKey`, calls `Validate` in every non-test file
+  that assembles a `wire.AccountUsageResponse`, and has a row in
+  the registry's Account Usage table recording its scope; a sibling without
+  the export uses none of those and its row reads `none`.
 
 ## Dot Files
 
@@ -150,8 +153,8 @@ full commit SHA. The family targets Linux and macOS; the workflow runs
 
 ## Docs
 
-Required docs are `README.md`, `doc.go`, `AGENTS.md`, `CLAUDE.md`, and the
-three examples. There is no docs site.
+Required docs are `README.md`, `doc.go`, `AGENTS.md`, and `CLAUDE.md`. There
+is no docs site.
 
 `README.md` states what the sibling wraps, how to install and run the binary,
 how to embed `Serve`, every process option and command flag, the session
@@ -166,9 +169,6 @@ rules, verification, and boundaries. `CLAUDE.md` is only the heading and the
 `@AGENTS.md` import. Sibling instructions are self-contained and mention no
 other repository.
 
-Examples are executable programs that build under `go vet ./...` and are
-covered by `coverage-check`.
-
 ## Code Standards
 
 gofmt-clean, golangci-lint-clean, table-driven tests, ethPandaOps house style.
@@ -181,9 +181,14 @@ Keep it simple.
 or under `ACP_GO_FAMILY_ROOT`. It verifies:
 
 - required files, identity constants, the module path, and the exported
-  `SessionStoreFormat` and `RawEventMethod`;
+  `SessionStoreFormat`, `RawEventMethod`, and `AccountUsageMethod`;
+- the [account-usage](#surface-presence) structural rule, including the
+  sibling's registry Account Usage row;
+- executable resolution through `process.ResolveExecutable` on the base
+  environment;
 - the Go directive, ACP SDK pin, and this module's pin against the README, in
-  every sibling and in this module's own `go.mod`;
+  every sibling and in this module's own `go.mod`, and one version per module
+  across every family `go.mod`, indirect requirements included;
 - the [surface presence](#surface-presence) symbols;
 - that README, AGENTS.md, and doc.go name no other sibling or this
   repository;

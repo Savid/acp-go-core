@@ -31,17 +31,6 @@ defines storage and wire publication.
 | opencode | `opencode serve` authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 | amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed uniquely under the native plugin directory and removed after its process is reaped. |
 
-## Native Version Probes
-
-| Sibling | Minimum native version |
-|---|---|
-| claude | `2.0.0` |
-| codex | `0.153.4` |
-| pi | `0.80.6` |
-| hermes | `0.21.3` |
-| opencode | `1.18.30` |
-| amp | `0.0.1789432613` |
-
 ## Session Stores
 
 | Sibling | Kind | Carrier record |
@@ -64,16 +53,18 @@ defines storage and wire publication.
 | opencode | Native prompt HTTP completion refetches every owned assistant step; callbacks join before the stable sync snapshot, atomic mirror, idle, and response. Close snapshots while HTTP remains available, then releases the binding. |
 | amp | The plugin's `agent.end` receipt and a quiet thread view settle the turn; the process is reaped, then the export must match the observed conversation, retried with backoff under a 30-second deadline, before the atomic mirror, idle, and response. Close joins the prompt process, commits, then fences; the remote thread stays. |
 
-## Turn Failure and Turn Timeout
+## Turn Failure
 
-| Sibling | Causes | Native mapping and disclosed detail |
-|---|---|---|
-| claude | `process_exit`, `transport`, `provider`, `timeout` | Native error results supply `errors`, `error`, or `result`; process death reports exit status and the last stderr line. |
-| codex | `process_exit`, `transport`, `provider`, `timeout` | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. App-server death reports status plus the last stderr line. |
-| pi | `process_exit`, `transport`, `provider`, `timeout`, `extension` | Command rejection preserves native text; process death reports status plus the last stderr line. Wrapper extension failure uses fixed `a pi extension failed`. |
-| hermes | `process_exit`, `transport`, `provider`, `timeout` | Native result status or RPC rejection supplies provider detail. Process death reports status and the final stderr line. |
-| opencode | `process_exit`, `transport`, `provider`, `timeout` | Native HTTP errors or assistant error records supply provider detail. Process death reports status and the final stderr line; explicit timeout aborts only the addressed session. |
-| amp | `process_exit`, `transport`, `provider`, `timeout` | A native receipt status `error` or an error stream record supplies provider detail. Process death reports status and the last stderr line. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
+Only pi adds a vendor cause: `extension`.
+
+| Sibling | Native mapping and disclosed detail |
+|---|---|
+| claude | Native error results supply `errors`, `error`, or `result`; process death reports exit status and the last stderr line. |
+| codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. App-server death reports status plus the last stderr line. |
+| pi | Command rejection preserves native text; process death reports status plus the last stderr line. Wrapper extension failure is `extension` with the fixed text `a pi extension failed`. |
+| hermes | Native result status or RPC rejection supplies provider detail. Process death reports status and the final stderr line. |
+| opencode | Native HTTP errors or assistant error records supply provider detail. Process death reports status and the final stderr line. |
+| amp | A native receipt status `error` or an error stream record supplies provider detail. Process death reports status and the last stderr line. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
 
 ## Raw Events
 
@@ -150,6 +141,17 @@ prompt process and removes image payloads.
   model's catalog `contextWindow`, else `0`.
 - **amp:** the native assistant message `usage.maxInputTokens`; `used` is that
   message's input, output, cache-read, and cache-creation tokens.
+
+## Account Usage
+
+| Sibling | Scope | Native source and mapping | `plan` | `usageAllowed` |
+|---|---|---|---|---|
+| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; `windowSeconds` is absent. Nothing beside the list is read. `rate_limits_available: false`, a null `rate_limits`, or an empty `limits[]` is `not_reported`; the CLI reports a logged-out home the same way. The CLI is logged out whenever `CLAUDE_CONFIG_DIR` is set, so an Agent with `WithHome` answers `not_reported`; the windows are observable only on the default home the CLI itself logged into. | `subscription_type` | absent |
+| codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
+| pi | `none` | | | |
+| hermes | `none` | | | |
+| opencode | `none` | | | |
+| amp | `none` | | | |
 
 ## Delegated Agents
 
@@ -364,7 +366,9 @@ Approvals and clarification use the
 Codex `0.154.0`, verified 2026-09-15: native creation/close/delete;
 race-enabled ACP → native `codex exec resume` → ACP continuation; live prompt,
 load/resume, and PATH rotation. The installed package's verified prefix is
-recorded under [session options](#vendor-session-options).
+recorded under [session options](#vendor-session-options). Verified
+2026-09-17 without tokens: the account-usage read through the built binary on
+an authenticated home.
 
 Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
 load/resume, strict native PATH prefix, PATH rotation, and ACP → native
@@ -381,12 +385,15 @@ settled their turns and kept the mirror consistent; recovery of a compacted
 thread after native deletion is refused because the importer rejects summary
 blocks. A failed recovery deleted the destination it created.
 
-Claude Code `2.1.270`, verified 2026-09-14: native initialization and settings
-controls, permission callbacks, AskUserQuestion elicitation, raw events,
-PATH changes on resume, running-command cancellation, and deletion;
-race-enabled ACP → native `claude --resume` → ACP load and continued
-prompt, retaining the same conversation id and both earlier turns. The native
-transcript can contain multiple entries with one API message id.
+Claude Code `2.1.273`, verified 2026-09-17 without tokens: native
+initialization and settings controls, account usage on the default home and
+its `not_reported` answer under `WithHome`, close, resume, and deletion.
+
+Claude Code `2.1.270`, verified 2026-09-14 with tokens: permission callbacks,
+AskUserQuestion elicitation, raw events, PATH changes on resume,
+running-command cancellation, and race-enabled ACP → native `claude --resume`
+→ ACP load with both earlier turns retained under one conversation id. The
+native transcript can contain multiple entries with one API message id.
 
 ## Known Deviations
 

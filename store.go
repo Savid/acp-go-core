@@ -15,6 +15,9 @@ import (
 // SessionStoreMainSubpath addresses a session's main record.
 const SessionStoreMainSubpath = ""
 
+// SessionStoreTimeout bounds one store call a sibling makes on a host's behalf.
+const SessionStoreTimeout = 10 * time.Second
+
 // ErrSessionIDRequired reports a write addressed to an empty session id.
 var ErrSessionIDRequired = errors.New("session id is required")
 

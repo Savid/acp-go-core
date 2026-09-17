@@ -73,15 +73,19 @@ listed under [Banned SDK Routes](#banned-sdk-routes).
 
 ## Extension Constants
 
-Every sibling exports:
+Extension methods and enum values carry the `_` prefix; `_meta` keys do not.
+Every sibling exports `RawEventMethod`; a sibling that implements the
+[account-usage read](#account-usage) also exports `AccountUsageMethod`:
 
 ```go
 const RawEventMethod = "_<vendor>/rawEvent"
+const AccountUsageMethod = "_<vendor>/accountUsage"
 ```
 
 | Method | Direction | Params |
 |---|---|---|
 | `_<vendor>/rawEvent` | Agent notification to client | `{ "sessionId": string, "sequence": number, "source": string, "event": object }` |
+| `_<vendor>/accountUsage` | Client request to agent | `{ "sessionId"?: string, "_meta"?: object }` |
 
 Raw events are off by default, enabled per session through
 `_meta.<vendor>.rawEvent.enabled`, size-capped to 64 KiB per notification, and
@@ -97,6 +101,86 @@ non-authoritative.
   number.
 - **An emit failure never fails the turn.**
 - **Live turn only.** No replay of raw events on `session/load`.
+
+## Account Usage
+
+`_<vendor>/accountUsage` reads the allowance windows the harness reports for
+the account it is authenticated as. It spends no model tokens and reads only
+through the harness's own protocol; a sibling never contacts a provider API
+itself. A sibling advertises it under
+[`_meta.<vendor>.accountUsage`](#capability-_metavendor) with its `scope`; a
+sibling without the advertisement answers the method with method-not-found.
+The [registry](registry.md#account-usage) records each sibling's scope and
+native source.
+
+The request members are `sessionId` and `_meta`. Any other member, and any
+repeated member, is refused with `{"error":"unsupported","field":"<member>"}`;
+absent or `null` params are the empty object, and any other params that are
+not one object are refused naming `params`; and
+`wire.DecodeAccountUsageRequest` is the only decoder. `_meta` carries the
+host's trace keys, which the sibling propagates exactly as on every other
+request; the read reads no `_meta.<vendor>` value and ignores that namespace.
+A `session`-scoped sibling requires `sessionId`, answering
+`{"error":"missing","field":"sessionId"}` when it is absent, and reads
+through that session's live native process, launching one when the session
+has none. The read holds the session's foreground gate, so one that arrives
+while a prompt, config change, restore, or another read holds it is refused
+with the `session_prompt` backpressure token. An `agent`-scoped sibling reads
+through its shared runtime, starting one when none is live exactly as session
+establishment would, and validates `sessionId` when present. An unknown,
+unloaded, or tombstoned id answers the uniform unknown-session refusal.
+
+```json
+{
+  "available": true,
+  "observedAt": "2026-09-17T02:41:03Z",
+  "plan": "pro",
+  "usageAllowed": true,
+  "limits": [
+    {"id": "session", "windowSeconds": 18000, "usedPercent": 4, "resetsAt": "2026-09-17T03:30:00Z"},
+    {"id": "weekly", "label": "Weekly", "usedPercent": 22, "resetsAt": "2026-09-19T08:00:00Z"}
+  ]
+}
+```
+
+```json
+{"available": false, "reason": "not_authenticated"}
+```
+
+- `observedAt` and every `resetsAt` are RFC 3339 UTC instants with whole
+  seconds and the `Z` suffix, as `wire.AccountUsageTime` renders them; it
+  renders an instant outside years 0001 through 9999 as the empty string, and
+  the member is then omitted. `windowSeconds` and `resetsAt` appear only when
+  the harness reports them; `label` only when the harness names the window.
+- `plan` is the harness's own plan or subscription name, present only when the
+  harness reports one. The [registry](registry.md#account-usage) records its
+  native source.
+- `usageAllowed` is the harness's own statement of whether the account's
+  plan-included usage is permitted right now, present only when the harness
+  makes one. A sibling MUST NOT derive it from `usedPercent` or `resetsAt`.
+  The [registry](registry.md#account-usage) records which siblings report it.
+- `usedPercent` is the harness's own figure, finite and non-negative; it MAY
+  exceed 100.
+- `id` is unique within one response and stable across reads of one account.
+  `limits` is non-empty whenever `available` is true.
+- `reason` is `not_authenticated` when the harness reports no authenticated
+  account and `not_reported` when it reports no allowance window for its
+  credential; a harness whose read does not distinguish the two answers
+  `not_reported`. An unavailable response carries no other member.
+- The native read is bounded by `wire.AccountUsageReadTimeout`. A read that
+  exceeds it, or fails for any other cause, is the `account_usage` class of
+  [`<vendor>_internal_failure`](00-overview.md#uniform-error-shapes); a
+  response is never assembled from a partial read. A native version without
+  the read answers the same class; the registry's verification record names
+  the version each read was verified on.
+  `wire.AccountUsageResponse.Validate` gates every available response a
+  sibling assembles.
+- The usage figures are a snapshot: never cached, replayed, or delivered as a
+  session update, and unrelated to [usage updates](05-behavior.md#usage-updates).
+  A session-scoped read that launches a process publishes that incarnation's
+  opening updates, as every launch does.
+- The response represents utilization windows only. It MUST NOT carry money,
+  credit, balance, or spend-control figures, whatever the harness reports.
 
 ## Banned SDK Routes
 
@@ -280,7 +364,7 @@ accept only this owned namespace:
 | Namespace | Unknown key behavior |
 |---|---|
 | `_meta.<vendor>.options` | Invalid params with the offending field path. |
-| `_meta.<vendor>` outside `options` and `rawEvent` | Invalid params. |
+| `_meta.<vendor>` outside `options` and `rawEvent` on a session lifecycle request | Invalid params. |
 | Foreign `_meta.*` namespaces | Ignored. The owned namespace is exactly `<vendor>`; anything else, including the module path, is foreign. |
 | `acp-go.dev/*` literals | Never foreign. Each carries its own rule, and one on a surface where this contract requires it to be read is never ignored. `acp-go.dev/lifecycle` on a session lifecycle request is invalid params naming `_meta["acp-go.dev/lifecycle"]`. |
 | Reserved trace keys | Pass through only for propagation. |
@@ -670,6 +754,7 @@ govern persistence and replacement.
       "<vendor>": {
         "elicitation": {"unstable": true, "scope": "session", "tracks": "ACP v1 elicitation"},
         "rawEvent": {"method": "_<vendor>/rawEvent", "enabledBy": "_meta.<vendor>.rawEvent.enabled", "maxBytes": 65536, "defaultEnabled": false},
+        "accountUsage": {"method": "_<vendor>/accountUsage", "scope": "session"},
         "sessionStore": {"format": "<SessionStoreFormat>", "key": ["sessionId", "subpath"]}
       }
     }
@@ -680,6 +765,9 @@ govern persistence and replacement.
 `elicitation` advertises adapter support only, not that the client opted in.
 `unstable` labels this private discovery object; ACP v1 `elicitation/create`
 itself is stable.
+
+`accountUsage` appears only on a sibling that implements the
+[read](#account-usage); `scope` is `session` or `agent`.
 
 Advertise structured output under `_meta.<vendor>.structuredOutput` only when
 the harness has proven support:

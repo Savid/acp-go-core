@@ -87,8 +87,8 @@ Every sibling selects exactly one strategy and records it in the
   started when the session is established, is relaunched lazily against the
   same native state when it has exited, and is stopped by `session/close`.
 - **multiplexed runtime** — one Agent-owned native process serves many
-  logical ACP sessions, is started by the first session-establishing request,
-  and is replaced by the next explicit operation after it exits.
+  logical ACP sessions, is started by the first operation that needs it, and
+  is replaced by the next explicit operation after it exits.
 - **prompt runtime** — one native process serves one prompt: it attaches to
   the remote conversation, submits the prompt, and is reaped before terminal
   publication. Restore and observation attach without input. Nothing runs
@@ -179,9 +179,9 @@ acp.NewInvalidRequest(map[string]any{"error": "agent closed"})
 The agent accepts no further request on that connection; the token is closed
 and carries no other member.
 
-A native turn that fails — the harness dies mid-turn, the transport breaks, the
-provider rejects the turn, or the turn deadline expires — terminates
-`session/prompt` with `-32603` and no stop reason:
+A native turn that fails — the harness dies mid-turn, the transport breaks, or
+the provider rejects the turn — terminates `session/prompt` with `-32603` and
+no stop reason:
 
 ```json
 {
@@ -197,10 +197,10 @@ provider rejects the turn, or the turn deadline expires — terminates
 }
 ```
 
-`cause` is one of `process_exit`, `transport`, `provider`, `timeout`, or a
-vendor cause the [registry](registry.md#turn-failure-and-turn-timeout)
-enumerates. `message` carries the real native cause and is never a placeholder
-or a bare `EOF`; it is valid UTF-8 of at most 2048 bytes, bounded by
+`cause` is one of `process_exit`, `transport`, `provider`, or a vendor cause
+the [registry](registry.md#turn-failure) enumerates. `message` carries the
+real native cause and is never a placeholder or a bare `EOF`; it is valid
+UTF-8 of at most 2048 bytes, bounded by
 `wire.TurnFailed`. `statusCode` and `providerCode` appear only when the harness
 supplies them. Semantics are in [05-behavior.md](05-behavior.md#native-turn-failure).
 
@@ -213,7 +213,7 @@ the constant `message`:
 | `<vendor>_restore_failed` | A stored session could not be restored: on `session/load`, `session/resume`, or a lazy relaunch that re-hydrates native state before a prompt or config-option change. The entry is neither deleted nor tombstoned. | none |
 | `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([06-lifecycle.md](06-lifecycle.md#shared-runtime-loss)). | none |
 | `<vendor>_session_poisoned` | The addressed session is poisoned ([04-sessions-and-store.md](04-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
-| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`, a closed token the sibling documents |
+| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a native [account-usage](03-wire-contract.md#account-usage) read that fails carries `class: "account_usage"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`, a closed token the sibling documents |
 
 The data MUST NOT carry a bare unprefixed token, joined Go error text, native
 text, or a `message` member. [registry.md](registry.md#known-deviations)

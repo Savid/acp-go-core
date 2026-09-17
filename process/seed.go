@@ -16,9 +16,6 @@ const (
 	// seedManifestFileName lists the relative paths the adapter manages inside
 	// a seed root so seed writes never clobber an operator-authored file.
 	seedManifestFileName = ".seed-manifest.json"
-	// seedBackupSuffix names the sidecar copy kept when a managed seed file's
-	// contents change.
-	seedBackupSuffix = ".seed.bak"
 )
 
 // SeedFileError reports an invalid or unwritable seed file; the root package
@@ -71,10 +68,10 @@ func (s *SeedFileFlag) Set(value string) error {
 }
 
 // WriteSeedFiles writes each file into dir under an ownership manifest so the
-// adapter never overwrites a file it did not create: a first write records the
-// relative path in the manifest, a later write of a managed file keeps a
-// backup of the prior bytes when they change, and a pre-existing unmanaged
-// target fails closed before anything is written.
+// adapter never overwrites a file it did not create: a pre-existing unmanaged
+// target fails closed before anything is written, and every new path is
+// recorded in the manifest before its file exists, so an interrupted write
+// leaves only managed files behind.
 func WriteSeedFiles(dir string, files map[string]string) error {
 	if len(files) == 0 {
 		return nil
@@ -128,6 +125,19 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	added := false
 
 	for _, item := range targets {
+		if _, managed := manifest[filepath.ToSlash(item.name)]; !managed {
+			manifest[filepath.ToSlash(item.name)] = struct{}{}
+			added = true
+		}
+	}
+
+	if added {
+		if err := writeSeedManifest(dir, manifest); err != nil {
+			return err
+		}
+	}
+
+	for _, item := range targets {
 		contents := []byte(files[item.name])
 
 		if item.exists {
@@ -139,10 +149,6 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 			if bytes.Equal(current, contents) {
 				continue
 			}
-
-			if backupErr := os.WriteFile(item.path+seedBackupSuffix, current, 0o600); backupErr != nil { //nolint:gosec // validSeedFilePath confines the name to dir.
-				return fmt.Errorf("back up managed seed file: %w", backupErr)
-			}
 		}
 
 		if err := os.MkdirAll(filepath.Dir(item.path), 0o700); err != nil {
@@ -152,15 +158,6 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 		if err := os.WriteFile(item.path, contents, 0o600); err != nil {
 			return fmt.Errorf("write seed file: %w", err)
 		}
-
-		if _, managed := manifest[filepath.ToSlash(item.name)]; !managed {
-			manifest[filepath.ToSlash(item.name)] = struct{}{}
-			added = true
-		}
-	}
-
-	if added {
-		return writeSeedManifest(dir, manifest)
 	}
 
 	return nil
@@ -215,8 +212,7 @@ func validSeedFilePath(name string) bool {
 		filepath.IsAbs(name) ||
 		strings.HasPrefix(name, "/") ||
 		strings.Contains(name, "\x00") ||
-		cleanName == seedManifestFileName ||
-		strings.HasSuffix(cleanName, seedBackupSuffix) {
+		cleanName == seedManifestFileName {
 		return false
 	}
 

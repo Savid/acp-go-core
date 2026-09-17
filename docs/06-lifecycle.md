@@ -37,7 +37,8 @@ A multiplexed sibling treats the loss of its shared runtime as an epoch fence:
 - The dead epoch is fenced, every thread bound to it is unbound, and every
   in-flight turn fails exactly once.
 - **The next explicit operation starts one replacement.** `session/new`,
-  `session/load`, `session/resume`, and a prompt on an unbound session each
+  `session/load`, `session/resume`, a prompt on an unbound session, and an
+  agent-scoped [account-usage read](03-wire-contract.md#account-usage) each
   admit a fresh runtime generation and rebind through it. A sibling never
   requires an adapter restart to recover from a runtime that exited, and never
   starts a replacement speculatively.
@@ -59,8 +60,8 @@ Session `env` and ordered `extraPathDirs` are per-session configuration.
   values the request supplies; live native state is never mutated in place.
 - **Recovery reconstructs them** from the session record before launching the
   native process.
-- Executable resolution and version probing use the base environment before
-  session path directories apply.
+- Executable resolution uses the base environment before session path
+  directories apply.
 
 ## Shutdown Ladder
 
@@ -146,7 +147,7 @@ incarnation ends the stream.
 | Limit | Value | Backpressure error |
 |---|---:|---|
 | Active sessions per agent | 32 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"active_sessions"})` |
-| Concurrent prompts per session | 1 (fixed) | `acp.NewInvalidRequest({"error":"backpressure","limit":"session_prompt"})` |
+| Concurrent foreground operations per session: prompts, config changes, and session-scoped account-usage reads | 1 (fixed) | `acp.NewInvalidRequest({"error":"backpressure","limit":"session_prompt"})` |
 | Concurrent server-to-client calls per agent | 16 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"client_calls"})` |
 
 A conflicting load or resume uses the `session_restore` limit token.
@@ -155,11 +156,10 @@ turns on independent sessions. `WithConcurrencyLimits` may change the two config
 zero means default; negative fails construction. `wire.Backpressure` builds
 the error.
 
-## Startup Version and Capability Gating
+## Startup Capability Gating
 
 - Resolve the executable from the base environment before session path
   directories apply.
-- Probe the binary version before launching sessions.
 - Fail fast with an actionable error if required methods, events, or
   permission surfaces are missing. Never silently downgrade: if a dependent
   surface is unavailable, do not advertise the capability and fail its use
