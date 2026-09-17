@@ -13,10 +13,9 @@ pass() { printf 'PASS %s\n' "$*"; }
 
 pin() { rg -o --no-line-number "^\| $1 \| \`([^\`]+)\`" -r '$1' "$repo_root/README.md" | head -1; }
 sdk_pin=$(pin 'ACP SDK'); go_pin=$(pin 'Go directive'); core_pin=$(pin 'Core module')
-core_released=1; rg -q '^\| Core module \|.*unreleased' "$repo_root/README.md" && core_released=0
-[[ -n "$sdk_pin" && -n "$go_pin" ]] || { fail "README shared pins are missing"; exit 1; }
+[[ -n "$sdk_pin" && -n "$go_pin" && "$core_pin" == *@v* ]] || { fail "README shared pins are missing"; exit 1; }
 sdk_module=${sdk_pin%@*}; sdk_version=${sdk_pin#*@}; go_version=${go_pin#go }
-core_module=${core_pin%% *}
+core_module=${core_pin%@*}; core_version=${core_pin#*@}
 
 siblings=()
 while IFS= read -r vendor; do
@@ -53,10 +52,8 @@ check_sibling() {
   rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from README pin"
   rg -q '^toolchain ' "$repo/go.mod" && fail "$name: toolchain line present"
   rg -q "^\s*$sdk_module $sdk_version\$" "$repo/go.mod" || fail "$name: ACP SDK pin differs from README"
-  rg -q "^\s*$core_module " "$repo/go.mod" || fail "$name: core module dependency missing"
-  if (( core_released == 0 )); then
-    rg -q "^replace $core_module => \.\./acp-go-core\$" "$repo/go.mod" || fail "$name: unreleased core module is not resolved through replace => ../acp-go-core"
-  fi
+  rg -q "^\s*$core_module $core_version\$" "$repo/go.mod" || fail "$name: core module pin differs from README"
+  rg -q "^[[:space:]]*(replace[[:space:]]+)?$core_module([[:space:]]+[^[:space:]]+)?[[:space:]]+=>" "$repo/go.mod" && fail "$name: core module has a replace directive"
   rg -q "^package ${vendor}acp\$" "$repo/agent.go" || fail "$name: root package is not ${vendor}acp"
   rg -q "SessionStoreFormat = \"$vendor-[a-z-]+-v1\"" "$repo"/*.go || fail "$name: SessionStoreFormat is not <vendor>-<kind>-v1"
   rg -q "RawEventMethod = \"_$vendor/rawEvent\"" "$repo"/*.go || fail "$name: RawEventMethod is not canonical"

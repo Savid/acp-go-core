@@ -44,12 +44,11 @@ Every sibling moves together on these pins. Values live only in this table.
 | Pin | Value |
 |---|---|
 | ACP SDK | `github.com/coder/acp-go-sdk@v0.13.5` |
-| Core module | `github.com/savid/acp-go-core` (unreleased; pinned here at first tag) |
+| Core module | `github.com/savid/acp-go-core@v0.0.0-20260917043259-b53a3dd7b50e` |
 | Go directive | `go 1.26.6` |
 
-While the core module is unreleased, every sibling resolves it through
-`replace github.com/savid/acp-go-core => ../acp-go-core` and the sibling CI
-workflow cannot resolve it until the first tag.
+Every sibling MUST require the core version in this table without a `replace`
+directive for that module. Local development may use an untracked Go workspace.
 
 A pin change covers every sibling and reruns each conformance suite. Shared
 direct dependencies such as OpenTelemetry and testify also move together;
