@@ -150,7 +150,7 @@ prompt process and removes image payloads.
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
 | hermes | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. Native `session.provider_access` resolves credentials, account IDs, routes, and headers in the addressed session’s profile. Unverified routes and authentication overrides are refused. The binding is revalidated after each shared provider read. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
-| opencode | `session` | `providers`: `opencode-go`, `openrouter`, `anthropic`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective credentials and routes. Authentication plugins for the requested provider and unverified overrides are refused. Anthropic uses the native SDK’s official default endpoint when no endpoint is set. Its OAuth/setup tokens expose Claude windows and reported spending; ordinary API keys answer `not_reported`. ChatGPT’s authentication plugin does not expose its effective credential through this catalog and is not advertised. | absent | absent account-wide; Go reports each window’s status |
+| opencode | `session` | `providers`: `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider and unverified overrides are refused. The catalog does not establish effective subscription authentication; Claude and ChatGPT usage are not advertised. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
 Provider response mappings were checked on 2026-09-18 against the
@@ -169,9 +169,11 @@ native percentage and explicit currency/exponent units.
 Verified on 2026-09-18 with Pi 0.85.1 and Hermes 0.21.3 plus the
 `session.provider_access` gateway addition: real reads returned ChatGPT and
 Claude windows and OpenCode Go percentages; Pi also returned OpenRouter dollar
-balances. OpenCode 1.18.31’s Anthropic route reached the usage endpoint, which
-returned HTTP 429. Scripted HTTP tests cover its response mapping. The Hermes
-gateway addition is required and is not in the unpatched native release.
+balances. The Hermes gateway addition is required and is not in the unpatched
+native release. OpenCode 1.18.31, checked on 2026-09-19: subscription auth is not
+established by an API-key catalog entry. Its [Anthropic provider documentation](https://opencode.ai/docs/providers/#anthropic)
+describes subscription authentication through plugins, whose effective credentials
+are not exposed by the native catalog.
 
 ## Delegated Agents
 
