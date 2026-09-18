@@ -36,7 +36,7 @@ defines storage and wire publication.
 | Sibling | Kind | Carrier record |
 |---|---|---|
 | claude | Native transcript rows plus a `config` subpath | The current record holds cwd, transcript location, accepted environment and paths, model, permission mode, effort, system prompt, bare mode, output schema, and output style. Empty conversations commit configuration with an empty main record. |
-| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, output schema, and admitted image bytes keyed by native tool identity. Empty conversations commit configuration with an empty main record; restore then resumes the recorded rollout path without a native header. |
+| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout path, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, output schema, and admitted image bytes keyed by native tool identity. Empty conversations commit configuration with an empty main record. If native resume reports no rollout and neither the store nor the recorded native file has rows, restore creates a new native thread and commits its binding under the unchanged ACP session id. |
 | pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. Empty conversations commit configuration with an empty main record; restore then resumes the recorded session file without a native header. |
 | hermes | Native per-conversation JSON export plus a `config` subpath | The configuration holds cwd, additional directories, environment, ordered paths, model, and effort. An empty conversation receives a native row before establishment succeeds. Missing state imports before binding a native session. Existing shorter or divergent history fails restore. |
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
@@ -368,7 +368,9 @@ race-enabled ACP → native `codex exec resume` → ACP continuation; live promp
 load/resume, and PATH rotation. The installed package's verified prefix is
 recorded under [session options](#vendor-session-options). Verified
 2026-09-17 without tokens: the account-usage read through the built binary on
-an authenticated home.
+an authenticated home. Verified 2026-09-18 without tokens: an empty session
+resumes after adapter restart in the same or a fresh native home, retaining
+its ACP id while committing a replacement native binding.
 
 Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
 load/resume, strict native PATH prefix, PATH rotation, and ACP → native
