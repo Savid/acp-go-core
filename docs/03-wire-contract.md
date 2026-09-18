@@ -85,7 +85,7 @@ const AccountUsageMethod = "_<vendor>/accountUsage"
 | Method | Direction | Params |
 |---|---|---|
 | `_<vendor>/rawEvent` | Agent notification to client | `{ "sessionId": string, "sequence": number, "source": string, "event": object }` |
-| `_<vendor>/accountUsage` | Client request to agent | `{ "sessionId"?: string, "_meta"?: object }` |
+| `_<vendor>/accountUsage` | Client request to agent | `{ "sessionId"?: string, "providerId"?: string, "_meta"?: object }` |
 
 Raw events are off by default, enabled per session through
 `_meta.<vendor>.rawEvent.enabled`, size-capped to 64 KiB per notification, and
@@ -104,16 +104,29 @@ non-authoritative.
 
 ## Account Usage
 
-`_<vendor>/accountUsage` reads the allowance windows the harness reports for
-the account it is authenticated as. Except for the [Claude setup-token
-probes](#claude-setup-token-probes), it MUST spend no model tokens and MUST
-read only through the harness protocol. A sibling advertises it under
-[`_meta.<vendor>.accountUsage`](#capability-_metavendor) with its `scope`; a
-sibling without the advertisement answers the method with method-not-found.
-The [registry](registry.md#account-usage) records each sibling's scope and
-native source.
+`_<vendor>/accountUsage` reads the authenticated account's allowance windows,
+monetary balances, and request limits. Except for the [Claude setup-token
+probes](#claude-setup-token-probes), it MUST spend no model tokens. A sibling
+advertises it under [`_meta.<vendor>.accountUsage`](#capability-_metavendor)
+with its `scope` and, when it supports provider selection, a nonempty
+`providers` array. A sibling without the advertisement answers the method
+with method-not-found. The [registry](registry.md#account-usage) records each
+sibling's scope and source.
 
-The request members are `sessionId` and `_meta`. Any other member, and any
+Reads use the native harness protocol or a shared `usage/` provider reader.
+A sibling using a provider reader MUST resolve the credential from its native
+runtime's effective configuration for the addressed session, verify the
+provider's official endpoint and authentication route, and reject a route it
+cannot establish. It MUST revalidate that binding after the read and discard
+the observation if the binding changed. Shared readers MUST NOT discover
+credentials, select identities, follow redirects, retry, or return credential
+material or response bodies in errors. Each HTTP request is bounded to ten
+seconds and 64 KiB; an optional account-balance read is bounded to five seconds.
+An unavailable optional balance MUST NOT erase a successful key observation.
+
+The request members are `sessionId`, `providerId`, and `_meta`.
+A sibling advertising `providers` requires a nonempty `providerId` from that
+list; other siblings refuse `providerId` as unsupported. Any other member, and any
 repeated member, is refused with `{"error":"unsupported","field":"<member>"}`;
 absent or `null` params are the empty object, and any other params that are
 not one object are refused naming `params`; and
@@ -146,7 +159,7 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 {"available": false, "reason": "not_authenticated"}
 ```
 
-- Every limit MUST carry `observedAt` and `staleAt`. `observedAt` is when its
+- Every measurement MUST carry `observedAt` and `staleAt`. `observedAt` is when its
   measurement was received; `staleAt` is its freshness expiry or invalidation
   time. Serving cached data MUST NOT renew either timestamp. Uncached reads
   expire after one minute. A consumer MUST also expire a window at `resetsAt`
@@ -166,9 +179,10 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 - `usedPercent` is the harness's own figure, finite and non-negative; it MAY
   exceed 100.
 - `id` is unique within one response and stable across reads of one account.
-  `limits` is non-empty whenever `available` is true.
+  At least one of `limits`, `balances`, or `requestLimits` is nonempty when
+  `available` is true.
 - `reason` is `not_authenticated` when the harness reports no authenticated
-  account and `not_reported` when it reports no allowance window for its
+  account and `not_reported` when it reports no account measurement for its
   credential; a harness whose read does not distinguish the two answers
   `not_reported`. An unavailable response carries no other member.
 - The native read is bounded by `wire.AccountUsageReadTimeout`. A read that
@@ -185,8 +199,24 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
   unrelated to [usage updates](05-behavior.md#usage-updates).
   A session-scoped read that launches a process publishes that incarnation's
   opening updates, as every launch does.
-- The response represents utilization windows only. It MUST NOT carry money,
-  credit, balance, or spend-control figures, whatever the harness reports.
+- `balances` contains monetary observations. Each amount is `{amount, currency}`
+  in major currency units; numbers MUST be finite and currencies uppercase
+  three-letter codes. `used` and `limit` MUST be nonnegative; `remaining` MAY
+  be negative. Each entry MUST carry `used` or `remaining`, and all its amounts
+  MUST use one currency. `uncapped: true` explicitly identifies usage without
+  a spending cap and MUST NOT accompany `limit`, `remaining`, or reset fields.
+  A wallet balance has neither `limit` nor `uncapped`. Purchased credits MUST
+  NOT be represented as a spending cap. Lifetime spending MUST NOT be
+  represented as usage within a resetting cap's period.
+- `requestLimits` contains nonnegative integer `used`, `limit`, and `remaining`
+  counts for the named request class. A class-specific limit MUST NOT imply
+  account-wide `usageAllowed`.
+- Monetary and request entries carry `id`, optional `label`, observation times,
+  and optional `resetsAt` and `resetInterval` (`daily`, `weekly`, or `monthly`).
+  A reset interval MUST NOT be converted to an invented reset timestamp.
+- A percentage window MAY carry its own `usageAllowed` when the source reports
+  that window's status. Money MUST NOT be inferred from quota percentages or
+  subscription prices.
 
 ### Claude Setup-Token Probes
 

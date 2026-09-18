@@ -56,21 +56,28 @@ const (
 
 // AccountUsageAdvertisement is the _meta.<vendor>.accountUsage value a sibling
 // that implements the read advertises at initialize.
-func AccountUsageAdvertisement(method string, scope AccountUsageScope) map[string]any {
-	return map[string]any{accountUsageFieldMethod: method, accountUsageFieldScope: string(scope)}
+func AccountUsageAdvertisement(method string, scope AccountUsageScope, providers ...string) map[string]any {
+	advertisement := map[string]any{accountUsageFieldMethod: method, accountUsageFieldScope: string(scope)}
+	if len(providers) != 0 {
+		advertisement["providers"] = slices.Clone(providers)
+	}
+
+	return advertisement
 }
 
 // AccountUsageRequest is one decoded _<vendor>/accountUsage request.
 type AccountUsageRequest struct {
 	// SessionID is empty only on an agent-scoped read that named no session.
 	SessionID acp.SessionId
+	// ProviderID selects a provider advertised by a provider-aware reader.
+	ProviderID string
 	// Meta is the request's _meta as sent; the sibling opens its span with it
 	// so the host's trace keys propagate as on every request.
 	Meta map[string]any
 }
 
 // DecodeAccountUsageRequest reads the params of one account-usage request. The
-// only members are sessionId and _meta; anything else, and any repeated
+// only members are sessionId, providerId, and _meta; anything else, and any repeated
 // member, is refused naming the member. Only the agent scope accepts a request
 // without sessionId; every other scope value, including an unset one, requires
 // it. _meta is decoded first, so every refusal after it returns the decoded
@@ -95,8 +102,14 @@ func DecodeAccountUsageRequest(params json.RawMessage, scope AccountUsageScope) 
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(members)) {
-		if name != fieldSessionID && name != accountUsageFieldMeta {
+		if name != fieldSessionID && name != "providerId" && name != accountUsageFieldMeta {
 			return request, Unsupported(name)
+		}
+	}
+
+	if raw, present := members["providerId"]; present {
+		if json.Unmarshal(raw, &request.ProviderID) != nil || request.ProviderID == "" || request.ProviderID != strings.TrimSpace(request.ProviderID) {
+			return request, Unsupported("providerId")
 		}
 	}
 
@@ -183,6 +196,8 @@ type AccountUsageLimit struct {
 	WindowSeconds int64 `json:"windowSeconds,omitempty"`
 	// UsedPercent is the harness's own utilization figure and may exceed 100.
 	UsedPercent float64 `json:"usedPercent"`
+	// UsageAllowed is the provider's explicit status for this window, when reported.
+	UsageAllowed *bool `json:"usageAllowed,omitempty"`
 	// ResetsAt is an RFC 3339 UTC instant with whole seconds, when known.
 	ResetsAt string `json:"resetsAt,omitempty"`
 }
@@ -198,8 +213,12 @@ type AccountUsageResponse struct {
 	// run ordinary inference now; nil when it makes none. It is never derived
 	// from the windows.
 	UsageAllowed *bool `json:"usageAllowed,omitempty"`
-	// Limits is non-empty when Available is true and absent otherwise.
+	// Limits contains observed percentage windows.
 	Limits []AccountUsageLimit `json:"limits,omitempty"`
+	// Balances distinguish spending caps from account credit balances.
+	Balances []AccountUsageBalance `json:"balances,omitempty"`
+	// RequestLimits are provider-reported request counters and ceilings.
+	RequestLimits []AccountUsageRequestLimit `json:"requestLimits,omitempty"`
 }
 
 // AccountUsageUnavailable answers a read that completed with nothing to report.
@@ -233,8 +252,8 @@ func (r AccountUsageResponse) Validate() error {
 		return errors.New("plan carries surrounding whitespace")
 	}
 
-	if len(r.Limits) == 0 {
-		return errors.New("an available response carries at least one limit")
+	if len(r.Limits)+len(r.Balances)+len(r.RequestLimits) == 0 {
+		return errors.New("an available response carries at least one measurement")
 	}
 
 	seen := make(map[string]struct{}, len(r.Limits))
@@ -251,6 +270,31 @@ func (r AccountUsageResponse) Validate() error {
 		seen[limit.ID] = struct{}{}
 	}
 
+	for index := range r.Balances {
+		balance := &r.Balances[index]
+		if err := balance.validate(); err != nil {
+			return fmt.Errorf("balances[%d]: %w", index, err)
+		}
+
+		if _, duplicate := seen[balance.ID]; duplicate {
+			return fmt.Errorf("balances[%d]: id %q repeats", index, balance.ID)
+		}
+
+		seen[balance.ID] = struct{}{}
+	}
+
+	for index, limit := range r.RequestLimits {
+		if err := limit.validate(); err != nil {
+			return fmt.Errorf("requestLimits[%d]: %w", index, err)
+		}
+
+		if _, duplicate := seen[limit.ID]; duplicate {
+			return fmt.Errorf("requestLimits[%d]: id %q repeats", index, limit.ID)
+		}
+
+		seen[limit.ID] = struct{}{}
+	}
+
 	return nil
 }
 
@@ -261,7 +305,7 @@ func (r AccountUsageResponse) validateUnavailable() error {
 		return fmt.Errorf("reason %q is not a contract token", r.Reason)
 	}
 
-	if r.Plan != "" || r.UsageAllowed != nil || len(r.Limits) != 0 {
+	if r.Plan != "" || r.UsageAllowed != nil || len(r.Limits)+len(r.Balances)+len(r.RequestLimits) != 0 {
 		return errors.New("an unavailable response carries only its reason")
 	}
 

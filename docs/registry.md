@@ -150,8 +150,16 @@ prompt process and removes image payloads.
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `none` | | | |
 | hermes | `none` | | | |
-| opencode | `none` | | | |
+| opencode | `session` | `providers`: `opencode-go`, `openrouter`. Effective credentials and routes come from directory-scoped `GET /config` and `GET /config/providers`; custom plugins and authentication overrides are refused. Shared core readers call OpenCode Go `/zen/go/v1/usage` and OpenRouter `/api/v1/key`, with an optional same-credential `/api/v1/credits` read. Go supplies rolling, weekly, and monthly percentages; OpenRouter supplies USD spending caps, lifetime usage, optional account credits, and free-model request counts. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
+
+Provider response mappings were checked on 2026-09-18 against the
+[OpenCode Go endpoint source](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts),
+[OpenRouter key API](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key),
+and [credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits).
+OpenCode Go reports no money. OpenRouter documents the credits endpoint as
+requiring a management key; denial omits the balance while retaining key data.
+These mappings are verified with scripted HTTP fixtures, not live credentials.
 
 ## Delegated Agents
 

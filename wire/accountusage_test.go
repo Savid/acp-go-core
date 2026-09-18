@@ -35,7 +35,7 @@ func TestDecodeAccountUsageRequest(t *testing.T) {
 		{name: "empty session id", params: `{"sessionId":""}`, scope: AccountUsageScopeAgent, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "sessionId"}},
 		{name: "null session id", params: `{"sessionId":null}`, scope: AccountUsageScopeAgent, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "sessionId"}},
 		{name: "numeric session id", params: `{"sessionId":7}`, scope: AccountUsageScopeSession, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "sessionId"}},
-		{name: "unknown member", params: `{"sessionId":"s","providerId":"x"}`, scope: AccountUsageScopeSession, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "providerId"}},
+		{name: "unknown member", params: `{"sessionId":"s","accountId":"x"}`, scope: AccountUsageScopeSession, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "accountId"}},
 		{name: "first unknown member by name", params: `{"zeta":1,"alpha":2}`, scope: AccountUsageScopeAgent, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "alpha"}},
 		{name: "array params", params: `[]`, scope: AccountUsageScopeAgent, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "params"}},
 		{name: "trailing input", params: `{} {}`, scope: AccountUsageScopeAgent, code: -32602, data: map[string]any{FieldError: VerdictUnsupported, FieldField: "params"}},
@@ -153,4 +153,46 @@ func TestAccountUsageResponseWire(t *testing.T) {
 
 	require.Equal(t, map[string]any{"method": "_x/accountUsage", "scope": "session"}, AccountUsageAdvertisement("_x/accountUsage", AccountUsageScopeSession))
 	require.Equal(t, map[string]any{"method": "_x/accountUsage", "scope": "agent"}, AccountUsageAdvertisement("_x/accountUsage", AccountUsageScopeAgent))
+}
+
+func TestAccountUsageAmounts(t *testing.T) {
+	t.Parallel()
+	balance := AccountUsageBalance{ID: "key", ObservedAt: "2026-09-18T00:00:00Z", StaleAt: "2026-09-18T00:01:00Z", Remaining: &AccountUsageMoney{Amount: -0.001, Currency: "USD"}}
+	response := AccountUsageResponse{Available: true, Balances: []AccountUsageBalance{balance}}
+	require.NoError(t, response.Validate())
+	for name, change := range map[string]func(*AccountUsageBalance){
+		"mixed currency":          func(b *AccountUsageBalance) { b.Limit = &AccountUsageMoney{Amount: 2, Currency: "EUR"} },
+		"invalid currency":        func(b *AccountUsageBalance) { b.Remaining = &AccountUsageMoney{Amount: 0, Currency: "usd"} },
+		"nonfinite amount":        func(b *AccountUsageBalance) { b.Used = &AccountUsageMoney{Amount: math.NaN(), Currency: "USD"} },
+		"uncapped with remaining": func(b *AccountUsageBalance) { b.Uncapped = true },
+		"missing observation":     func(b *AccountUsageBalance) { b.ObservedAt = "" },
+		"unknown interval":        func(b *AccountUsageBalance) { b.ResetInterval = "hourly" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := balance
+			change(&b)
+			require.Error(t, (AccountUsageResponse{Available: true, Balances: []AccountUsageBalance{b}}).Validate())
+		})
+	}
+	response.RequestLimits = []AccountUsageRequestLimit{{ID: "key", ObservedAt: balance.ObservedAt, StaleAt: balance.StaleAt, Used: 1, Limit: 2, Remaining: 1}}
+	require.Error(t, response.Validate(), "IDs are unique across measurement types")
+	response.RequestLimits[0].ID = "requests"
+	require.NoError(t, response.Validate())
+	response.RequestLimits[0].Used = -1
+	require.Error(t, response.Validate())
+}
+
+func TestAccountUsageProviderSelection(t *testing.T) {
+	t.Parallel()
+	request, refusal := DecodeAccountUsageRequest(json.RawMessage(`{"sessionId":"s","providerId":"openrouter"}`), AccountUsageScopeSession)
+	require.Nil(t, refusal)
+	require.Equal(t, "openrouter", request.ProviderID)
+	for _, raw := range []string{`null`, `""`, `" openrouter"`, `5`} {
+		_, refusal = DecodeAccountUsageRequest(json.RawMessage(`{"sessionId":"s","providerId":`+raw+`}`), AccountUsageScopeSession)
+		require.NotNil(t, refusal)
+		require.Equal(t, map[string]any{FieldError: VerdictUnsupported, FieldField: "providerId"}, refusal.Data)
+	}
+	advertisement := AccountUsageAdvertisement("_test/accountUsage", AccountUsageScopeSession, "openrouter")
+	require.Equal(t, []string{"openrouter"}, advertisement["providers"])
 }

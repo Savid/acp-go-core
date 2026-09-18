@@ -6,7 +6,8 @@ contract repository.
 ## Purpose and Sources
 
 `acp-go-core` holds the behavior identical across siblings and the contract
-that binds them. Vendor-specific code never lives here.
+that binds them. Native harness code lives in its sibling; provider clients
+shared across harnesses live here.
 
 | Source | Authority |
 |---|---|
@@ -31,6 +32,7 @@ within the task's scope. Never weaken a rule merely to match an implementation.
 | `lifecycle/` | Capability, envelope, decoder, reducer, emitter, publisher; `testdata/fixtures/` is the canonical battery |
 | `process/` | Environment merge, executable resolution, launch, stderr tail, shutdown, seed files, file lock |
 | `wire/` | Error constructors, raw-event framing, request builders, session metadata and gates, text rules, publication ordering, reserved literals, account-usage decoder and response shape |
+| `usage/` | Shared provider usage readers; credentials and native route selection stay in siblings |
 | `image/` | Limits, media envelope, input gates, handoff, output gates |
 | `docs/` | The contract pages and the registry |
 | `scripts/` | `check.py` for this repo, `drift-check.sh` for the siblings |

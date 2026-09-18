@@ -44,7 +44,10 @@ Every sibling proves, against the current ACP v1 schema:
   holds it refuses a concurrent read; the fake's
   no-credential and no-allowance answers map to `not_authenticated` or
   `not_reported`; a native refusal is `<vendor>_internal_failure` with
-  `class: "account_usage"`.
+  `class: "account_usage"`. Provider readers are exercised with local HTTP
+  fixtures for credential routing, redirects, cancellation, malformed bodies,
+  optional-balance denial, zero and negative amounts, and credential changes
+  during a read. No real credential or inference is required.
 - `_meta.<vendor>` strictness: unknown own-namespace keys rejected on session
   lifecycle requests, foreign namespaces ignored, trace keys preserved,
   `acp-go.dev/lifecycle` refused on session lifecycle requests.

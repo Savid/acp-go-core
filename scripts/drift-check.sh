@@ -61,10 +61,10 @@ check_sibling() {
     rg -q --type go -g '!*_test.go' "AccountUsageMethod += \"_$vendor/accountUsage\"" "$repo" || fail "$name: AccountUsageMethod is not canonical"
     rg -q --type go -g '!*_test.go' 'wire\.DecodeAccountUsageRequest\(' "$repo" || fail "$name: account usage request is not decoded through core"
     rg -q --type go -g '!*_test.go' 'wire\.AccountUsageCapabilityKey' "$repo" || fail "$name: account usage is not advertised through core's key"
-    assembling=$(rg -l --type go -g '!*_test.go' 'wire\.AccountUsageResponse\{[^}]' "$repo" || true)
-    [[ -n "$assembling" ]] || fail "$name: no non-test file assembles a wire.AccountUsageResponse"
+    assembling=$(rg -l --type go -g '!*_test.go' 'wire\.AccountUsageResponse\{[^}]|reader\.Read\(' "$repo" || true)
+    [[ -n "$assembling" ]] || fail "$name: no response assembly or shared provider read"
     while IFS= read -r f; do
-      [[ -z "$f" ]] || rg -q '\.Validate\(\)' "$f" || fail "$name: $(basename "$f") assembles an account-usage response without Validate"
+      [[ -z "$f" ]] || rg -q '\.Validate\(\)' "$f" || fail "$name: $(basename "$f") handles an account-usage response without Validate"
     done <<< "$assembling"
     printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`(session|agent)\` \|" || fail "$name: registry Account Usage row does not record a scope"
   else
