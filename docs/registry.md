@@ -358,8 +358,11 @@ imports use the
 [native sync replay route](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts).
 OpenCode `1.18.31`, verified 2026-09-18: conversation-scoped reads and their
 stability fence complete against a populated native database without exporting
-unrelated history. Native creation, fresh-home import, and deletion require no
-model calls.
+unrelated history. Query stdout is captured in a private regular file: the
+[CLI's explicit exit](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/index.ts)
+truncates larger piped output at 64 KiB in the observed macOS run. Native
+creation, fresh-home import, and deletion pass with a carrier larger than
+64 KiB and no model calls.
 
 Hermes `0.21.3`, native source `f5a457ad`, verified 2026-09-15:
 no-token creation/close/delete; race-enabled ACP → native
