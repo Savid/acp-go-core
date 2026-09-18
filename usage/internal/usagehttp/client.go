@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,7 @@ type Response struct {
 	Body       []byte
 	StatusCode int
 	ObservedAt time.Time
+	RetryAt    time.Time
 }
 
 // Get makes one request without redirects, cookies, or inference.
@@ -61,6 +63,13 @@ func Get(ctx context.Context, transport http.RoundTripper, endpoint, token strin
 	}
 	defer response.Body.Close()
 
+	observedAt := time.Now().UTC()
+
+	result := Response{StatusCode: response.StatusCode, ObservedAt: observedAt, RetryAt: retryAt(response.Header.Get("Retry-After"), observedAt)}
+	if response.StatusCode != http.StatusOK {
+		return result, nil
+	}
+
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxBodyBytes+1))
 
 	if ctx.Err() != nil {
@@ -71,7 +80,9 @@ func Get(ctx context.Context, transport http.RoundTripper, endpoint, token strin
 		return Response{}, errors.New("provider usage response exceeds its read bound or is incomplete")
 	}
 
-	return Response{Body: body, StatusCode: response.StatusCode, ObservedAt: time.Now().UTC()}, nil
+	result.Body = body
+
+	return result, nil
 }
 
 // Decode rejects incomplete JSON without returning response bodies in errors.
@@ -81,4 +92,17 @@ func (r Response) Decode(value any) error {
 	}
 
 	return nil
+}
+
+func retryAt(value string, now time.Time) time.Time {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		return now.Add(time.Duration(seconds) * time.Second).Truncate(time.Second).Add(time.Second)
+	}
+
+	if when, err := http.ParseTime(value); err == nil && when.After(now) {
+		return when.UTC()
+	}
+
+	return time.Time{}
 }

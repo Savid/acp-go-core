@@ -26,6 +26,9 @@ type Request struct {
 	Args       []string
 	Env        []string
 	Dir        string
+	// Stdout, when set, is the file the child writes its standard output to
+	// instead of a pipe; Process.Stdout is then nil. The caller owns the file.
+	Stdout *os.File
 }
 
 // Result describes a terminal process.
@@ -54,8 +57,9 @@ type Process struct {
 	waitErr  error
 }
 
-// Start launches the request as a child in its own process group with three
-// dedicated pipes. exec.Cmd's own pipe helpers hand their parent ends to Wait,
+// Start launches the request as a child in its own process group with
+// dedicated pipes for stdin, stderr, and, unless the request names a stdout
+// file, stdout. exec.Cmd's own pipe helpers hand their parent ends to Wait,
 // which closes them the moment the child exits and races whoever is still
 // draining; owning both ends here keeps each parent end open until its reader
 // sees EOF.
@@ -69,7 +73,7 @@ func Start(ctx context.Context, request Request) (*Process, error) {
 	cmd.Dir = request.Dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	pipes, err := newPipes(cmd)
+	pipes, err := newPipes(cmd, request.Stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -85,10 +89,12 @@ func Start(ctx context.Context, request Request) (*Process, error) {
 	p := &Process{
 		cmd:        cmd,
 		stdin:      pipes.stdin,
-		stdout:     pipes.stdout,
 		stderr:     pipes.stderr,
 		tailClosed: make(chan struct{}),
 		done:       make(chan struct{}),
+	}
+	if pipes.stdout != nil {
+		p.stdout = pipes.stdout
 	}
 
 	go p.drainStderr()
@@ -99,7 +105,8 @@ func Start(ctx context.Context, request Request) (*Process, error) {
 // Stdin is the child's standard input.
 func (p *Process) Stdin() io.WriteCloser { return p.stdin }
 
-// Stdout is the child's standard output.
+// Stdout is the child's standard output pipe, or nil when the request sent
+// stdout to a file.
 func (p *Process) Stdout() io.ReadCloser { return p.stdout }
 
 // drainStderr copies the child's stderr into the bounded tail until the pipe
@@ -266,6 +273,10 @@ func (p *Process) Close() error {
 	var errs []error
 
 	for _, closer := range []io.Closer{p.stdin, p.stdout, p.stderr} {
+		if closer == nil {
+			continue
+		}
+
 		if err := closer.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			errs = append(errs, err)
 		}
@@ -281,7 +292,7 @@ type pipes struct {
 	childStdin, childStdout, childStderr *os.File
 }
 
-func newPipes(cmd *exec.Cmd) (_ *pipes, err error) {
+func newPipes(cmd *exec.Cmd, stdout *os.File) (_ *pipes, err error) {
 	set := &pipes{}
 
 	defer func() {
@@ -295,9 +306,14 @@ func newPipes(cmd *exec.Cmd) (_ *pipes, err error) {
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 
-	set.stdout, set.childStdout, err = os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("create stdout pipe: %w", err)
+	cmd.Stdout = stdout
+	if stdout == nil {
+		set.stdout, set.childStdout, err = os.Pipe()
+		if err != nil {
+			return nil, fmt.Errorf("create stdout pipe: %w", err)
+		}
+
+		cmd.Stdout = set.childStdout
 	}
 
 	set.stderr, set.childStderr, err = os.Pipe()
@@ -306,7 +322,6 @@ func newPipes(cmd *exec.Cmd) (_ *pipes, err error) {
 	}
 
 	cmd.Stdin = set.childStdin
-	cmd.Stdout = set.childStdout
 	cmd.Stderr = set.childStderr
 
 	return set, nil

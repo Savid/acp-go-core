@@ -121,6 +121,37 @@ func TestStartWaitAndShutdown(t *testing.T) {
 	require.NoError(t, child.Close())
 }
 
+func TestStartWritesStdoutToTheRequestedFile(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	output, err := os.CreateTemp(t.TempDir(), "stdout-*")
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = output.Close() })
+
+	child, err := Start(ctx, Request{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "echo captured; echo err >&2"},
+		Env:        []string{"PATH=/usr/bin:/bin"},
+		Stdout:     output,
+	})
+	require.NoError(t, err)
+	require.Nil(t, child.Stdout())
+	require.NoError(t, child.Stdin().Close())
+
+	result, err := child.Wait(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, result.ExitCode)
+	require.Equal(t, "err", child.StderrLastLine())
+	require.NoError(t, child.Close())
+
+	data, err := os.ReadFile(output.Name())
+	require.NoError(t, err)
+	require.Equal(t, "captured\n", string(data))
+}
+
 func TestShutdownSignalsTheGroup(t *testing.T) {
 	t.Parallel()
 

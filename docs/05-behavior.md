@@ -45,7 +45,8 @@ A **native entry** is one the harness enumerates for itself, read once when
 the native runtime starts. A **configured entry** is one the deployment
 named: the default model and a host-listed id from `WithConfiguredModels`.
 Configured entries are always published, after the native rows, as the id
-alone unless a native row carries it.
+alone unless a native row carries it. `wire.ModelSelectOptions` builds the
+menu in that order from the sibling's native rows.
 
 Membership never gates selection: a value absent from a menu still travels to
 the harness. An adapter never reads a provider endpoint the harness does not

@@ -43,7 +43,7 @@ func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.Acc
 		return decode(response)
 	}
 
-	return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode}
+	return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
 }
 
 type window struct {

@@ -149,7 +149,7 @@ prompt process and removes image payloads.
 | claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; a `get_usage` window carries no `windowSeconds`. Enabled native `spend` uses the shared Anthropic projection, with currency and unit exponent supplied by the source. `rate_limits_available: false`, a null `rate_limits`, or an observation without windows or spending is `not_reported`; the CLI reports a logged-out home the same way. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`; these carry `windowSeconds` of 18000 and 604800. Native turn quota events update or invalidate those cached windows. Each window carries its own `observedAt` and `staleAt`. | `subscription_type` | absent |
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
-| hermes | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. Native `session.provider_access` resolves credentials, account IDs, routes, and headers in the addressed session’s profile. Unverified routes and authentication overrides are refused. The binding is revalidated after each shared provider read. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
+| hermes | `none` | | | |
 | opencode | `session` | `providers`: `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider and unverified overrides are refused. The catalog does not establish effective subscription authentication; Claude and ChatGPT usage are not advertised. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
@@ -166,11 +166,11 @@ status. Its credit balance has no verified currency unit and is not money.
 Anthropic reads `/api/oauth/usage`; its `limits[]` and enabled `spend` retain
 native percentage and explicit currency/exponent units.
 
-Verified on 2026-09-18 with Pi 0.85.1 and Hermes 0.21.3 plus the
-`session.provider_access` gateway addition: real reads returned ChatGPT and
-Claude windows and OpenCode Go percentages; Pi also returned OpenRouter dollar
-balances. The Hermes gateway addition is required and is not in the unpatched
-native release. OpenCode 1.18.31, checked on 2026-09-19: subscription auth is not
+Verified on 2026-09-18 with Pi 0.85.1: real reads returned ChatGPT and
+Claude windows, OpenCode Go percentages, and OpenRouter dollar balances.
+Hermes 0.21.3 has no native surface exposing effective provider credentials
+for these reads.
+OpenCode 1.18.31, checked on 2026-09-19: subscription auth is not
 established by an API-key catalog entry. Its [Anthropic provider documentation](https://opencode.ai/docs/providers/#anthropic)
 describes subscription authentication through plugins, whose effective credentials
 are not exposed by the native catalog.
@@ -216,8 +216,8 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | claude | `model`, `mode`, `effort`, `output_style` | Model and permission mode use native control requests. Effort and output style use `apply_flag_settings` followed by `get_settings`. Optional selectors require native availability and a known current value. |
 | codex | `model`, `mode`, `effort`, `service_tier`, `personality` | Values forward to the next `turn/start`; only `mode`, `effort`, and `personality` reject empty. `mode` is `default` or `plan`, sent as `collaborationMode`. `service_tier` and `personality` appear only while set. |
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
-| hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
-| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
+| hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back; refused with `session_prompt` backpressure while a turn is in flight. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
+| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt; a set is refused with `session_prompt` backpressure while a turn is in flight. Model IDs must be provider-qualified. `effort` appears only while set. |
 | amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
 
 ### How each model catalog is built

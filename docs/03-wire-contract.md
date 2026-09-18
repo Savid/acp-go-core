@@ -188,7 +188,12 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 - The native read is bounded by `wire.AccountUsageReadTimeout`. A read that
   exceeds it, or fails for any other cause, is the `account_usage` class of
   [`<vendor>_internal_failure`](00-overview.md#uniform-error-shapes); a
-  response MUST NOT contain an incomplete native observation. Independently
+  response MUST NOT contain an incomplete native observation. A shared provider
+  reader failure carries `statusCode` when an HTTP response was received and
+  `retryAt` when its Retry-After header supplies a valid future retry time.
+  `retryAt` is an RFC 3339 UTC instant with whole seconds. A host MUST NOT
+  repeat that provider read before `retryAt`. HTTP bodies and credentials MUST
+  NOT appear in error data. Independently
   observed cached windows MUST retain their individual timestamps. A native version without
   the read answers the same class; the registry's verification record names
   the version each read was verified on.
@@ -488,8 +493,7 @@ with a global sequence, and causal activity and action ownership.
 It follows the shape of the ACP v2
 [prompt lifecycle RFD](https://agentclientprotocol.com/rfds/v2/prompt), which
 answers a prompt on acceptance and reports turns and background work through
-session updates. Carrying that shape in `_meta` now, on top of v1, is what
-lets a host move to native v2 with a small change when the protocol ships.
+session updates.
 
 Every value in this section lives only in `_meta`, carries exact scalar
 `version: 1`, and rejects an unknown member. Every opaque identifier is a
@@ -848,5 +852,6 @@ the harness has proven support:
 {"structuredOutput": {"config": "_meta.<vendor>.options.outputSchema", "result": "_meta.<vendor>.structuredOutput", "schema": "json_schema"}}
 ```
 
-A sibling without it fails `outputSchema` at session start with
+`wire.StructuredOutputAdvertisement(vendor)` builds that object. A sibling
+without it fails `outputSchema` at session start with
 `{"error":"unsupported","field":"_meta.<vendor>.options.outputSchema"}`.

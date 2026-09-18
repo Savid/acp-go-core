@@ -196,3 +196,13 @@ func TestAccountUsageProviderSelection(t *testing.T) {
 	advertisement := AccountUsageAdvertisement("_test/accountUsage", AccountUsageScopeSession, "openrouter")
 	require.Equal(t, []string{"openrouter"}, advertisement["providers"])
 }
+
+func TestStructuredOutputAdvertisement(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, map[string]any{
+		"config": "_meta.v.options.outputSchema",
+		"result": "_meta.v.structuredOutput",
+		"schema": "json_schema",
+	}, StructuredOutputAdvertisement("v"))
+}

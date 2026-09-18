@@ -2,11 +2,9 @@
 // event vocabulary, the strict wire decoder, the projection reducer, and the
 // ordered emitter one session incarnation writes through.
 //
-// The extension carries, in ACP v1 _meta, the shape of the ACP v2 prompt
-// lifecycle RFD (https://agentclientprotocol.com/rfds/v2/prompt): a prompt is
-// answered on acceptance and turns and background work are reported through
-// session updates. A host that consumes this stream moves to native v2 with a
-// small change when the protocol ships.
+// The extension carries, in ACP v1 _meta, a prompt lifecycle in which a
+// prompt is answered on acceptance and turns and background work are reported
+// through session updates.
 //
 // The reducer handles the whole event set, including events a given sibling's
 // configuration never emits, because the same code validates the stream a

@@ -147,8 +147,9 @@ Rules:
   its home from the inherited environment exactly as it would from a shell.
   `Home` never acts as a scratch parent.
 - `WithScratchDir` is the parent for all ephemeral state, such as extension
-  staging. Empty means `os.TempDir()`; a missing directory is
-  created `0700`. Every ephemeral path is created through the sibling's
+  staging. Empty means `os.TempDir()`; otherwise it MUST be absolute, and a
+  relative path is a construction failure. A missing directory is created
+  `0700`. Every ephemeral path is created through the sibling's
   single scratch accessor with a stable `acp-go-<vendor>-<purpose>-*` prefix
   so a host can sweep orphans. A sibling that allocates no ephemeral state
   accepts the option and allocates nothing; the
@@ -240,7 +241,6 @@ type VendorOptions struct {
     Model         string            `json:"model,omitempty"`
     Env           map[string]string `json:"env,omitempty"`
     ExtraPathDirs []string          `json:"extraPathDirs,omitempty"`
-    OutputSchema  map[string]any    `json:"outputSchema,omitempty"`
 
     // Vendor-specific fields follow. Add only proven native settings.
 }
@@ -252,7 +252,6 @@ func (options VendorOptions) Meta() map[string]any
 func WithVendorModel(model string) VendorOption
 func WithVendorEnv(env map[string]string) VendorOption
 func WithVendorExtraPathDirs(dirs ...string) VendorOption
-func WithVendorOutputSchema(schema map[string]any) VendorOption
 func WithSessionVendorOptions(options VendorOptions) SessionRequestOption
 ```
 
@@ -261,9 +260,9 @@ non-zero supported fields; a boolean the caller set explicitly travels even
 when `false`, and the [registry](registry.md#vendor-session-options) records
 which fields carry explicit presence. Maps and slices are cloned before storing
 or returning. Unknown own-namespace keys fail closed with the unsupported error.
-A field that exists for symmetry but has no proven native support fails at
-session start with the unsupported error naming it; the
-[registry](registry.md#vendor-session-options) records which.
+Only siblings with native structured output expose `OutputSchema map[string]any`
+and `WithVendorOutputSchema(schema map[string]any) VendorOption`. The
+[registry](registry.md#vendor-session-options) records native support.
 
 ### Session Environment and PATH
 

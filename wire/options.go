@@ -6,9 +6,9 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/savid/acp-go-core/process"
-
 	"github.com/coder/acp-go-sdk"
+
+	"github.com/savid/acp-go-core/process"
 )
 
 // StringMapOption validates a string map and copies it at the request boundary.
@@ -133,4 +133,15 @@ func ValidateSessionEnvironment(env map[string]string, dirs []string, path strin
 	}
 
 	return nil
+}
+
+// StructuredOutputAdvertisement is the _meta.<vendor>.structuredOutput
+// capability: where the schema is configured, where the parsed answer rides
+// on the prompt response, and the schema dialect.
+func StructuredOutputAdvertisement(vendor string) map[string]any {
+	return map[string]any{
+		"config": MetaOptionPath(vendor, "outputSchema"),
+		"result": "_meta." + vendor + ".structuredOutput",
+		"schema": "json_schema",
+	}
 }

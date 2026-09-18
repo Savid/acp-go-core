@@ -35,7 +35,7 @@ func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.Acc
 	}
 
 	if response.StatusCode != http.StatusOK {
-		return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode}
+		return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
 	}
 
 	result, err := decode(response)

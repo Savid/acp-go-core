@@ -234,15 +234,48 @@ func TestProviderHTTPBoundary(t *testing.T) {
 				require.Equal(t, 302, readErr.StatusCode)
 				require.Equal(t, int64(1), calls.Load())
 			})
-			t.Run("rate limited", func(t *testing.T) {
-				reader := makeReader(roundTrip(func(r *http.Request) (*http.Response, error) {
-					return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"120"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
-				}))
-				_, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
-				var readErr *usage.HTTPError
-				require.ErrorAs(t, err, &readErr)
-				require.Equal(t, http.StatusTooManyRequests, readErr.StatusCode)
-			})
+			for _, retry := range []struct {
+				name, header string
+				delay        time.Duration
+			}{
+				{"retry seconds", "120", 120 * time.Second},
+				{"retry date", time.Now().UTC().Add(10 * time.Minute).Format(http.TimeFormat), 0},
+				{"invalid retry", "not-a-date", 0},
+				{"negative retry", "-1", 0},
+			} {
+				t.Run(retry.name, func(t *testing.T) {
+					var calls int
+					reader := makeReader(roundTrip(func(r *http.Request) (*http.Response, error) {
+						calls++
+
+						return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": {retry.header}}, Body: io.NopCloser(strings.NewReader("private provider body")), Request: r}, nil
+					}))
+					started := time.Now().UTC()
+					response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
+					var readErr *usage.HTTPError
+					require.ErrorAs(t, err, &readErr)
+					require.Equal(t, http.StatusTooManyRequests, readErr.StatusCode)
+					require.Equal(t, wire.AccountUsageResponse{}, response)
+					require.Equal(t, 1, calls)
+					data, ok := usage.RequestError("fixture", fmt.Errorf("wrapped: %w", err)).Data.(map[string]any)
+					require.True(t, ok)
+					want := map[string]any{"error": "fixture_internal_failure", "class": "account_usage", "statusCode": 429}
+					switch retry.name {
+					case "retry seconds":
+						require.False(t, readErr.RetryAt.Before(started.Add(retry.delay)))
+						require.WithinDuration(t, started.Add(retry.delay), readErr.RetryAt, 2*time.Second)
+						want["retryAt"] = wire.AccountUsageTime(readErr.RetryAt)
+					case "retry date":
+						expected, parseErr := http.ParseTime(retry.header)
+						require.NoError(t, parseErr)
+						require.Equal(t, expected, readErr.RetryAt)
+						want["retryAt"] = wire.AccountUsageTime(expected)
+					default:
+						require.True(t, readErr.RetryAt.IsZero())
+					}
+					require.Equal(t, want, data)
+				})
+			}
 			t.Run("cancellation", func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				reader := makeReader(roundTrip(func(r *http.Request) (*http.Response, error) {
@@ -324,4 +357,8 @@ func TestAnthropicUsagePreservesPercentagesAndMonetaryUnits(t *testing.T) {
 	response, err = reader.Read(t.Context(), usage.Credential{Token: "api-key"})
 	require.NoError(t, err)
 	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), response)
+}
+
+func TestUsageRequestErrorHidesUnknownFailureDetails(t *testing.T) {
+	require.Equal(t, wire.InternalFailure("fixture", "account_usage"), usage.RequestError("fixture", errors.New("credential-shaped sensitive detail")))
 }
