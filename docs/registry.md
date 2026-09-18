@@ -28,7 +28,7 @@ defines storage and wire publication.
 | codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
 | hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
-| opencode | `opencode serve` authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
+| opencode | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 | amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed uniquely under the native plugin directory and removed after its process is reaped. |
 
 ## Session Stores
@@ -352,7 +352,14 @@ further prompt; permissions, form questions, raw events, PATH rotation,
 running-command cancellation, and deletion. The native CLI fixture passes
 `--dir` because the CLI also consults inherited `PWD`. Message IDs follow the
 [native timestamp layout](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/id/id.ts).
-Snapshots use the [native sync routes](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts).
+Snapshot reads use scoped queries through the
+[native database command](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/cli/cmd/db.ts);
+imports use the
+[native sync replay route](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts).
+OpenCode `1.18.31`, verified 2026-09-18: conversation-scoped reads and their
+stability fence complete against a populated native database without exporting
+unrelated history. Native creation, fresh-home import, and deletion require no
+model calls.
 
 Hermes `0.21.3`, native source `f5a457ad`, verified 2026-09-15:
 no-token creation/close/delete; race-enabled ACP → native
