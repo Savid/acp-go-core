@@ -21,8 +21,8 @@ const (
 type Reader struct{ Transport http.RoundTripper }
 
 // Read observes the subscription addressed by the caller's effective API key.
-func (r Reader) Read(ctx context.Context, apiKey string) (wire.AccountUsageResponse, error) {
-	response, err := usagehttp.Get(ctx, r.Transport, Endpoint, apiKey)
+func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
+	response, err := usagehttp.Get(ctx, r.Transport, Endpoint, credential.Token, nil)
 	if err != nil {
 		return wire.AccountUsageResponse{}, err
 	}
@@ -86,7 +86,7 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 		result.Limits = append(result.Limits, wire.AccountUsageLimit{
 			ID: item.id, Label: item.label, UsedPercent: *w.Percent,
 			ObservedAt: wire.AccountUsageTime(response.ObservedAt),
-			StaleAt:    wire.AccountUsageTime(response.ObservedAt.Add(usage.Freshness)),
+			StaleAt:    wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness)),
 			ResetsAt:   wire.AccountUsageTime(w.ResetsAt), UsageAllowed: new(w.Status == "ok"),
 		})
 	}

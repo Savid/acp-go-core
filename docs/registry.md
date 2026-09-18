@@ -146,11 +146,11 @@ prompt process and removes image payloads.
 
 | Sibling | Scope | Native source and mapping | `plan` | `usageAllowed` |
 |---|---|---|---|---|
-| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; `windowSeconds` is absent. Nothing beside the list is read. `rate_limits_available: false`, a null `rate_limits`, or an empty `limits[]` is `not_reported`; the CLI reports a logged-out home the same way. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`. Native turn quota events update or invalidate those cached windows. Each window carries its own `observedAt` and `staleAt`. | `subscription_type` | absent |
+| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. Each `rate_limits.limits[]` entry is one limit: `id` is `kind`, suffixed `/<scope model display name>` for a model-scoped entry; `label` is that display name; a `get_usage` window carries no `windowSeconds`. Enabled native `spend` uses the shared Anthropic projection, with currency and unit exponent supplied by the source. `rate_limits_available: false`, a null `rate_limits`, or an observation without windows or spending is `not_reported`; the CLI reports a logged-out home the same way. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`; these carry `windowSeconds` of 18000 and 604800. Native turn quota events update or invalidate those cached windows. Each window carries its own `observedAt` and `staleAt`. | `subscription_type` | absent |
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
-| pi | `session` | `providers`: `opencode-go`, `openrouter`. An authenticated loopback extension reads the addressed process's native model registry, resolving API keys, model endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared provider readers supply Go percentage windows and OpenRouter monetary balances and request counts. | absent | absent account-wide; Go reports each window’s status |
-| hermes | `none` | | | |
-| opencode | `session` | `providers`: `opencode-go`, `openrouter`. Effective credentials and routes come from directory-scoped `GET /provider/auth` and `GET /config/providers`; authentication plugins for the requested provider and unverified authentication overrides are refused. Shared core readers call OpenCode Go `/zen/go/v1/usage` and OpenRouter `/api/v1/key`, with an optional same-credential `/api/v1/credits` read. Go supplies rolling, weekly, and monthly percentages; OpenRouter supplies USD spending caps, lifetime usage, optional account credits, and free-model request counts. | absent | absent account-wide; Go reports each window’s status |
+| pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
+| hermes | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. Native `session.provider_access` resolves credentials, account IDs, routes, and headers in the addressed session’s profile. Unverified routes and authentication overrides are refused. The binding is revalidated after each shared provider read. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
+| opencode | `session` | `providers`: `opencode-go`, `openrouter`, `anthropic`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective credentials and routes. Authentication plugins for the requested provider and unverified overrides are refused. Anthropic uses the native SDK’s official default endpoint when no endpoint is set. Its OAuth/setup tokens expose Claude windows and reported spending; ordinary API keys answer `not_reported`. ChatGPT’s authentication plugin does not expose its effective credential through this catalog and is not advertised. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
 Provider response mappings were checked on 2026-09-18 against the
@@ -159,7 +159,19 @@ Provider response mappings were checked on 2026-09-18 against the
 and [credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits).
 OpenCode Go reports no money. OpenRouter documents the credits endpoint as
 requiring a management key; denial omits the balance while retaining key data.
-These mappings are verified with scripted HTTP fixtures, not live credentials.
+ChatGPT reads `/backend-api/wham/usage` with the native account ID and refuses a
+response bound to another account. Native primary, secondary, code-review, and
+additional allowances retain their percentages, durations, resets, and window
+status. Its credit balance has no verified currency unit and is not money.
+Anthropic reads `/api/oauth/usage`; its `limits[]` and enabled `spend` retain
+native percentage and explicit currency/exponent units.
+
+Verified on 2026-09-18 with Pi 0.85.1 and Hermes 0.21.3 plus the
+`session.provider_access` gateway addition: real reads returned ChatGPT and
+Claude windows and OpenCode Go percentages; Pi also returned OpenRouter dollar
+balances. OpenCode 1.18.31’s Anthropic route reached the usage endpoint, which
+returned HTTP 429. Scripted HTTP tests cover its response mapping. The Hermes
+gateway addition is required and is not in the unpatched native release.
 
 ## Delegated Agents
 

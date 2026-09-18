@@ -25,6 +25,10 @@ const AccountUsageCapabilityKey = "accountUsage"
 // request.
 const AccountUsageReadTimeout = 30 * time.Second
 
+// AccountUsageFreshness is how long one account-usage observation stays
+// current; staleAt is observedAt plus this.
+const AccountUsageFreshness = time.Minute
+
 // AccountUsageScope names what a sibling's account-usage read is bound to.
 type AccountUsageScope string
 

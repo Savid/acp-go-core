@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -21,7 +22,7 @@ type Response struct {
 }
 
 // Get makes one request without redirects, cookies, or inference.
-func Get(ctx context.Context, transport http.RoundTripper, endpoint, token string) (Response, error) {
+func Get(ctx context.Context, transport http.RoundTripper, endpoint, token string, headers http.Header) (Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -41,6 +42,7 @@ func Get(ctx context.Context, transport http.RoundTripper, endpoint, token strin
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "acp-go-core/usage")
+	maps.Copy(request.Header, headers)
 
 	client := &http.Client{
 		Transport: transport,

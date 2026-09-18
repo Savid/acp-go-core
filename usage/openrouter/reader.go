@@ -24,8 +24,8 @@ const (
 type Reader struct{ Transport http.RoundTripper }
 
 // Read observes the key allowance and any account balance that the same credential can read.
-func (r Reader) Read(ctx context.Context, apiKey string) (wire.AccountUsageResponse, error) {
-	response, err := usagehttp.Get(ctx, r.Transport, Endpoint, apiKey)
+func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
+	response, err := usagehttp.Get(ctx, r.Transport, Endpoint, credential.Token, nil)
 	if err != nil {
 		return wire.AccountUsageResponse{}, err
 	}
@@ -43,7 +43,7 @@ func (r Reader) Read(ctx context.Context, apiKey string) (wire.AccountUsageRespo
 		return wire.AccountUsageResponse{}, err
 	}
 
-	if balance := r.credits(ctx, apiKey); balance != nil {
+	if balance := r.credits(ctx, credential.Token); balance != nil {
 		result.Balances = append(result.Balances, *balance)
 	}
 
@@ -87,7 +87,7 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 	}
 
 	observedAt := wire.AccountUsageTime(response.ObservedAt)
-	staleAt := wire.AccountUsageTime(response.ObservedAt.Add(usage.Freshness))
+	staleAt := wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness))
 
 	budget := wire.AccountUsageBalance{ID: "key_spending", Label: "Key spending", ObservedAt: observedAt, StaleAt: staleAt}
 	if limit == nil {
@@ -131,7 +131,7 @@ func (r Reader) credits(ctx context.Context, apiKey string) *wire.AccountUsageBa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	response, err := usagehttp.Get(ctx, r.Transport, balanceEndpoint, apiKey)
+	response, err := usagehttp.Get(ctx, r.Transport, balanceEndpoint, apiKey, nil)
 	if err != nil || response.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -153,7 +153,7 @@ func (r Reader) credits(ctx context.Context, apiKey string) *wire.AccountUsageBa
 
 	return &wire.AccountUsageBalance{
 		ID: "account_credits", Label: "Account credits", ObservedAt: wire.AccountUsageTime(response.ObservedAt),
-		StaleAt: wire.AccountUsageTime(response.ObservedAt.Add(usage.Freshness)), Used: money(used), Remaining: money(purchased - used),
+		StaleAt: wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness)), Used: money(used), Remaining: money(purchased - used),
 	}
 }
 

@@ -4,17 +4,19 @@ package usage
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/savid/acp-go-core/wire"
 )
 
-// Freshness is the maximum age of a provider HTTP observation.
-const Freshness = time.Minute
+// Credential identifies the effective provider account resolved by the native harness.
+type Credential struct {
+	Token     string
+	AccountID string
+}
 
 // Reader reads the account addressed by the caller's effective provider credential.
 type Reader interface {
-	Read(context.Context, string) (wire.AccountUsageResponse, error)
+	Read(context.Context, Credential) (wire.AccountUsageResponse, error)
 }
 
 // HTTPError reports an unsuccessful provider read without exposing credentials or bodies.

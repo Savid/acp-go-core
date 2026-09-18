@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/savid/acp-go-core/usage"
+	"github.com/savid/acp-go-core/usage/anthropic"
+	"github.com/savid/acp-go-core/usage/openaicodex"
 	"github.com/savid/acp-go-core/usage/opencodego"
 	"github.com/savid/acp-go-core/usage/openrouter"
 	"github.com/savid/acp-go-core/wire"
@@ -39,7 +41,7 @@ func fixtureTransport(t *testing.T, host string, handler http.HandlerFunc) http.
 		require.Equal(t, "https", r.URL.Scheme)
 		require.Equal(t, host, r.URL.Host)
 		require.Equal(t, http.MethodGet, r.Method)
-		require.Equal(t, "Bearer fixture-key", r.Header.Get("Authorization"))
+		require.Equal(t, "Bearer sk-ant-oat01-fixture-key", r.Header.Get("Authorization"))
 		request := r.Clone(r.Context())
 		request.URL.Scheme, request.URL.Host = target.Scheme, target.Host
 
@@ -63,7 +65,7 @@ func TestOpenRouterKeepsKeyCapLifetimeSpendAndAccountBalanceSeparate(t *testing.
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})}
-	response, err := reader.Read(t.Context(), "fixture-key")
+	response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 	require.NoError(t, err)
 	require.NoError(t, response.Validate())
 	require.Equal(t, []string{"/api/v1/key", "/api/v1/credits"}, calls)
@@ -95,7 +97,7 @@ func TestOpenRouterKeepsKeyCapLifetimeSpendAndAccountBalanceSeparate(t *testing.
 		require.NoError(t, parseErr)
 		stale, parseErr := time.Parse(time.RFC3339, balance.StaleAt)
 		require.NoError(t, parseErr)
-		require.Equal(t, usage.Freshness, stale.Sub(observed))
+		require.Equal(t, wire.AccountUsageFreshness, stale.Sub(observed))
 	}
 }
 
@@ -112,7 +114,7 @@ func TestOpenRouterRetainsUncappedUsageWhenAccountBalanceIsUnavailable(t *testin
 				require.Equal(t, "/api/v1/credits", r.URL.Path)
 				w.WriteHeader(status)
 			})}
-			response, err := reader.Read(t.Context(), "fixture-key")
+			response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 			require.NoError(t, err)
 			require.True(t, response.Available)
 			require.Len(t, response.Balances, 1)
@@ -135,7 +137,7 @@ func TestOpenRouterReportsZeroAndOverdrawnAccountBalances(t *testing.T) {
 				_, err := io.WriteString(w, body)
 				require.NoError(t, err)
 			})}
-			response, err := reader.Read(t.Context(), "fixture-key")
+			response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 			require.NoError(t, err)
 			require.Len(t, response.Balances, 3)
 			require.Equal(t, -2.5, response.Balances[0].Remaining.Amount)
@@ -150,7 +152,7 @@ func TestOpenCodeGoPreservesWindowMeasurementsAndStatus(t *testing.T) {
 		_, err := io.WriteString(w, `{"usage":{"rolling":{"status":"ok","percent":0,"resetsAt":"2026-09-18T10:00:00.123Z"},"weekly":{"status":"rate-limited","percent":103.5,"resetsAt":"2026-09-21T00:00:00Z"},"monthly":{"status":"ok","percent":34.5,"resetsAt":"2026-10-01T00:00:00Z"}}}`)
 		require.NoError(t, err)
 	})}
-	response, err := reader.Read(t.Context(), "fixture-key")
+	response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 	require.NoError(t, err)
 	require.NoError(t, response.Validate())
 	require.Len(t, response.Limits, 3)
@@ -168,6 +170,10 @@ func TestProviderReadersRejectMalformedObservations(t *testing.T) {
 		name, body string
 		makeReader func(http.RoundTripper) usage.Reader
 	}{
+		{"claude missing percent", `{"limits":[{"kind":"session"}]}`, func(t http.RoundTripper) usage.Reader { return anthropic.Reader{Transport: t} }},
+		{"claude missing monetary unit", `{"spend":{"enabled":true,"used":{"amount_minor":120,"currency":"USD"}}}`, func(t http.RoundTripper) usage.Reader { return anthropic.Reader{Transport: t} }},
+		{"codex wrong account", `{"account_id":"other","plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10}}}`, func(t http.RoundTripper) usage.Reader { return openaicodex.Reader{Transport: t} }},
+		{"codex missing percentage", `{"account_id":"fixture-account","plan_type":"plus","rate_limit":{"primary_window":{}}}`, func(t http.RoundTripper) usage.Reader { return openaicodex.Reader{Transport: t} }},
 		{"router missing cap", `{"data":{"usage":10}}`, func(t http.RoundTripper) usage.Reader { return openrouter.Reader{Transport: t} }},
 		{"router missing remaining", `{"data":{"usage":10,"limit":20}}`, func(t http.RoundTripper) usage.Reader { return openrouter.Reader{Transport: t} }},
 		{"router malformed request count", `{"data":{"usage":10,"limit":null,"limit_remaining":null,"free_model_daily_requests":{"used":1.5,"limit":50,"remaining":48.5}}}`, func(t http.RoundTripper) usage.Reader { return openrouter.Reader{Transport: t} }},
@@ -181,7 +187,7 @@ func TestProviderReadersRejectMalformedObservations(t *testing.T) {
 
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body)), Request: r}, nil
 			}))
-			response, err := reader.Read(t.Context(), "fixture-key")
+			response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 			require.Error(t, err)
 			require.Equal(t, wire.AccountUsageResponse{}, response)
 			require.Equal(t, 1, calls)
@@ -190,9 +196,15 @@ func TestProviderReadersRejectMalformedObservations(t *testing.T) {
 }
 
 func TestProviderHTTPBoundary(t *testing.T) {
-	for _, kind := range []string{"go", "router"} {
+	for _, kind := range []string{"go", "router", "codex", "anthropic"} {
 		t.Run(kind, func(t *testing.T) {
 			makeReader := func(transport http.RoundTripper) usage.Reader {
+				if kind == "anthropic" {
+					return anthropic.Reader{Transport: transport}
+				}
+				if kind == "codex" {
+					return openaicodex.Reader{Transport: transport}
+				}
 				if kind == "go" {
 					return opencodego.Reader{Transport: transport}
 				}
@@ -205,7 +217,7 @@ func TestProviderHTTPBoundary(t *testing.T) {
 
 					return nil, errors.New("unexpected")
 				}))
-				response, err := reader.Read(t.Context(), "")
+				response, err := reader.Read(t.Context(), usage.Credential{})
 				require.NoError(t, err)
 				require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated), response)
 			})
@@ -216,7 +228,7 @@ func TestProviderHTTPBoundary(t *testing.T) {
 
 					return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{"https://other.example/usage"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 				}))
-				_, err := reader.Read(t.Context(), "fixture-key")
+				_, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 				var readErr *usage.HTTPError
 				require.ErrorAs(t, err, &readErr)
 				require.Equal(t, 302, readErr.StatusCode)
@@ -226,7 +238,7 @@ func TestProviderHTTPBoundary(t *testing.T) {
 				reader := makeReader(roundTrip(func(r *http.Request) (*http.Response, error) {
 					return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"120"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 				}))
-				_, err := reader.Read(t.Context(), "fixture-key")
+				_, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 				var readErr *usage.HTTPError
 				require.ErrorAs(t, err, &readErr)
 				require.Equal(t, http.StatusTooManyRequests, readErr.StatusCode)
@@ -239,23 +251,77 @@ func TestProviderHTTPBoundary(t *testing.T) {
 
 					return nil, r.Context().Err()
 				}))
-				_, err := reader.Read(ctx, "fixture-key")
+				_, err := reader.Read(ctx, usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 				require.ErrorIs(t, err, context.Canceled)
 			})
 			t.Run("bounded body", func(t *testing.T) {
 				reader := makeReader(roundTrip(func(r *http.Request) (*http.Response, error) {
 					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(strings.Repeat(" ", 65537))), Request: r}, nil
 				}))
-				_, err := reader.Read(t.Context(), "fixture-key")
+				_, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 				require.ErrorContains(t, err, "read bound")
 			})
 			t.Run("redacted error", func(t *testing.T) {
-				reader := makeReader(roundTrip(func(*http.Request) (*http.Response, error) { return nil, errors.New("fixture-key response payload") }))
-				_, err := reader.Read(t.Context(), "fixture-key")
+				reader := makeReader(roundTrip(func(*http.Request) (*http.Response, error) {
+					return nil, errors.New("sk-ant-oat01-fixture-key response payload")
+				}))
+				_, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
 				require.Error(t, err)
-				require.NotContains(t, err.Error(), "fixture-key")
+				require.NotContains(t, err.Error(), "sk-ant-oat01-fixture-key")
 				require.NotContains(t, err.Error(), "payload")
 			})
 		})
 	}
+}
+
+func TestCodexUsagePreservesAccountAndIndependentWindows(t *testing.T) {
+	reader := openaicodex.Reader{Transport: fixtureTransport(t, "chatgpt.com", func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/backend-api/wham/usage", r.URL.Path)
+		require.Equal(t, "fixture-account", r.Header.Get("ChatGPT-Account-ID"))
+		_, err := io.WriteString(w, `{"account_id":"fixture-account","plan_type":"plus","rate_limit":{"allowed":false,"primary_window":{"used_percent":103.5,"limit_window_seconds":18000,"reset_at":1790000000},"secondary_window":{"used_percent":8,"limit_window_seconds":604800,"reset_at":1790500000}},"additional_rate_limits":[{"limit_name":"Reserve","metered_feature":"base_model_inference","rate_limit":{"allowed":true,"primary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_at":1790600000},"secondary_window":null}}],"credits":{"balance":"42"}}`)
+		require.NoError(t, err)
+	})}
+	response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key", AccountID: "fixture-account"})
+	require.NoError(t, err)
+	require.Equal(t, "plus", response.Plan)
+	require.Len(t, response.Limits, 3)
+	require.Equal(t, "codex/primary", response.Limits[0].ID)
+	require.Equal(t, 103.5, response.Limits[0].UsedPercent)
+	require.Equal(t, int64(18000), response.Limits[0].WindowSeconds)
+	require.False(t, *response.Limits[0].UsageAllowed)
+	require.Equal(t, "base_model_inference/primary", response.Limits[2].ID)
+	require.Equal(t, "Reserve", response.Limits[2].Label)
+	require.Equal(t, 0.0, response.Limits[2].UsedPercent)
+	require.True(t, *response.Limits[2].UsageAllowed)
+	require.Nil(t, response.UsageAllowed)
+	require.Empty(t, response.Balances, "subscription credits do not establish a dollar balance")
+	for _, window := range response.Limits {
+		observed, parseErr := time.Parse(time.RFC3339, window.ObservedAt)
+		require.NoError(t, parseErr)
+		stale, parseErr := time.Parse(time.RFC3339, window.StaleAt)
+		require.NoError(t, parseErr)
+		require.Equal(t, wire.AccountUsageFreshness, stale.Sub(observed))
+	}
+}
+
+func TestAnthropicUsagePreservesPercentagesAndMonetaryUnits(t *testing.T) {
+	reader := anthropic.Reader{Transport: fixtureTransport(t, "api.anthropic.com", func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/oauth/usage", r.URL.Path)
+		require.Equal(t, "oauth-2025-04-20", r.Header.Get("Anthropic-Beta"))
+		_, err := io.WriteString(w, `{"limits":[{"kind":"session","percent":0.5,"resets_at":"2026-09-18T10:00:00.123Z"},{"kind":"weekly_scoped","percent":101.5,"scope":{"model":{"display_name":"Fable"}}}],"spend":{"enabled":true,"used":{"amount_minor":125,"currency":"USD","exponent":2},"limit":{"amount_minor":5000,"currency":"USD","exponent":2}}}`)
+		require.NoError(t, err)
+	})}
+	response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key"})
+	require.NoError(t, err)
+	require.Len(t, response.Limits, 2)
+	require.Equal(t, 0.5, response.Limits[0].UsedPercent)
+	require.Equal(t, "weekly_scoped/Fable", response.Limits[1].ID)
+	require.Equal(t, 101.5, response.Limits[1].UsedPercent)
+	require.Len(t, response.Balances, 1)
+	require.Equal(t, &wire.AccountUsageMoney{Amount: 1.25, Currency: "USD"}, response.Balances[0].Used)
+	require.Equal(t, &wire.AccountUsageMoney{Amount: 50, Currency: "USD"}, response.Balances[0].Limit)
+	require.Nil(t, response.Balances[0].Remaining)
+	response, err = reader.Read(t.Context(), usage.Credential{Token: "api-key"})
+	require.NoError(t, err)
+	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), response)
 }
