@@ -364,6 +364,14 @@ truncates larger piped output at 64 KiB in the observed macOS run. Native
 creation, fresh-home import, and deletion pass with a carrier larger than
 64 KiB and no model calls.
 
+OpenCode server readiness has a two-minute bound, shortened by the caller's
+deadline. Health requests have a two-second timeout and retry within that bound.
+Startup diagnostics distinguish health readiness from schema loading and report
+their durations. On macOS with `1.18.31`, an early health request can remain
+unanswered while a second connection receives a healthy response from the same
+process. The two-second retry recovers this observed startup stall. Verified
+2026-09-18 without model calls, including native creation, import, and deletion.
+
 Hermes `0.21.3`, native source `f5a457ad`, verified 2026-09-15:
 no-token creation/close/delete; race-enabled ACP → native
 `hermes chat --cli --resume` → ACP continuation; fresh-home import followed by
