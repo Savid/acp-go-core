@@ -44,7 +44,7 @@ Every sibling moves together on these pins. Values live only in this table.
 | Pin | Value |
 |---|---|
 | ACP SDK | `github.com/coder/acp-go-sdk@v0.13.5` |
-| Core module | `github.com/savid/acp-go-core@v0.0.0-20260917142953-b181a80a6b52` |
+| Core module | `github.com/savid/acp-go-core@v0.0.0-20260918070815-f63e98d3f200` |
 | Go directive | `go 1.26.6` |
 
 Every sibling MUST require the core version in this table without a `replace`
