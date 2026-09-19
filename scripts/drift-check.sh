@@ -78,7 +78,7 @@ check_sibling() {
     [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
   done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
-  rg -q --type go -g '!*_test.go' 'StderrLastLine\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
+  rg -q --type go -g '!*_test.go' 'StderrTail\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
   rg -q 'ConfiguredModels +\[\]string' "$repo/options.go" && rg -q 'func WithConfiguredModels\(ids \[\]string\) Option' "$repo/options.go" || fail "$name: WithConfiguredModels surface missing"
   for f in 'wire.MediaEnvelopeKey|acp-go.dev/mediaEnvelope' 'wire.HandoffKey|acp-go.dev/handoff' 'wire.LifecycleKey|acp-go.dev/lifecycle'; do

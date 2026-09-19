@@ -82,8 +82,8 @@ The structural gate checks these symbols and literals in every sibling:
   base environment.
 - `request_builders.go` declares only the vendor option constructors, each
   returning `wire.SessionRequestOption`.
-- Native process death reports its last stderr line through
-  `process.(*Process).StderrLastLine`.
+- Native process death reports its stderr tail through
+  `process.(*Process).StderrTail`.
 - A sibling that exports `AccountUsageMethod` in non-test Go spells it
   `"_<vendor>/accountUsage"`, decodes through
   `wire.DecodeAccountUsageRequest`, advertises

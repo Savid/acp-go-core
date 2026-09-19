@@ -118,7 +118,7 @@ func TestStartWaitAndShutdown(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, result.ExitCode)
 	require.Equal(t, "hello\n", <-out)
-	require.Equal(t, "err", child.StderrLastLine())
+	require.Equal(t, "err", child.StderrTail())
 	require.NoError(t, child.Close())
 }
 
@@ -145,7 +145,7 @@ func TestStartWritesStdoutToTheRequestedFile(t *testing.T) {
 	result, err := child.Wait(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, result.ExitCode)
-	require.Equal(t, "err", child.StderrLastLine())
+	require.Equal(t, "err", child.StderrTail())
 	require.NoError(t, child.Close())
 
 	data, err := os.ReadFile(output.Name())
@@ -207,7 +207,7 @@ func TestKillReapsTheChild(t *testing.T) {
 
 	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
 
-	require.Eventually(t, func() bool { return child.StderrLastLine() == "dying" }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return child.StderrTail() == "dying" }, 5*time.Second, 10*time.Millisecond)
 	require.NoError(t, child.Kill())
 
 	// Kill itself must begin the reap: nothing here calls Wait or Done.
@@ -217,21 +217,25 @@ func TestKillReapsTheChild(t *testing.T) {
 		t.Fatal("killed child was not reaped")
 	}
 
-	require.Equal(t, "dying", child.StderrLastLine())
+	require.Equal(t, "dying", child.StderrTail())
 	require.NoError(t, child.Close())
 }
 
-func TestStderrTailKeepsTheLastLine(t *testing.T) {
+func TestStderrTailKeepsTheEndOfTheStream(t *testing.T) {
 	t.Parallel()
 
-	child, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 2000 ]; do echo line-$i >&2; i=$((i+1)); done; echo final >&2"}, Env: []string{"PATH=/bin"}})
+	child, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 4000 ]; do echo line-$i >&2; i=$((i+1)); done; printf 'Error: dead\\nHint: why\\n' >&2"}, Env: []string{"PATH=/bin"}})
 	require.NoError(t, err)
 
 	go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
 
 	_, err = child.Wait(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "final", child.StderrLastLine())
+
+	tail := child.StderrTail()
+	require.True(t, strings.HasSuffix(tail, "line-3999\nError: dead\nHint: why"), tail)
+	require.NotContains(t, tail, "line-0\n")
+	require.LessOrEqual(t, len(tail), stderrTailBytes)
 	require.NoError(t, child.Close())
 }
 
@@ -269,7 +273,7 @@ func TestConcurrentClosePreservesPendingStderr(t *testing.T) {
 			t.Fatal("concurrent Close did not join the copier")
 		}
 	}
-	require.Equal(t, "fatal: dead", child.StderrLastLine())
+	require.Equal(t, "fatal: dead", child.StderrTail())
 }
 
 func TestCloseBoundsStderrHeldByAWriter(t *testing.T) {

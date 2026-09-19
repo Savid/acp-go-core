@@ -59,12 +59,12 @@ Only pi adds a vendor cause: `extension`.
 
 | Sibling | Native mapping and disclosed detail |
 |---|---|
-| claude | Native error results supply `errors`, `error`, or `result`; process death reports exit status and the last stderr line. |
-| codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. App-server death reports status plus the last stderr line. |
-| pi | Command rejection preserves native text; process death reports status plus the last stderr line. Wrapper extension failure is `extension` with the fixed text `a pi extension failed`. |
-| hermes | Native result status or RPC rejection supplies provider detail. Process death reports status and the final stderr line. |
-| opencode | Native HTTP errors or assistant error records supply provider detail. Process death reports status and the final stderr line. |
-| amp | A native receipt status `error` or an error stream record supplies provider detail. Process death reports status and the last stderr line. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
+| claude | Native error results supply `errors`, `error`, or `result`. |
+| codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. |
+| pi | Command rejection preserves native text. Wrapper extension failure is `extension` with the fixed text `a pi extension failed`. |
+| hermes | Native result status or RPC rejection supplies provider detail. |
+| opencode | Native HTTP errors or assistant error records supply provider detail. |
+| amp | A native receipt status `error` or an error stream record supplies provider detail. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
 
 ## Raw Events
 
@@ -480,8 +480,7 @@ native transcript can contain multiple entries with one API message id.
   operator's extensions, skills, and prompt templates stays on.
 - **Pi retry and settings:** native retry defaults off; `autoRetry` opts in
   per session. Seed files are written into pi's config root under a manifest;
-  a seeded `settings.json` must parse. Turn process-exit detail retains one
-  last stderr line.
+  a seeded `settings.json` must parse.
 
 - **Amp models and permissions:** modes select the model; no model catalog,
   permission, elicitation, or slash-command surface exists. Native tool

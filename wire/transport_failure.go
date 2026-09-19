@@ -23,8 +23,8 @@ func TransportFailure(ctx context.Context, proc *process.Process, name string, e
 			message = fmt.Sprintf("%s was killed by signal %d", name, result.Signal)
 		}
 
-		if line := proc.StderrLastLine(); line != "" {
-			message += ": " + line
+		if tail := proc.StderrTail(); tail != "" {
+			message += ": " + tail
 		}
 
 		return TurnFailure{Cause: CauseProcessExit, Message: message}

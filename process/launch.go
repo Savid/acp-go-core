@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// stderrTailBytes bounds the stderr the process retains for diagnostics.
-const stderrTailBytes = 8 * 1024
+// stderrTailBytes bounds the stderr the process retains for diagnostics; the
+// end of the stream holds a dying harness's reason, stack trace included.
+const stderrTailBytes = 16 * 1024
 
 // stderrFlushWait bounds how long diagnostic reads and Close wait for the
 // stderr copier to deliver the child's final line.
@@ -134,10 +135,11 @@ func (p *Process) drainStderr() {
 	}
 }
 
-// StderrLastLine is the final non-empty stderr line, which is where a dying
-// harness names its reason. After the child has exited it waits briefly for
-// the copier to deliver the last bytes.
-func (p *Process) StderrLastLine() string {
+// StderrTail is the retained end of the child's stderr, trimmed, where a
+// dying harness states its reason as an error line, a hint, or a stack trace.
+// After the child has exited it waits briefly for the copier to deliver the
+// last bytes.
+func (p *Process) StderrTail() string {
 	select {
 	case <-p.done:
 		p.flushStderr()
@@ -147,14 +149,7 @@ func (p *Process) StderrLastLine() string {
 	p.tailMu.Lock()
 	defer p.tailMu.Unlock()
 
-	lines := bytes.Split(bytes.TrimSpace(p.tail), []byte("\n"))
-	for index := len(lines) - 1; index >= 0; index-- {
-		if line := bytes.TrimSpace(lines[index]); len(line) > 0 {
-			return string(line)
-		}
-	}
-
-	return ""
+	return string(bytes.TrimSpace(p.tail))
 }
 
 func (p *Process) flushStderr() {
