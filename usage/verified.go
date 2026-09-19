@@ -8,10 +8,12 @@ import (
 )
 
 // Access identifies the credential and route selected by the native runtime.
-// Fingerprint covers native routing facts beyond the credential itself.
+// BaseURL is where the runtime sends the key; Fingerprint covers native
+// routing facts beyond the credential itself.
 type Access struct {
 	APIKey      string
 	AccountID   string
+	BaseURL     string
 	Reason      string
 	Fingerprint [32]byte
 }
@@ -28,7 +30,7 @@ func ReadVerified(ctx context.Context, access func(context.Context) (Access, err
 		return wire.AccountUsageUnavailable(before.Reason), nil
 	}
 
-	response, err := reader.Read(ctx, Credential{Token: before.APIKey, AccountID: before.AccountID})
+	response, err := reader.Read(ctx, Credential{Token: before.APIKey, AccountID: before.AccountID, BaseURL: before.BaseURL})
 	if err != nil {
 		return wire.AccountUsageResponse{}, err
 	}

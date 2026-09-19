@@ -113,7 +113,9 @@ with its `scope` and, when it supports provider selection, a nonempty
 with method-not-found. The [registry](registry.md#account-usage) records each
 sibling's scope and source.
 
-Reads use the native harness protocol or a shared `usage/` provider reader.
+Reads use the native harness protocol or a shared `usage/` provider reader;
+a provider the harness routes through a gateway is read by the shared gateway
+reader keyed to that provider.
 A sibling using a provider reader MUST resolve the credential from its native
 runtime's effective configuration for the addressed session, verify the
 provider's official endpoint and authentication route, and reject a route it

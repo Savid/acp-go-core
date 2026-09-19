@@ -1,0 +1,253 @@
+// Package gateway reads the aggregate usage report a forwarding gateway
+// publishes for the upstream accounts it brokers.
+package gateway
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"math"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/savid/acp-go-core/usage"
+	"github.com/savid/acp-go-core/usage/internal/usagehttp"
+	"github.com/savid/acp-go-core/wire"
+)
+
+// Path is where a gateway publishes its report, beneath the API root the
+// harness is configured with.
+const Path = "/v1/usage"
+
+// Reader reads one upstream provider's section of the report published at the
+// credential's base. It uses the supplied transport or http.DefaultTransport
+// and never acquires credentials.
+type Reader struct {
+	Transport  http.RoundTripper
+	ProviderID string
+}
+
+// Endpoint is the report address beneath base: the API root the harness sends
+// requests to, with or without its trailing /v1 segment.
+func Endpoint(base string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("gateway base is not an http origin")
+	}
+
+	parsed.Path = strings.TrimSuffix(strings.TrimSuffix(parsed.Path, "/"), "/v1") + Path
+	parsed.RawPath = ""
+
+	return parsed.String(), nil
+}
+
+// Read observes the provider's section of the report at credential.BaseURL
+// with the bearer the harness sends there. A base that publishes no report is
+// a plain proxy and answers not_reported.
+func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
+	endpoint, err := Endpoint(credential.BaseURL)
+	if err != nil {
+		return wire.AccountUsageResponse{}, err
+	}
+
+	response, err := usagehttp.Get(ctx, r.Transport, endpoint, credential.Token, nil)
+	if err != nil {
+		return wire.AccountUsageResponse{}, err
+	}
+
+	switch response.StatusCode {
+	case http.StatusUnauthorized:
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated), nil
+	case http.StatusNotFound:
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+	case http.StatusOK:
+		return r.decode(response)
+	}
+
+	return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
+}
+
+type report struct {
+	Reports []providerReport `json:"reports"`
+}
+
+type providerReport struct {
+	Provider  string  `json:"provider"`
+	FetchedAt int64   `json:"fetchedAt"`
+	Error     string  `json:"error"`
+	Limits    []limit `json:"limits"`
+	Metadata  struct {
+		PlanType string `json:"planType"`
+		Allowed  *bool  `json:"allowed"`
+	} `json:"metadata"`
+}
+
+type limit struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Status string `json:"status"`
+	Window struct {
+		DurationMs int64 `json:"durationMs"`
+		ResetsAt   int64 `json:"resetsAt"`
+	} `json:"window"`
+	Amount struct {
+		Used         *float64 `json:"used"`
+		Limit        *float64 `json:"limit"`
+		Remaining    *float64 `json:"remaining"`
+		UsedFraction *float64 `json:"usedFraction"`
+		Unit         string   `json:"unit"`
+	} `json:"amount"`
+}
+
+// decode projects the provider's section: percent limits become windows, usd
+// amounts balances, request counts request limits, and any other unit is left
+// out. A section the gateway could not fetch is a failed read.
+func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
+	var body report
+
+	published := response.Decode(&body) == nil && body.Reports != nil
+	if !published {
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+	}
+
+	for _, section := range body.Reports {
+		if section.Provider != r.ProviderID {
+			continue
+		}
+
+		if section.Error != "" && len(section.Limits) == 0 {
+			return wire.AccountUsageResponse{}, errors.New("gateway could not read the upstream account")
+		}
+
+		result := wire.AccountUsageResponse{Available: true, Plan: strings.TrimSpace(section.Metadata.PlanType), UsageAllowed: section.Metadata.Allowed}
+		observed := wire.AccountUsageTime(time.UnixMilli(section.FetchedAt))
+
+		for _, entry := range section.Limits {
+			id := strings.ReplaceAll(strings.TrimPrefix(entry.ID, section.Provider+":"), ":", "/")
+			label := strings.TrimSpace(entry.Label)
+
+			resets := ""
+			if entry.Window.ResetsAt > 0 {
+				resets = wire.AccountUsageTime(time.UnixMilli(entry.Window.ResetsAt))
+			}
+
+			switch entry.Amount.Unit {
+			case "percent":
+				percent, ok := percentOf(entry)
+				if !ok {
+					continue
+				}
+
+				window := wire.AccountUsageLimit{ID: id, Label: label, ObservedAt: observed, UsedPercent: percent, ResetsAt: resets, UsageAllowed: allowed(entry.Status)}
+				if entry.Window.DurationMs > 0 {
+					window.WindowSeconds = entry.Window.DurationMs / 1000
+				}
+
+				result.Limits = append(result.Limits, window)
+			case "usd":
+				if entry.Amount.Used == nil {
+					continue
+				}
+
+				result.Balances = append(result.Balances, wire.AccountUsageBalance{
+					ID: id, Label: label, ObservedAt: observed, ResetsAt: resets,
+					Used: money(entry.Amount.Used), Limit: money(entry.Amount.Limit), Remaining: money(entry.Amount.Remaining),
+				})
+			case "requests":
+				if entry.Amount.Used == nil || entry.Amount.Limit == nil {
+					continue
+				}
+
+				remaining := *entry.Amount.Limit - *entry.Amount.Used
+				if entry.Amount.Remaining != nil {
+					remaining = *entry.Amount.Remaining
+				}
+
+				result.RequestLimits = append(result.RequestLimits, wire.AccountUsageRequestLimit{
+					ID: id, Label: label, ObservedAt: observed, ResetsAt: resets,
+					Used: int64(*entry.Amount.Used), Limit: int64(*entry.Amount.Limit), Remaining: int64(remaining),
+				})
+			}
+		}
+
+		if len(result.Limits)+len(result.Balances)+len(result.RequestLimits) == 0 {
+			return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+		}
+
+		if err := result.Validate(); err != nil {
+			return wire.AccountUsageResponse{}, err
+		}
+
+		return result, nil
+	}
+
+	return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+}
+
+func percentOf(entry limit) (float64, bool) {
+	switch {
+	case entry.Amount.UsedFraction != nil:
+		return *entry.Amount.UsedFraction * 100, finite(*entry.Amount.UsedFraction)
+	case entry.Amount.Used != nil:
+		return *entry.Amount.Used, finite(*entry.Amount.Used)
+	default:
+		return 0, false
+	}
+}
+
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+}
+
+func allowed(status string) *bool {
+	switch status {
+	case "ok", "warning":
+		return new(true)
+	case "exhausted":
+		return new(false)
+	default:
+		return nil
+	}
+}
+
+func money(amount *float64) *wire.AccountUsageMoney {
+	if amount == nil {
+		return nil
+	}
+
+	return &wire.AccountUsageMoney{Amount: *amount, Currency: "USD"}
+}
+
+// Route is one custom provider route a harness is configured with: the base
+// it sends requests to and the bearer it sends there.
+type Route struct {
+	Provider string
+	BaseURL  string
+	Token    string
+}
+
+// ReadRoutes asks each route for the provider's section in order and answers
+// with the first that covers it. A route without an http base or a bearer is
+// skipped. When no route covers the provider, fallback answers.
+func ReadRoutes(ctx context.Context, transport http.RoundTripper, routes []Route, providerID string, fallback wire.AccountUsageResponse) (wire.AccountUsageResponse, error) {
+	for _, route := range routes {
+		if _, err := Endpoint(route.BaseURL); err != nil || strings.TrimSpace(route.Token) == "" {
+			continue
+		}
+
+		access := usage.Access{APIKey: route.Token, BaseURL: route.BaseURL, Fingerprint: sha256.Sum256([]byte(route.Provider + "\x00" + route.BaseURL))}
+
+		response, err := usage.ReadVerified(ctx, func(context.Context) (usage.Access, error) { return access, nil }, Reader{Transport: transport, ProviderID: providerID})
+		if err != nil {
+			return wire.AccountUsageResponse{}, err
+		}
+
+		if response.Available {
+			return response, nil
+		}
+	}
+
+	return fallback, nil
+}

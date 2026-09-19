@@ -12,10 +12,13 @@ import (
 	"github.com/savid/acp-go-core/wire"
 )
 
-// Credential identifies the effective provider account resolved by the native harness.
+// Credential identifies the effective provider account resolved by the native
+// harness. BaseURL is the route the harness sends the token to; a reader that
+// addresses the provider's own endpoint ignores it.
 type Credential struct {
 	Token     string
 	AccountID string
+	BaseURL   string
 }
 
 // Reader reads the account addressed by the caller's effective provider credential.
