@@ -99,7 +99,8 @@ type limit struct {
 	Label  string `json:"label"`
 	Status string `json:"status"`
 	Scope  struct {
-		Tier string `json:"tier"`
+		Tier    string `json:"tier"`
+		ModelID string `json:"modelId"`
 	} `json:"scope"`
 	Window struct {
 		ID         string `json:"id"`
@@ -155,7 +156,7 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 				}
 
 				window := wire.AccountUsageLimit{ID: id, Label: label, ObservedAt: observed, UsedPercent: percent, ResetsAt: resets, UsageAllowed: allowed(entry.Status)}
-				if entry.Window.DurationMs > 0 {
+				if entry.Window.DurationMs > 0 && section.Provider == openaicodex.ProviderID {
 					window.WindowSeconds = entry.Window.DurationMs / 1000
 				}
 
@@ -203,7 +204,8 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 // nativeWindow names a gateway limit as the provider's own reader names the
 // same window, so an account reads the same whichever route carried it. The
 // gateway's window and tier identify the window; a provider without a
-// mapping keeps the gateway's names.
+// mapping keeps the gateway's names. Only ChatGPT's reader reports window
+// lengths, so only its windows carry one.
 func nativeWindow(provider string, entry *limit) (id, label string) {
 	switch provider {
 	case anthropic.ProviderID:
@@ -224,7 +226,7 @@ func nativeWindow(provider string, entry *limit) (id, label string) {
 		}
 
 		if suffix := entry.ID[strings.LastIndex(entry.ID, ":")+1:]; suffix == "primary" || suffix == "secondary" {
-			return feature + "/" + suffix, strings.TrimSpace(entry.Label)
+			return feature + "/" + suffix, strings.TrimSpace(entry.Scope.ModelID)
 		}
 	case opencodego.ProviderID:
 		switch entry.Window.ID {

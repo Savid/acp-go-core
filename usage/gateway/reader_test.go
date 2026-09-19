@@ -72,10 +72,10 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.True(t, anthropic.Available)
 	require.Nil(t, anthropic.UsageAllowed)
 	require.Equal(t, []wire.AccountUsageLimit{
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "session", WindowSeconds: 18000, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-19T11:29:59Z"},
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_all", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_scoped/Fable", Label: "Fable", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
-	}, anthropic.Limits, "windows carry the names Anthropic's own reader gives them")
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "session", UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-19T11:29:59Z"},
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_all", UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_scoped/Fable", Label: "Fable", UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
+	}, anthropic.Limits, "windows carry the names and shape Anthropic's own reader gives them")
 
 	codex, err := gateway.Reader{ProviderID: "openai-codex"}.Read(t.Context(), credential)
 	require.NoError(t, err)
@@ -87,7 +87,9 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.Equal(t, "codex/secondary", codex.Limits[1].ID)
 	require.InDelta(t, 8, codex.Limits[1].UsedPercent, 1e-9)
 	require.Equal(t, "base_model_inference/primary", codex.Limits[2].ID)
-	require.Equal(t, "7 days (gpt-reserve)", codex.Limits[2].Label)
+	require.Equal(t, "gpt-reserve", codex.Limits[2].Label, "ChatGPT windows are labelled by model, as natively")
+	require.Empty(t, codex.Limits[0].Label)
+	require.Equal(t, int64(18000), codex.Limits[0].WindowSeconds, "only ChatGPT windows carry a length")
 
 	openrouter, err := gateway.Reader{ProviderID: "openrouter"}.Read(t.Context(), credential)
 	require.NoError(t, err)
@@ -181,8 +183,8 @@ func TestReadNamesOpenCodeGoWindowsNatively(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "OpenCode Go", response.Plan)
 	require.Equal(t, []wire.AccountUsageLimit{
-		{ObservedAt: "2026-09-19T08:40:38Z", ID: "rolling", Label: "Rolling", WindowSeconds: 18000, UsedPercent: 10, UsageAllowed: new(true)},
-		{ObservedAt: "2026-09-19T08:40:38Z", ID: "weekly", Label: "Weekly", WindowSeconds: 604800, UsedPercent: 20, UsageAllowed: new(true)},
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "rolling", Label: "Rolling", UsedPercent: 10, UsageAllowed: new(true)},
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "weekly", Label: "Weekly", UsedPercent: 20, UsageAllowed: new(true)},
 		{ObservedAt: "2026-09-19T08:40:38Z", ID: "monthly", Label: "Monthly", UsedPercent: 100, UsageAllowed: new(false)},
 		{ObservedAt: "2026-09-19T08:40:38Z", ID: "bonus", Label: "Bonus", UsedPercent: 0},
 	}, response.Limits, "known windows take the native names; an unknown window keeps the gateway's")

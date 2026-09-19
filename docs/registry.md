@@ -171,8 +171,9 @@ the gateway's own fetch time; `usage/gateway` reads the requested provider's
 section with the bearer the harness sends that gateway. Percent limits become
 windows named as the provider's own reader names them, from the gateway's
 window and tier: Anthropic `session`, `weekly_all`, `weekly_scoped/<Model>`;
-ChatGPT `<feature>/primary` and `/secondary`; OpenCode Go `rolling`, `weekly`,
-`monthly`; a window without a mapping keeps the gateway's id. Usd amounts
+ChatGPT `<feature>/primary` and `/secondary` labelled by the scoped model;
+OpenCode Go `rolling`, `weekly`, `monthly`; a window without a mapping keeps
+the gateway's id. Only ChatGPT windows carry `windowSeconds`, as natively. Usd amounts
 become balances and request counts request limits; other units are left out. A base without the report is a plain proxy and answers
 `not_reported`.
 
