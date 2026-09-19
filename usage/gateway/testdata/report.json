@@ -1,0 +1,236 @@
+{
+ "generatedAt": 1789807309336,
+ "reports": [
+  {
+   "provider": "openai-codex",
+   "fetchedAt": 1789807237427,
+   "limits": [
+    {
+     "id": "openai-codex:primary",
+     "label": "5 hours",
+     "scope": {
+      "provider": "openai-codex",
+      "windowId": "5h",
+      "shared": true
+     },
+     "window": {
+      "id": "5h",
+      "label": "5 hours",
+      "durationMs": 18000000,
+      "resetsAt": 1789825238000
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "openai-codex:secondary",
+     "label": "7 days",
+     "scope": {
+      "provider": "openai-codex",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 days",
+      "durationMs": 604800000,
+      "resetsAt": 1790046593000
+     },
+     "amount": {
+      "used": 8,
+      "limit": 100,
+      "remaining": 92,
+      "usedFraction": 0.08,
+      "remainingFraction": 0.92,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "openai-codex:base-model-inference:primary",
+     "label": "7 days (gpt-reserve)",
+     "scope": {
+      "provider": "openai-codex",
+      "tier": "base-model-inference",
+      "modelId": "gpt-reserve",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 days",
+      "durationMs": 604800000,
+      "resetsAt": 1790412038000
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    }
+   ],
+   "resetCredits": {
+    "availableCount": 2,
+    "credits": [
+     {
+      "grantedAt": "2026-09-04T06:05:36.977498Z",
+      "expiresAt": "2026-10-04T06:05:36.977498Z",
+      "status": "available"
+     },
+     {
+      "grantedAt": "2026-09-04T21:56:40.674779Z",
+      "expiresAt": "2026-10-04T21:56:40.674779Z",
+      "status": "available"
+     }
+    ]
+   },
+   "metadata": {
+    "planType": "plus",
+    "allowed": true,
+    "limitReached": false
+   }
+  },
+  {
+   "provider": "anthropic",
+   "fetchedAt": 1789807237831,
+   "limits": [
+    {
+     "id": "anthropic:5h",
+     "label": "Claude 5 Hour",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "5h",
+      "shared": true
+     },
+     "window": {
+      "id": "5h",
+      "label": "5 Hour",
+      "durationMs": 18000000,
+      "resetsAt": 1789817399682
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d",
+     "label": "Claude 7 Day",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1790409599682
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d:fable",
+     "label": "Claude 7 Day (Fable)",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "tier": "fable"
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1790409599682
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    }
+   ],
+   "metadata": {}
+  },
+  {
+   "provider": "openrouter",
+   "fetchedAt": 1789807237000,
+   "limits": [
+    {
+     "id": "openrouter:credits",
+     "label": "Credits",
+     "window": {
+      "id": "lifetime"
+     },
+     "amount": {
+      "used": 40.81,
+      "limit": 50,
+      "remaining": 9.19,
+      "unit": "usd"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "openrouter:free-daily",
+     "label": "Free requests",
+     "window": {
+      "id": "daily",
+      "resetsAt": 1789833600000
+     },
+     "amount": {
+      "used": 12,
+      "limit": 1000,
+      "unit": "requests"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "openrouter:tokens",
+     "label": "Tokens",
+     "window": {
+      "id": "daily"
+     },
+     "amount": {
+      "used": 5,
+      "unit": "tokens"
+     },
+     "status": "ok"
+    }
+   ]
+  },
+  {
+   "provider": "opencode-go",
+   "fetchedAt": 1789807238149,
+   "error": "upstream timeout",
+   "limits": []
+  }
+ ]
+}
