@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -234,4 +235,25 @@ func TestModelsReadsTheGatewayList(t *testing.T) {
 	none, err = gateway.Models(t.Context(), nil, gateway.Route{BaseURL: proxy.URL, Token: "k"})
 	require.NoError(t, err)
 	require.Nil(t, none)
+}
+
+func TestModelsReadsAListLargerThanAUsageReport(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[`))
+		for i := range 1500 {
+			if i > 0 {
+				_, _ = w.Write([]byte(","))
+			}
+
+			_, _ = fmt.Fprintf(w, `{"id":"provider-%d/model-%d","object":"model","owned_by":"provider-%d","display_name":"Model %d","context_length":128000,"max_output_tokens":8192,"input_modalities":["text"]}`, i%9, i, i%9, i)
+		}
+		_, _ = w.Write([]byte(`]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	models, err := gateway.Models(t.Context(), nil, gateway.Route{BaseURL: server.URL + "/v1", Token: "k"})
+	require.NoError(t, err)
+	require.Len(t, models, 1500)
 }

@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// maxBodyBytes bounds a usage report; a model list is read within a bound of
+// its own.
 const maxBodyBytes = 64 * 1024
 
 // Response retains only the fields a provider reader consumes.
@@ -25,6 +27,12 @@ type Response struct {
 
 // Get makes one request without redirects, cookies, or inference.
 func Get(ctx context.Context, transport http.RoundTripper, endpoint, token string, headers http.Header) (Response, error) {
+	return GetWithin(ctx, transport, endpoint, token, headers, maxBodyBytes)
+}
+
+// GetWithin reads endpoint with the bearer, refusing a body larger than
+// maxBytes.
+func GetWithin(ctx context.Context, transport http.RoundTripper, endpoint, token string, headers http.Header, maxBytes int64) (Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -70,13 +78,13 @@ func Get(ctx context.Context, transport http.RoundTripper, endpoint, token strin
 		return result, nil
 	}
 
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
 
 	if ctx.Err() != nil {
 		return Response{}, ctx.Err()
 	}
 
-	if err != nil || len(body) > maxBodyBytes {
+	if err != nil || int64(len(body)) > maxBytes {
 		return Response{}, errors.New("provider usage response exceeds its read bound or is incomplete")
 	}
 

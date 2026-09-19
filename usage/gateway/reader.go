@@ -322,6 +322,9 @@ func ReadRoutes(ctx context.Context, transport http.RoundTripper, routes []Route
 // the API root the harness is configured with.
 const ModelsPath = "/v1/models"
 
+// modelsMaxBytes bounds a model list, which runs to thousands of entries.
+const modelsMaxBytes = 8 << 20
+
 // Model is one entry of a gateway's model list.
 type Model struct {
 	ID            string
@@ -353,7 +356,7 @@ func Models(ctx context.Context, transport http.RoundTripper, route Route) ([]Mo
 		return nil, err
 	}
 
-	response, err := usagehttp.Get(ctx, transport, endpoint, route.Token, nil)
+	response, err := usagehttp.GetWithin(ctx, transport, endpoint, route.Token, nil, modelsMaxBytes)
 	if err != nil {
 		return nil, err
 	}
