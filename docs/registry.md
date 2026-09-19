@@ -386,6 +386,12 @@ establishment (claude, hermes, opencode, pi).
 
 ## Native Verification
 
+The no-token smoke suites passed on 2026-09-20 with Amp
+`0.0.1789736830-g151f8f`, Claude Code `2.1.278`, Codex `0.155.1`, Hermes
+`0.21.3` (`f5a457ad`), OpenCode `1.18.31`, and Pi `0.85.1`. These runs cover
+native session setup and the non-inference controls each smoke suite exercises;
+they do not establish live prompt, callback, or cancellation behavior.
+
 OpenCode `1.18.30`, tag commit `3104c1428ec91f809e5ab86631300de41eb6952e`,
 verified 2026-09-14: native creation and sync import; race-enabled ACP → native
 `opencode run --session` → ACP continuation; fresh-home import followed by a
@@ -450,7 +456,8 @@ Claude Code `2.1.278`, source-verified 2026-09-20 against the integrity-checked
 [published native package](https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/2.1.278):
 `get_usage` exposes fixed rate-limit members and `model_scoped` windows. Its
 availability flag can be true while the fetched report is null. Adapter tests
-cover both forms; this verification did not execute an authenticated read.
+cover both forms. The no-token native smoke also passed against this package,
+including the logged-out usage response; no authenticated read was executed.
 
 Claude Code `2.1.273`, verified 2026-09-17 without tokens: native
 initialization and settings controls, account usage on the default home and
