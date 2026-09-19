@@ -89,7 +89,8 @@ The structural gate checks these symbols and literals in every sibling:
   `wire.DecodeAccountUsageRequest`, advertises
   `wire.AccountUsageCapabilityKey`, calls `Validate` in every non-test file
   that assembles a `wire.AccountUsageResponse` or calls a shared provider
-  reader, and has a row in
+  reader (a read through `usage.ReadVerified` or `gateway.ReadRoutes`
+  validates within core), and has a row in
   the registry's Account Usage table recording its scope; a sibling without
   the export uses none of those and its row reads `none`.
 
