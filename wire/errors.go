@@ -15,6 +15,9 @@ import (
 // nativeCauseMaxBytes bounds the native cause text a turn failure carries.
 const nativeCauseMaxBytes = 2048
 
+// processCauseMaxBytes holds the complete stderr tail and the exit diagnosis.
+const processCauseMaxBytes = nativeCauseMaxBytes + 16*1024
+
 // Data member names shared by every uniform error.
 const (
 	FieldError   = "error"
@@ -107,8 +110,12 @@ func CancelledResponse(params acp.PromptRequest) acp.PromptResponse {
 
 // boundNativeCause is the one gate every native cause text passes through
 // before it reaches a client.
-func boundNativeCause(message string) string {
-	if len(message) > nativeCauseMaxBytes {
+func boundNativeCause(message, cause string) string {
+	if cause == CauseProcessExit {
+		if len(message) > processCauseMaxBytes {
+			message = message[len(message)-processCauseMaxBytes:]
+		}
+	} else if len(message) > nativeCauseMaxBytes {
 		message = message[:nativeCauseMaxBytes]
 	}
 
@@ -130,12 +137,12 @@ type TurnFailure struct {
 }
 
 // TurnFailed renders the <vendor>_turn_failed error. Message carries the real
-// native cause, bounded to nativeCauseMaxBytes of valid UTF-8.
+// native cause as bounded valid UTF-8; process exits retain the full stderr tail.
 func TurnFailed(vendor string, failure TurnFailure) *acp.RequestError {
 	data := map[string]any{
 		FieldError:   vendor + "_" + TokenTurnFailed,
 		FieldCause:   failure.Cause,
-		FieldMessage: boundNativeCause(failure.Message),
+		FieldMessage: boundNativeCause(failure.Message, failure.Cause),
 	}
 
 	if failure.StatusCode > 0 {

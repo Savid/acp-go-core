@@ -4,11 +4,12 @@ package gateway
 
 import (
 	"context"
-	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/savid/acp-go-core/usage/internal/usagehttp"
 	"github.com/savid/acp-go-core/usage/openaicodex"
 	"github.com/savid/acp-go-core/usage/opencodego"
+	"github.com/savid/acp-go-core/usage/openrouter"
 	"github.com/savid/acp-go-core/wire"
 )
 
@@ -57,26 +59,32 @@ func Endpoint(base string) (string, error) {
 // with the bearer the harness sends there. A base that publishes no report is
 // a plain proxy and answers not_reported.
 func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
+	response, _, err := r.read(ctx, credential)
+
+	return response, err
+}
+
+func (r Reader) read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, bool, error) {
 	endpoint, err := Endpoint(credential.BaseURL)
 	if err != nil {
-		return wire.AccountUsageResponse{}, err
+		return wire.AccountUsageResponse{}, false, err
 	}
 
 	response, err := usagehttp.Get(ctx, r.Transport, endpoint, credential.Token, nil)
 	if err != nil {
-		return wire.AccountUsageResponse{}, err
+		return wire.AccountUsageResponse{}, false, err
 	}
 
 	switch response.StatusCode {
 	case http.StatusUnauthorized:
-		return wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated), nil
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated), false, nil
 	case http.StatusNotFound:
-		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), false, nil
 	case http.StatusOK:
 		return r.decode(response)
 	}
 
-	return wire.AccountUsageResponse{}, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
+	return wire.AccountUsageResponse{}, false, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
 }
 
 type report struct {
@@ -108,23 +116,23 @@ type limit struct {
 		ResetsAt   int64  `json:"resetsAt"`
 	} `json:"window"`
 	Amount struct {
-		Used         *float64 `json:"used"`
-		Limit        *float64 `json:"limit"`
-		Remaining    *float64 `json:"remaining"`
-		UsedFraction *float64 `json:"usedFraction"`
-		Unit         string   `json:"unit"`
+		Used         *json.Number `json:"used"`
+		Limit        *json.Number `json:"limit"`
+		Remaining    *json.Number `json:"remaining"`
+		UsedFraction *float64     `json:"usedFraction"`
+		Unit         string       `json:"unit"`
 	} `json:"amount"`
 }
 
 // decode projects the provider's section: percent limits become windows, usd
 // amounts balances, request counts request limits, and any other unit is left
 // out. A section the gateway could not fetch is a failed read.
-func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
+func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, bool, error) {
 	var body report
 
 	published := response.Decode(&body) == nil && body.Reports != nil
 	if !published {
-		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+		return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), false, nil
 	}
 
 	for _, section := range body.Reports {
@@ -132,8 +140,8 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 			continue
 		}
 
-		if section.Error != "" && len(section.Limits) == 0 {
-			return wire.AccountUsageResponse{}, errors.New("gateway could not read the upstream account")
+		if section.Error != "" {
+			return wire.AccountUsageResponse{}, true, errors.New("gateway could not read the upstream account")
 		}
 
 		result := wire.AccountUsageResponse{Available: true, Plan: strings.TrimSpace(section.Metadata.PlanType), UsageAllowed: section.Metadata.Allowed}
@@ -166,39 +174,57 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 					continue
 				}
 
+				quotaLimit := entry.Amount.Limit
+				if section.Provider == openrouter.ProviderID && entry.ID == "openrouter:credits" {
+					quotaLimit = nil
+				}
+
 				result.Balances = append(result.Balances, wire.AccountUsageBalance{
 					ID: id, Label: label, ObservedAt: observed, ResetsAt: resets,
-					Used: money(entry.Amount.Used), Limit: money(entry.Amount.Limit), Remaining: money(entry.Amount.Remaining),
+					Used: money(entry.Amount.Used), Limit: money(quotaLimit), Remaining: money(entry.Amount.Remaining),
 				})
 			case "requests":
 				if entry.Amount.Used == nil || entry.Amount.Limit == nil {
 					continue
 				}
 
-				remaining := *entry.Amount.Limit - *entry.Amount.Used
+				used, usedErr := entry.Amount.Used.Int64()
+
+				quotaLimit, capErr := entry.Amount.Limit.Int64()
+				if usedErr != nil || capErr != nil || used < 0 || quotaLimit < 0 {
+					return wire.AccountUsageResponse{}, true, errors.New("gateway request counts must be nonnegative integers")
+				}
+
+				remaining := max(quotaLimit-used, 0)
+
 				if entry.Amount.Remaining != nil {
-					remaining = *entry.Amount.Remaining
+					var err error
+
+					remaining, err = entry.Amount.Remaining.Int64()
+					if err != nil || remaining < 0 {
+						return wire.AccountUsageResponse{}, true, errors.New("gateway remaining requests must be a nonnegative integer")
+					}
 				}
 
 				result.RequestLimits = append(result.RequestLimits, wire.AccountUsageRequestLimit{
 					ID: id, Label: label, ObservedAt: observed, ResetsAt: resets,
-					Used: int64(*entry.Amount.Used), Limit: int64(*entry.Amount.Limit), Remaining: int64(remaining),
+					Used: used, Limit: quotaLimit, Remaining: remaining,
 				})
 			}
 		}
 
 		if len(result.Limits)+len(result.Balances)+len(result.RequestLimits) == 0 {
-			return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+			return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), true, nil
 		}
 
 		if err := result.Validate(); err != nil {
-			return wire.AccountUsageResponse{}, err
+			return wire.AccountUsageResponse{}, true, err
 		}
 
-		return result, nil
+		return result, true, nil
 	}
 
-	return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
+	return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), false, nil
 }
 
 // nativeWindow names a gateway limit as the provider's own reader names the
@@ -228,6 +254,10 @@ func nativeWindow(provider string, entry *limit) (id, label string) {
 		if suffix := entry.ID[strings.LastIndex(entry.ID, ":")+1:]; suffix == "primary" || suffix == "secondary" {
 			return feature + "/" + suffix, strings.TrimSpace(entry.Scope.ModelID)
 		}
+	case openrouter.ProviderID:
+		if entry.ID == "openrouter:credits" || entry.ID == "openrouter:free-daily" {
+			return strings.TrimPrefix(entry.ID, openrouter.ProviderID+":"), strings.TrimSpace(entry.Label)
+		}
 	case opencodego.ProviderID:
 		switch entry.Window.ID {
 		case windowFiveHour:
@@ -239,7 +269,7 @@ func nativeWindow(provider string, entry *limit) (id, label string) {
 		}
 	}
 
-	return strings.ReplaceAll(strings.TrimPrefix(entry.ID, provider+":"), ":", "/"), strings.TrimSpace(entry.Label)
+	return entry.ID, strings.TrimSpace(entry.Label)
 }
 
 // titled renders a gateway tier as the provider's model display name: the
@@ -257,7 +287,9 @@ func percentOf(entry *limit) (float64, bool) {
 	case entry.Amount.UsedFraction != nil:
 		return *entry.Amount.UsedFraction * 100, finite(*entry.Amount.UsedFraction)
 	case entry.Amount.Used != nil:
-		return *entry.Amount.Used, finite(*entry.Amount.Used)
+		value, err := entry.Amount.Used.Float64()
+
+		return value, err == nil && finite(value)
 	default:
 		return 0, false
 	}
@@ -278,12 +310,14 @@ func allowed(status string) *bool {
 	}
 }
 
-func money(amount *float64) *wire.AccountUsageMoney {
+func money(amount *json.Number) *wire.AccountUsageMoney {
 	if amount == nil {
 		return nil
 	}
 
-	return &wire.AccountUsageMoney{Amount: *amount, Currency: "USD"}
+	value, _ := amount.Float64()
+
+	return &wire.AccountUsageMoney{Amount: value, Currency: "USD"}
 }
 
 // Route is one custom provider route a harness is configured with: the base
@@ -296,22 +330,35 @@ type Route struct {
 
 // ReadRoutes asks each route for the provider's section in order and answers
 // with the first that covers it. A route without an http base or a bearer is
-// skipped. When no route covers the provider, fallback answers.
-func ReadRoutes(ctx context.Context, transport http.RoundTripper, routes []Route, providerID string, fallback wire.AccountUsageResponse) (wire.AccountUsageResponse, error) {
+// skipped. The resolver rechecks the native routes after every read; a changed
+// binding discards the observation. When no route covers the provider, fallback answers.
+func ReadRoutes(ctx context.Context, transport http.RoundTripper, resolve func(context.Context) ([]Route, error), providerID string, fallback wire.AccountUsageResponse) (wire.AccountUsageResponse, error) {
+	routes, err := resolve(ctx)
+	if err != nil {
+		return wire.AccountUsageResponse{}, err
+	}
+
 	for _, route := range routes {
 		if _, err := Endpoint(route.BaseURL); err != nil || strings.TrimSpace(route.Token) == "" {
 			continue
 		}
 
-		access := usage.Access{APIKey: route.Token, BaseURL: route.BaseURL, Fingerprint: sha256.Sum256([]byte(route.Provider + "\x00" + route.BaseURL))}
-
-		response, err := usage.ReadVerified(ctx, func(context.Context) (usage.Access, error) { return access, nil }, Reader{Transport: transport, ProviderID: providerID})
+		response, covered, err := (Reader{Transport: transport, ProviderID: providerID}).read(ctx, usage.Credential{Token: route.Token, BaseURL: route.BaseURL})
 		if err != nil {
 			return wire.AccountUsageResponse{}, err
 		}
 
-		if response.Available {
-			return response, nil
+		current, err := resolve(ctx)
+		if err != nil {
+			return wire.AccountUsageResponse{}, err
+		}
+
+		if !slices.Equal(routes, current) {
+			return wire.AccountUsageResponse{}, errors.New("gateway credentials or routes changed")
+		}
+
+		if covered {
+			return response, response.Validate()
 		}
 	}
 

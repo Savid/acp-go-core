@@ -98,8 +98,6 @@ check_sibling() {
   done
   rg -q 'var buildVersion = "dev"' "$repo/cmd/$name/version.go" || fail "$name: buildVersion default is not dev"
   rg -q '^GO_TEST_TIMEOUT \?= 40m$' "$repo/Makefile" || fail "$name: GO_TEST_TIMEOUT not declared once as 40m"
-  rg -q '^audit: fmt-check lint build coverage-check tidy vuln modernize-check$' "$repo/Makefile" || fail "$name: audit prerequisites are not canonical"
-  rg -A1 '^audit: ' "$repo/Makefile" | rg -q '^\tgo mod verify$' || fail "$name: audit recipe does not end with go mod verify"
   rg -q 'go test -race -shuffle=on -timeout=\$\(GO_TEST_TIMEOUT\) \./\.\.\.' "$repo/Makefile" || fail "$name: test recipe is not canonical"
   rg -q 'go fix -diff \./\.\.\.' "$repo/Makefile" || fail "$name: modernize-check recipe is not canonical"
   rg -q '@latest' "$repo/Makefile" && fail "$name: @latest in Makefile"
@@ -214,6 +212,10 @@ for repo in repos[1:]:
     makefile = (repo / "Makefile").read_text()
     if len(re.findall(r"^GO_TEST_TIMEOUT \?= 40m$", makefile, re.M)) != 1:
         fail(f"{repo.name}: GO_TEST_TIMEOUT must be declared exactly once")
+    audit = re.search(r"^audit:\n((?:\t[^\n]*\n)+)", makefile, re.M)
+    expected_audit = "".join(f"\t$(MAKE) {target}\n" for target in ("fmt-check", "lint", "build", "coverage-check", "tidy", "vuln", "modernize-check")) + "\tgo mod verify\n"
+    if audit is None or audit[1] != expected_audit:
+        fail(f"{repo.name}: audit must run canonical checks serially and end with go mod verify")
     for target in ("build", "test-integration-smoke", "test-integration-live", "clean", "help"):
         if not re.search(rf"^{target}:", makefile, re.M):
             fail(f"{repo.name}: missing {target} target")

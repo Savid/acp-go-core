@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -101,7 +102,7 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, goWindows.Limits)
 	require.Equal(t, []wire.AccountUsageBalance{{ID: "credits", Label: "Credits", ObservedAt: "2026-09-19T08:40:37Z",
-		Used: &wire.AccountUsageMoney{Amount: 40.81, Currency: "USD"}, Limit: &wire.AccountUsageMoney{Amount: 50, Currency: "USD"}, Remaining: &wire.AccountUsageMoney{Amount: 9.19, Currency: "USD"}}}, openrouter.Balances)
+		Used: &wire.AccountUsageMoney{Amount: 40.81, Currency: "USD"}, Remaining: &wire.AccountUsageMoney{Amount: 9.19, Currency: "USD"}}}, openrouter.Balances)
 	require.Equal(t, []wire.AccountUsageRequestLimit{{ID: "free-daily", Label: "Free requests", ObservedAt: "2026-09-19T08:40:37Z", Used: 12, Limit: 1000, Remaining: 988, ResetsAt: "2026-09-19T16:00:00Z"}}, openrouter.RequestLimits)
 
 	_, err = gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), credential)
@@ -152,19 +153,19 @@ func TestReadRoutesAnswersWithTheFirstCoveringRoute(t *testing.T) {
 		{Provider: "broken", BaseURL: "gateway.example", Token: "x"},
 		{Provider: "empty", BaseURL: proxy.URL, Token: " "},
 		{Provider: "proxy", BaseURL: proxy.URL + "/v1", Token: "proxy-key"},
-		{Provider: "omp", BaseURL: server.URL + "/v1", Token: "gateway-key"},
+		{Provider: "gateway", BaseURL: server.URL + "/v1", Token: "gateway-key"},
 	}
 
-	response, err := gateway.ReadRoutes(t.Context(), nil, routes, "anthropic", fallback)
+	response, err := gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "anthropic", fallback)
 	require.NoError(t, err)
 	require.True(t, response.Available)
 	require.Len(t, response.Limits, 3)
 
-	response, err = gateway.ReadRoutes(t.Context(), nil, routes, "xai", fallback)
+	response, err = gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "xai", fallback)
 	require.NoError(t, err)
 	require.Equal(t, fallback, response, "a provider no route covers keeps the fallback")
 
-	_, err = gateway.ReadRoutes(t.Context(), nil, routes, "opencode-go", fallback)
+	_, err = gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "opencode-go", fallback)
 	require.Error(t, err, "a gateway that could not fetch the provider is a failed read")
 }
 
@@ -218,7 +219,7 @@ func TestModelsReadsTheGatewayList(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, server.URL+"/v1/models", endpoint)
 
-	models, err := gateway.Models(t.Context(), nil, gateway.Route{Provider: "omp", BaseURL: server.URL + "/v1", Token: "gateway-key"})
+	models, err := gateway.Models(t.Context(), nil, gateway.Route{Provider: "gateway", BaseURL: server.URL + "/v1", Token: "gateway-key"})
 	require.NoError(t, err)
 	require.Equal(t, []gateway.Model{
 		{ID: "openai-codex/gpt-5.6-luna", Name: "GPT-5.6-Luna", ContextWindow: 400000, MaxTokens: 128000, Inputs: []string{"text", "image"}},
@@ -256,4 +257,87 @@ func TestModelsReadsAListLargerThanAUsageReport(t *testing.T) {
 	models, err := gateway.Models(t.Context(), nil, gateway.Route{BaseURL: server.URL + "/v1", Token: "k"})
 	require.NoError(t, err)
 	require.Len(t, models, 1500)
+}
+
+func TestGatewayRejectsErroredSectionWithMeasurements(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"anthropic","fetchedAt":1789807237000,"error":"upstream read failed after first window","limits":[{"id":"anthropic:5h","window":{"id":"5h"},"amount":{"unit":"percent","used":25}}]}]}`)
+	}))
+	t.Cleanup(server.Close)
+	response, err := (gateway.Reader{ProviderID: "anthropic"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+	require.Error(t, err, "explicit upstream failure must not turn its partial measurements into success: %+v", response)
+}
+func TestGatewayRejectsNonIntegerRequestCounts(t *testing.T) {
+	for _, used := range []string{"1.9", "-0.5", "9223372036854775808"} {
+		t.Run(used, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"reports":[{"provider":"openrouter","fetchedAt":1789807237000,"limits":[{"id":"requests","amount":{"unit":"requests","used":%s,"limit":10,"remaining":8}}]}]}`, used)
+			}))
+			t.Cleanup(server.Close)
+			response, err := (gateway.Reader{ProviderID: "openrouter"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+			require.Error(t, err, "malformed source count must not be rounded into a valid observation: %+v", response)
+		})
+	}
+}
+func TestGatewayPreservesIntegerRequestCounts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"openrouter","fetchedAt":1789807237000,"limits":[{"id":"requests","amount":{"unit":"requests","used":9007199254740993,"limit":9007199254740993,"remaining":0}}]}]}`)
+	}))
+	t.Cleanup(server.Close)
+	response, err := (gateway.Reader{ProviderID: "openrouter"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+	require.NoError(t, err)
+	require.Len(t, response.RequestLimits, 1)
+	require.Equal(t, int64(9007199254740993), response.RequestLimits[0].Used)
+	require.Equal(t, int64(9007199254740993), response.RequestLimits[0].Limit)
+}
+
+func TestReadRoutesRevalidatesNativeBinding(t *testing.T) {
+	t.Parallel()
+	server := gatewayServer(t)
+	calls := 0
+	resolve := func(context.Context) ([]gateway.Route, error) {
+		calls++
+		token := "gateway-key"
+		if calls > 1 {
+			token = "rotated-key"
+		}
+
+		return []gateway.Route{{Provider: "gateway", BaseURL: server.URL, Token: token}}, nil
+	}
+	response, err := gateway.ReadRoutes(t.Context(), nil, resolve, "anthropic", wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated))
+	require.Error(t, err)
+	require.False(t, response.Available)
+	require.Equal(t, 2, calls)
+}
+
+func TestReadRoutesPreservesConnectedUnreportedAccount(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"anthropic","limits":[]}]}`)
+	}))
+	t.Cleanup(server.Close)
+	response, err := gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) {
+		return []gateway.Route{{BaseURL: server.URL, Token: "key"}}, nil
+	}, "anthropic", wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated))
+	require.NoError(t, err)
+	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), response)
+}
+
+func TestGatewayPreservesUnmappedWindowNames(t *testing.T) {
+	t.Parallel()
+	for _, provider := range []string{"opencode-go", "unmapped-provider"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			id := provider + ":promo:bonus"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"reports":[{"provider":%q,"fetchedAt":1789807237000,"limits":[{"id":%q,"label":"Bonus","window":{"id":"promo"},"amount":{"unit":"percent","used":25}}]}]}`, provider, id)
+			}))
+			t.Cleanup(server.Close)
+			response, err := (gateway.Reader{ProviderID: provider}).Read(t.Context(), usage.Credential{BaseURL: server.URL, Token: "key"})
+			require.NoError(t, err)
+			require.Len(t, response.Limits, 1)
+			require.Equal(t, id, response.Limits[0].ID)
+			require.Equal(t, "Bonus", response.Limits[0].Label)
+		})
+	}
 }

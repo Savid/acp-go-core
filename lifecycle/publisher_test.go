@@ -19,8 +19,8 @@ func TestPublisherSerializesForegroundAndBlockers(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	var cycle Cycle
-	require.NoError(t, publisher.OpenAgentCycle(t.Context(), &cycle))
+	cycle := publisher.NewAgentCycle()
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), cycle))
 	require.NoError(t, publisher.ActionPending(t.Context(), cycle, "one", ActionPermission))
 	require.NoError(t, publisher.ActionPending(t.Context(), cycle, "two", ActionElicitation))
 	require.NoError(t, publisher.ActionResolved(t.Context(), cycle, "one", ActionAccepted))
@@ -45,13 +45,13 @@ func TestPublisherKeepsBlockersPerCycle(t *testing.T) {
 		return nil
 	}
 	require.NoError(t, publisher.Open(t.Context(), "incarnation", Negotiated{Version: Version, UpdatesOutsidePrompt: true, ActivityKinds: []ActivityKind{}}, deliver))
-	var first Cycle
-	require.NoError(t, publisher.OpenAgentCycle(t.Context(), &first))
+	first := publisher.NewAgentCycle()
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), first))
 	require.NoError(t, publisher.ActionPending(t.Context(), first, "stale", ActionPermission))
 	require.NoError(t, publisher.Idle(t.Context(), first, StopReasonEndTurn, OutcomeSuccess))
 	require.Empty(t, publisher.blockers, "idle cancels the cycle's own blockers")
-	var second Cycle
-	require.NoError(t, publisher.OpenAgentCycle(t.Context(), &second))
+	second := publisher.NewAgentCycle()
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), second))
 	require.NoError(t, publisher.ActionPending(t.Context(), second, "fresh", ActionElicitation))
 	require.NoError(t, publisher.ActionResolved(t.Context(), first, "fresh", ActionAccepted), "another cycle cannot resolve this cycle's blocker")
 	require.Len(t, publisher.blockers, 1)
@@ -75,11 +75,11 @@ func TestPublisherCountsBlockersPerCycle(t *testing.T) {
 		return nil
 	}
 	require.NoError(t, publisher.Open(t.Context(), "incarnation", Negotiated{Version: Version, UpdatesOutsidePrompt: true, ActivityKinds: []ActivityKind{}}, deliver))
-	var abandoned Cycle
-	require.NoError(t, publisher.OpenAgentCycle(t.Context(), &abandoned))
+	abandoned := publisher.NewAgentCycle()
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), abandoned))
 	require.NoError(t, publisher.ActionPending(t.Context(), abandoned, "stale", ActionPermission))
-	var next Cycle
-	require.NoError(t, publisher.OpenAgentCycle(t.Context(), &next))
+	next := publisher.NewAgentCycle()
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), next))
 	require.NoError(t, publisher.ActionPending(t.Context(), next, "fresh", ActionElicitation))
 	require.Equal(t, "requires_action", transitions[len(transitions)-1], "a blocker left by another cycle does not hide this cycle's first blocker")
 	require.NoError(t, publisher.ActionResolved(t.Context(), next, "fresh", ActionAccepted))
@@ -96,4 +96,17 @@ func TestPublisherFencesFailedDelivery(t *testing.T) {
 	})
 	require.ErrorIs(t, err, failure)
 	require.False(t, publisher.Active())
+}
+
+func TestPublisherRejectsAnAgentCycleFromAnotherIncarnation(t *testing.T) {
+	t.Parallel()
+	var publisher Publisher
+	negotiated := Negotiated{Version: Version, UpdatesOutsidePrompt: true}
+	require.NoError(t, publisher.Open(t.Context(), "first", negotiated, nil))
+	cycle := publisher.NewAgentCycle()
+	publisher.Fence()
+	require.NoError(t, publisher.Open(t.Context(), "second", negotiated, nil))
+	require.Error(t, publisher.OpenAgentCycle(t.Context(), cycle))
+	require.True(t, publisher.Active())
+	require.NoError(t, publisher.OpenAgentCycle(t.Context(), publisher.NewAgentCycle()))
 }

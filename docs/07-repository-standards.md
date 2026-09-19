@@ -132,7 +132,7 @@ mode and agent selection are session config options, never flags.
 | `tidy` | Verify `go mod tidy`. |
 | `vuln` | Run the pinned vulnerability scanner. |
 | `modernize-check` | `go fix -diff ./...`. |
-| `audit` | Exactly `fmt-check lint build coverage-check tidy vuln modernize-check`, in that order, then `go mod verify`. |
+| `audit` | Exactly `fmt-check lint build coverage-check tidy vuln modernize-check`, in that order even under parallel make, then `go mod verify`. |
 | `clean`, `help` | Remove artifacts; list targets. |
 
 `GO_TEST_TIMEOUT ?= 40m` is declared once. Identical-class recipes are

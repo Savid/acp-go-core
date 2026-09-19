@@ -200,8 +200,9 @@ no stop reason:
 `cause` is one of `process_exit`, `transport`, `provider`, or a vendor cause
 the [registry](registry.md#turn-failure) enumerates. `message` carries the
 real native cause and is never a placeholder or a bare `EOF`; it is valid
-UTF-8 of at most 2048 bytes, bounded by
-`wire.TurnFailed`. `statusCode` and `providerCode` appear only when the harness
+UTF-8 bounded by `wire.TurnFailed`: at most 18 KiB for `process_exit`,
+including the complete retained 16 KiB stderr tail, and at most 2048 bytes
+for other causes. `statusCode` and `providerCode` appear only when the harness
 supplies them. Semantics are in [05-behavior.md](05-behavior.md#native-turn-failure).
 
 Every other `-32603` a sibling emits carries a closed `data.error` token and

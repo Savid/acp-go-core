@@ -9,9 +9,10 @@ import (
 
 // Cycle identifies a foreground turn and the native cause that owns it.
 type Cycle struct {
-	TurnID  string
-	CycleID string
-	Origin  Cause
+	TurnID      string
+	CycleID     string
+	Origin      Cause
+	incarnation string
 }
 
 // Publisher owns one session's lifecycle incarnation and blocking actions. It
@@ -86,8 +87,24 @@ func (p *Publisher) Accept(ctx context.Context, c *Cycle, submission Submission)
 	return p.emit(ctx, transitionEvent(ForegroundRunning, c.CycleID, c.TurnID, c.Origin))
 }
 
-// OpenAgentCycle opens a foreground cycle caused by native activity.
-func (p *Publisher) OpenAgentCycle(ctx context.Context, c *Cycle) error {
+// NewAgentCycle allocates an immutable identity in the current incarnation.
+// The caller reserves its foreground with this identity before publishing it.
+func (p *Publisher) NewAgentCycle() Cycle {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	c := Cycle{Origin: CauseActivity}
+	if p.active() {
+		c.TurnID = p.nextID("turn")
+		c.CycleID = p.nextID("cycle")
+		c.incarnation = p.stream.id
+	}
+
+	return c
+}
+
+// OpenAgentCycle publishes the reserved native activity in its incarnation.
+func (p *Publisher) OpenAgentCycle(ctx context.Context, c Cycle) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -95,9 +112,9 @@ func (p *Publisher) OpenAgentCycle(ctx context.Context, c *Cycle) error {
 		return nil
 	}
 
-	c.TurnID = p.nextID("turn")
-	c.CycleID = p.nextID("cycle")
-	c.Origin = CauseActivity
+	if c.incarnation != p.stream.id || c.Origin != CauseActivity || c.TurnID == "" || c.CycleID == "" {
+		return fmt.Errorf("agent cycle does not belong to the current incarnation")
+	}
 
 	return p.emit(ctx, transitionEvent(ForegroundRunning, c.CycleID, c.TurnID, c.Origin))
 }
