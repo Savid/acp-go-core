@@ -317,3 +317,85 @@ func ReadRoutes(ctx context.Context, transport http.RoundTripper, routes []Route
 
 	return fallback, nil
 }
+
+// ModelsPath is where a gateway publishes the models it routes to, beneath
+// the API root the harness is configured with.
+const ModelsPath = "/v1/models"
+
+// Model is one entry of a gateway's model list.
+type Model struct {
+	ID            string
+	Name          string
+	ContextWindow int64
+	MaxTokens     int64
+	// Inputs is the gateway's own list of input modalities; nil means it
+	// reported none.
+	Inputs []string
+}
+
+// ModelsEndpoint is the model list address beneath base, with or without its
+// trailing /v1 segment.
+func ModelsEndpoint(base string) (string, error) {
+	endpoint, err := Endpoint(base)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSuffix(endpoint, Path) + ModelsPath, nil
+}
+
+// Models reads the model list a gateway publishes at the route's base with the
+// bearer the harness sends there, in the gateway's order. A base that
+// publishes no list answers none.
+func Models(ctx context.Context, transport http.RoundTripper, route Route) ([]Model, error) {
+	endpoint, err := ModelsEndpoint(route.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := usagehttp.Get(ctx, transport, endpoint, route.Token, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	switch response.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusUnauthorized:
+		return nil, nil
+	default:
+		return nil, &usage.HTTPError{StatusCode: response.StatusCode, RetryAt: response.RetryAt}
+	}
+
+	var body struct {
+		Data []struct {
+			ID            string   `json:"id"`
+			DisplayName   string   `json:"display_name"`      //nolint:tagliatelle // Gateway API member.
+			ContextLength int64    `json:"context_length"`    //nolint:tagliatelle // Gateway API member.
+			MaxOutput     int64    `json:"max_output_tokens"` //nolint:tagliatelle // Gateway API member.
+			Inputs        []string `json:"input_modalities"`  //nolint:tagliatelle // Gateway API member.
+		} `json:"data"`
+	}
+
+	published := response.Decode(&body) == nil && body.Data != nil
+	if !published {
+		return nil, nil
+	}
+
+	models := make([]Model, 0, len(body.Data))
+
+	for _, entry := range body.Data {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+
+		name := strings.TrimSpace(entry.DisplayName)
+		if name == "" {
+			name = id
+		}
+
+		models = append(models, Model{ID: id, Name: name, ContextWindow: max(entry.ContextLength, 0), MaxTokens: max(entry.MaxOutput, 0), Inputs: entry.Inputs})
+	}
+
+	return models, nil
+}

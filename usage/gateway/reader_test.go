@@ -189,3 +189,49 @@ func TestReadNamesOpenCodeGoWindowsNatively(t *testing.T) {
 		{ObservedAt: "2026-09-19T08:40:38Z", ID: "bonus", Label: "Bonus", UsedPercent: 0},
 	}, response.Limits, "known windows take the native names; an unknown window keeps the gateway's")
 }
+
+func TestModelsReadsTheGatewayList(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer gateway-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+
+			return
+		}
+
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"openai-codex/gpt-5.6-luna","object":"model","owned_by":"openai-codex","display_name":"GPT-5.6-Luna","context_length":400000,"max_output_tokens":128000,"input_modalities":["text","image"]},
+			{"id":"opencode-go/qwen3.8-flash","object":"model","owned_by":"opencode-go"},
+			{"id":"  ","object":"model"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	endpoint, err := gateway.ModelsEndpoint(server.URL + "/v1")
+	require.NoError(t, err)
+	require.Equal(t, server.URL+"/v1/models", endpoint)
+
+	models, err := gateway.Models(t.Context(), nil, gateway.Route{Provider: "omp", BaseURL: server.URL + "/v1", Token: "gateway-key"})
+	require.NoError(t, err)
+	require.Equal(t, []gateway.Model{
+		{ID: "openai-codex/gpt-5.6-luna", Name: "GPT-5.6-Luna", ContextWindow: 400000, MaxTokens: 128000, Inputs: []string{"text", "image"}},
+		{ID: "opencode-go/qwen3.8-flash", Name: "opencode-go/qwen3.8-flash"},
+	}, models, "an entry without an id is left out; a missing display name falls back to the id")
+
+	none, err := gateway.Models(t.Context(), nil, gateway.Route{BaseURL: server.URL + "/v1", Token: "wrong"})
+	require.NoError(t, err)
+	require.Nil(t, none, "a refused bearer publishes no list to this caller")
+
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	t.Cleanup(proxy.Close)
+
+	none, err = gateway.Models(t.Context(), nil, gateway.Route{BaseURL: proxy.URL, Token: "k"})
+	require.NoError(t, err)
+	require.Nil(t, none)
+}

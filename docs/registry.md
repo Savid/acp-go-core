@@ -175,7 +175,8 @@ ChatGPT `<feature>/primary` and `/secondary` labelled by the scoped model;
 OpenCode Go `rolling`, `weekly`, `monthly`; a window without a mapping keeps
 the gateway's id. Only ChatGPT windows carry `windowSeconds`, as natively. Usd amounts
 become balances and request counts request limits; other units are left out. A base without the report is a plain proxy and answers
-`not_reported`.
+`not_reported`. A gateway also publishes the models it routes to at `/v1/models`,
+which `gateway.Models` reads for a harness that cannot discover them itself.
 
 Verified on 2026-09-18 with Pi 0.85.1: real reads returned ChatGPT and
 Claude windows, OpenCode Go percentages, and OpenRouter dollar balances.
@@ -238,7 +239,7 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | Sibling | Source | Metadata |
 |---|---|---|
 | claude | `initialize.models`, snapshotted once per process | `modelId` and native `supportedEffortLevels`; configured and selected ids append after the native entries. Unknown full ids forward unchanged. |
-| codex | `model/list`, the presets the CLI build ships, read once per app-server generation | `modelId`, plus `contextWindow` and `supportedEffortLevels` when the row carries them; the effort menu is the selected model's `supportedReasoningEfforts`, else a fixed menu once an effort is set |
+| codex | `model/list`, the presets the CLI build ships, read once per app-server generation; when the active `model_provider` routes through a gateway publishing `/v1/models`, that list replaces the presets, each id naming its upstream | `modelId`, plus `contextWindow` and `supportedEffortLevels` when the row carries them; the effort menu is the selected model's `supportedReasoningEfforts`, else a fixed menu once an effort is set |
 | pi | `get_available_models`, pi's own registry filtered by its configured providers, snapshotted once at native start | `modelId`, plus `contextWindow` and `maxOutputTokens` when the row carries them |
 | hermes | `model.options` provider catalogs | Provider-qualified `modelId`. Configured and selected ids append after native entries. |
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
