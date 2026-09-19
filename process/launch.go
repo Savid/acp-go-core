@@ -16,8 +16,8 @@ import (
 // stderrTailBytes bounds the stderr the process retains for diagnostics.
 const stderrTailBytes = 8 * 1024
 
-// stderrFlushWait bounds how long a reader waits for the stderr copier to
-// deliver the child's final line after the child has exited.
+// stderrFlushWait bounds how long diagnostic reads and Close wait for the
+// stderr copier to deliver the child's final line.
 const stderrFlushWait = 250 * time.Millisecond
 
 // Request describes one harness launch.
@@ -140,10 +140,7 @@ func (p *Process) drainStderr() {
 func (p *Process) StderrLastLine() string {
 	select {
 	case <-p.done:
-		select {
-		case <-p.tailClosed:
-		case <-time.After(stderrFlushWait):
-		}
+		p.flushStderr()
 	default:
 	}
 
@@ -158,6 +155,13 @@ func (p *Process) StderrLastLine() string {
 	}
 
 	return ""
+}
+
+func (p *Process) flushStderr() {
+	select {
+	case <-p.tailClosed:
+	case <-time.After(stderrFlushWait):
+	}
 }
 
 func (p *Process) beginWait() {
@@ -265,19 +269,27 @@ func (p *Process) signalGroup(signal syscall.Signal) error {
 	return nil
 }
 
-// Close closes the parent ends of the three pipes and then joins the stderr
-// copier; the close is what returns the copier's blocked read, so it must
-// precede the join. A pipe already closed by its reader or writer is not an
-// error.
+// Close closes stdin and stdout, allows the stderr copier a bounded drain,
+// then closes stderr and joins the copier. The deadline interrupts a read
+// held open by a live child or descendant. An already closed pipe is not an
+// error; concurrent Close calls are safe.
 func (p *Process) Close() error {
 	var errs []error
 
-	for _, closer := range []io.Closer{p.stdin, p.stdout, p.stderr} {
+	for _, closer := range []io.Closer{p.stdin, p.stdout} {
 		if closer == nil {
 			continue
 		}
 
 		if err := closer.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			errs = append(errs, err)
+		}
+	}
+
+	p.flushStderr()
+
+	if p.stderr != nil {
+		if err := p.stderr.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			errs = append(errs, err)
 		}
 	}

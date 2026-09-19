@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,6 +233,102 @@ func TestStderrTailKeepsTheLastLine(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "final", child.StderrLastLine())
 	require.NoError(t, child.Close())
+}
+
+func TestConcurrentClosePreservesPendingStderr(t *testing.T) {
+	t.Parallel()
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	_, err = io.WriteString(writer, "fatal: dead\n")
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	stderr := &observedStderrClose{File: reader, closed: make(chan struct{})}
+	stdin := &observedStdinClose{Writer: io.Discard, closed: make(chan struct{})}
+	child := &Process{stdin: stdin, stderr: stderr, done: make(chan struct{}), tailClosed: make(chan struct{})}
+	close(child.done)
+	read := make(chan struct{})
+	go func() { <-read; child.drainStderr() }()
+	results := make(chan error, 2)
+	for range 2 {
+		go func() { results <- child.Close() }()
+	}
+	<-stdin.closed
+	// The final write and process exit precede Close, but the copier has
+	// not been scheduled. Closing stderr here discards those pending bytes.
+	select {
+	case <-stderr.closed:
+	case <-time.After(stderrFlushWait / 10):
+	}
+	close(read)
+	for range 2 {
+		select {
+		case closeErr := <-results:
+			require.NoError(t, closeErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("concurrent Close did not join the copier")
+		}
+	}
+	require.Equal(t, "fatal: dead", child.StderrLastLine())
+}
+
+func TestCloseBoundsStderrHeldByAWriter(t *testing.T) {
+	t.Parallel()
+	for _, exited := range []bool{false, true} {
+		name := "live process"
+		if exited {
+			name = "exited process with live descendant"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reader, writer, err := os.Pipe()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+			child := &Process{stderr: reader, done: make(chan struct{}), tailClosed: make(chan struct{})}
+			if exited {
+				close(child.done)
+			}
+			go child.drainStderr()
+			closed := make(chan error, 1)
+			go func() { closed <- child.Close() }()
+			select {
+			case closeErr := <-closed:
+				require.NoError(t, closeErr)
+			case <-time.After(2 * time.Second):
+				t.Fatal("Close waited for the stderr writer to exit")
+			}
+			select {
+			case <-child.tailClosed:
+			default:
+				t.Fatal("Close returned before the stderr copier stopped")
+			}
+			require.NoError(t, child.Close(), "repeated close is idempotent")
+		})
+	}
+}
+
+type observedStdinClose struct {
+	io.Writer
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (w *observedStdinClose) Close() error {
+	w.once.Do(func() { close(w.closed) })
+
+	return nil
+}
+
+type observedStderrClose struct {
+	*os.File
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (r *observedStderrClose) Close() error {
+	r.once.Do(func() { close(r.closed) })
+
+	return r.File.Close()
 }
 
 func TestValidateOptionalAbsolutePath(t *testing.T) {
