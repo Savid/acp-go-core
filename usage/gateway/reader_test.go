@@ -72,10 +72,10 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.True(t, anthropic.Available)
 	require.Nil(t, anthropic.UsageAllowed)
 	require.Equal(t, []wire.AccountUsageLimit{
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "5h", Label: "Claude 5 Hour", WindowSeconds: 18000, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-19T11:29:59Z"},
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "7d", Label: "Claude 7 Day", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
-		{ObservedAt: "2026-09-19T08:40:37Z", ID: "7d/fable", Label: "Claude 7 Day (Fable)", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
-	}, anthropic.Limits)
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "session", WindowSeconds: 18000, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-19T11:29:59Z"},
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_all", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
+		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_scoped/Fable", Label: "Fable", WindowSeconds: 604800, UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
+	}, anthropic.Limits, "windows carry the names Anthropic's own reader gives them")
 
 	codex, err := gateway.Reader{ProviderID: "openai-codex"}.Read(t.Context(), credential)
 	require.NoError(t, err)
@@ -83,14 +83,20 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.Equal(t, "plus", codex.Plan)
 	require.Equal(t, new(true), codex.UsageAllowed)
 	require.Len(t, codex.Limits, 3)
-	require.Equal(t, "secondary", codex.Limits[1].ID)
+	require.Equal(t, "codex/primary", codex.Limits[0].ID)
+	require.Equal(t, "codex/secondary", codex.Limits[1].ID)
 	require.InDelta(t, 8, codex.Limits[1].UsedPercent, 1e-9)
-	require.Equal(t, "base-model-inference/primary", codex.Limits[2].ID)
+	require.Equal(t, "base_model_inference/primary", codex.Limits[2].ID)
+	require.Equal(t, "7 days (gpt-reserve)", codex.Limits[2].Label)
 
 	openrouter, err := gateway.Reader{ProviderID: "openrouter"}.Read(t.Context(), credential)
 	require.NoError(t, err)
 	require.NoError(t, openrouter.Validate())
 	require.Empty(t, openrouter.Limits, "a token count has no wire form and is left out")
+
+	goWindows, err := gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), usage.Credential{Token: "gateway-key", BaseURL: server.URL + "/v1"})
+	require.Error(t, err)
+	require.Nil(t, goWindows.Limits)
 	require.Equal(t, []wire.AccountUsageBalance{{ID: "credits", Label: "Credits", ObservedAt: "2026-09-19T08:40:37Z",
 		Used: &wire.AccountUsageMoney{Amount: 40.81, Currency: "USD"}, Limit: &wire.AccountUsageMoney{Amount: 50, Currency: "USD"}, Remaining: &wire.AccountUsageMoney{Amount: 9.19, Currency: "USD"}}}, openrouter.Balances)
 	require.Equal(t, []wire.AccountUsageRequestLimit{{ID: "free-daily", Label: "Free requests", ObservedAt: "2026-09-19T08:40:37Z", Used: 12, Limit: 1000, Remaining: 988, ResetsAt: "2026-09-19T16:00:00Z"}}, openrouter.RequestLimits)
@@ -157,4 +163,27 @@ func TestReadRoutesAnswersWithTheFirstCoveringRoute(t *testing.T) {
 
 	_, err = gateway.ReadRoutes(t.Context(), nil, routes, "opencode-go", fallback)
 	require.Error(t, err, "a gateway that could not fetch the provider is a failed read")
+}
+
+func TestReadNamesOpenCodeGoWindowsNatively(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"generatedAt":1,"reports":[{"provider":"opencode-go","fetchedAt":1789807238149,"limits":[
+			{"id":"rolling-5h","label":"5 Hour limit","window":{"id":"5h","durationMs":18000000},"amount":{"usedFraction":0.1,"unit":"percent"},"status":"ok"},
+			{"id":"weekly","label":"Weekly limit","window":{"id":"7d","durationMs":604800000},"amount":{"usedFraction":0.2,"unit":"percent"},"status":"warning"},
+			{"id":"monthly","label":"Monthly limit","window":{"id":"monthly"},"amount":{"usedFraction":1,"unit":"percent"},"status":"exhausted"},
+			{"id":"bonus","label":"Bonus","window":{"id":"promo"},"amount":{"usedFraction":0,"unit":"percent"},"status":"unknown"}],"metadata":{"planType":"OpenCode Go"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	response, err := gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), usage.Credential{Token: "k", BaseURL: server.URL})
+	require.NoError(t, err)
+	require.Equal(t, "OpenCode Go", response.Plan)
+	require.Equal(t, []wire.AccountUsageLimit{
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "rolling", Label: "Rolling", WindowSeconds: 18000, UsedPercent: 10, UsageAllowed: new(true)},
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "weekly", Label: "Weekly", WindowSeconds: 604800, UsedPercent: 20, UsageAllowed: new(true)},
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "monthly", Label: "Monthly", UsedPercent: 100, UsageAllowed: new(false)},
+		{ObservedAt: "2026-09-19T08:40:38Z", ID: "bonus", Label: "Bonus", UsedPercent: 0},
+	}, response.Limits, "known windows take the native names; an unknown window keeps the gateway's")
 }

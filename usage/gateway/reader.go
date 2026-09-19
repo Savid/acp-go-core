@@ -13,13 +13,23 @@ import (
 	"time"
 
 	"github.com/savid/acp-go-core/usage"
+	"github.com/savid/acp-go-core/usage/anthropic"
 	"github.com/savid/acp-go-core/usage/internal/usagehttp"
+	"github.com/savid/acp-go-core/usage/openaicodex"
+	"github.com/savid/acp-go-core/usage/opencodego"
 	"github.com/savid/acp-go-core/wire"
 )
 
 // Path is where a gateway publishes its report, beneath the API root the
 // harness is configured with.
 const Path = "/v1/usage"
+
+// The gateway's window ids for the windows every provider shares.
+const (
+	windowFiveHour = "5h"
+	windowSevenDay = "7d"
+	windowMonthly  = "monthly"
+)
 
 // Reader reads one upstream provider's section of the report published at the
 // credential's base. It uses the supplied transport or http.DefaultTransport
@@ -88,9 +98,13 @@ type limit struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Status string `json:"status"`
+	Scope  struct {
+		Tier string `json:"tier"`
+	} `json:"scope"`
 	Window struct {
-		DurationMs int64 `json:"durationMs"`
-		ResetsAt   int64 `json:"resetsAt"`
+		ID         string `json:"id"`
+		DurationMs int64  `json:"durationMs"`
+		ResetsAt   int64  `json:"resetsAt"`
 	} `json:"window"`
 	Amount struct {
 		Used         *float64 `json:"used"`
@@ -124,9 +138,9 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 		result := wire.AccountUsageResponse{Available: true, Plan: strings.TrimSpace(section.Metadata.PlanType), UsageAllowed: section.Metadata.Allowed}
 		observed := wire.AccountUsageTime(time.UnixMilli(section.FetchedAt))
 
-		for _, entry := range section.Limits {
-			id := strings.ReplaceAll(strings.TrimPrefix(entry.ID, section.Provider+":"), ":", "/")
-			label := strings.TrimSpace(entry.Label)
+		for index := range section.Limits {
+			entry := &section.Limits[index]
+			id, label := nativeWindow(section.Provider, entry)
 
 			resets := ""
 			if entry.Window.ResetsAt > 0 {
@@ -186,7 +200,57 @@ func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, 
 	return wire.AccountUsageUnavailable(wire.AccountUsageNotReported), nil
 }
 
-func percentOf(entry limit) (float64, bool) {
+// nativeWindow names a gateway limit as the provider's own reader names the
+// same window, so an account reads the same whichever route carried it. The
+// gateway's window and tier identify the window; a provider without a
+// mapping keeps the gateway's names.
+func nativeWindow(provider string, entry *limit) (id, label string) {
+	switch provider {
+	case anthropic.ProviderID:
+		switch {
+		case entry.Window.ID == windowFiveHour:
+			return "session", ""
+		case entry.Window.ID == windowSevenDay && entry.Scope.Tier == "":
+			return "weekly_all", ""
+		case entry.Window.ID == windowSevenDay:
+			model := titled(entry.Scope.Tier)
+
+			return "weekly_scoped/" + model, model
+		}
+	case openaicodex.ProviderID:
+		feature := "codex"
+		if entry.Scope.Tier != "" {
+			feature = strings.ReplaceAll(entry.Scope.Tier, "-", "_")
+		}
+
+		if suffix := entry.ID[strings.LastIndex(entry.ID, ":")+1:]; suffix == "primary" || suffix == "secondary" {
+			return feature + "/" + suffix, strings.TrimSpace(entry.Label)
+		}
+	case opencodego.ProviderID:
+		switch entry.Window.ID {
+		case windowFiveHour:
+			return "rolling", "Rolling"
+		case windowSevenDay:
+			return "weekly", "Weekly"
+		case windowMonthly:
+			return "monthly", "Monthly"
+		}
+	}
+
+	return strings.ReplaceAll(strings.TrimPrefix(entry.ID, provider+":"), ":", "/"), strings.TrimSpace(entry.Label)
+}
+
+// titled renders a gateway tier as the provider's model display name: the
+// first letter raised, the rest as given.
+func titled(tier string) string {
+	if tier == "" {
+		return ""
+	}
+
+	return strings.ToUpper(tier[:1]) + tier[1:]
+}
+
+func percentOf(entry *limit) (float64, bool) {
 	switch {
 	case entry.Amount.UsedFraction != nil:
 		return *entry.Amount.UsedFraction * 100, finite(*entry.Amount.UsedFraction)
