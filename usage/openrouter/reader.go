@@ -87,9 +87,8 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 	}
 
 	observedAt := wire.AccountUsageTime(response.ObservedAt)
-	staleAt := wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness))
 
-	budget := wire.AccountUsageBalance{ID: "key_spending", Label: "Key spending", ObservedAt: observedAt, StaleAt: staleAt}
+	budget := wire.AccountUsageBalance{ID: "key_spending", Label: "Key spending", ObservedAt: observedAt}
 	if limit == nil {
 		budget.Uncapped = true
 		budget.Used = money(*body.Data.Usage)
@@ -105,7 +104,7 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 	result := wire.AccountUsageResponse{Available: true, Balances: []wire.AccountUsageBalance{budget}}
 	if limit != nil {
 		result.Balances = append(result.Balances, wire.AccountUsageBalance{
-			ID: "key_usage", Label: "Key spend (all time)", ObservedAt: observedAt, StaleAt: staleAt, Used: money(*body.Data.Usage),
+			ID: "key_usage", Label: "Key spend (all time)", ObservedAt: observedAt, Used: money(*body.Data.Usage),
 		})
 	}
 
@@ -115,7 +114,7 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 		}
 
 		result.RequestLimits = append(result.RequestLimits, wire.AccountUsageRequestLimit{
-			ID: "free_model_daily_requests", Label: "Free-model requests", ObservedAt: observedAt, StaleAt: staleAt,
+			ID: "free_model_daily_requests", Label: "Free-model requests", ObservedAt: observedAt,
 			Used: *requests.Used, Limit: *requests.Limit, Remaining: *requests.Remaining, ResetInterval: "daily",
 		})
 	}
@@ -153,7 +152,7 @@ func (r Reader) credits(ctx context.Context, apiKey string) *wire.AccountUsageBa
 
 	return &wire.AccountUsageBalance{
 		ID: "account_credits", Label: "Account credits", ObservedAt: wire.AccountUsageTime(response.ObservedAt),
-		StaleAt: wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness)), Used: money(used), Remaining: money(purchased - used),
+		Used: money(used), Remaining: money(purchased - used),
 	}
 }
 

@@ -86,7 +86,6 @@ func decode(response usagehttp.Response) (wire.AccountUsageResponse, error) {
 		result.Limits = append(result.Limits, wire.AccountUsageLimit{
 			ID: item.id, Label: item.label, UsedPercent: *w.Percent,
 			ObservedAt: wire.AccountUsageTime(response.ObservedAt),
-			StaleAt:    wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness)),
 			ResetsAt:   wire.AccountUsageTime(w.ResetsAt), UsageAllowed: new(w.Status == "ok"),
 		})
 	}

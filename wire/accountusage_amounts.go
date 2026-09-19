@@ -25,7 +25,6 @@ type AccountUsageBalance struct {
 	ID            string             `json:"id"`
 	Label         string             `json:"label,omitempty"`
 	ObservedAt    string             `json:"observedAt"`
-	StaleAt       string             `json:"staleAt"`
 	Used          *AccountUsageMoney `json:"used,omitempty"`
 	Limit         *AccountUsageMoney `json:"limit,omitempty"`
 	Remaining     *AccountUsageMoney `json:"remaining,omitempty"`
@@ -39,7 +38,6 @@ type AccountUsageRequestLimit struct {
 	ID            string `json:"id"`
 	Label         string `json:"label,omitempty"`
 	ObservedAt    string `json:"observedAt"`
-	StaleAt       string `json:"staleAt"`
 	Used          int64  `json:"used"`
 	Limit         int64  `json:"limit"`
 	Remaining     int64  `json:"remaining"`
@@ -47,16 +45,12 @@ type AccountUsageRequestLimit struct {
 	ResetsAt      string `json:"resetsAt,omitempty"`
 }
 
-func validateAccountMeasurement(id, label, observedAt, staleAt, interval, resetsAt string) error {
+func validateAccountMeasurement(id, label, observedAt, interval, resetsAt string) error {
 	if id == "" || id != strings.TrimSpace(id) || label != strings.TrimSpace(label) {
 		return errors.New("measurement identity is empty or carries surrounding whitespace")
 	}
 
 	if err := validateAccountUsageTime(observedAt, "observedAt"); err != nil {
-		return err
-	}
-
-	if err := validateAccountUsageTime(staleAt, "staleAt"); err != nil {
 		return err
 	}
 
@@ -72,7 +66,7 @@ func validateAccountMeasurement(id, label, observedAt, staleAt, interval, resets
 }
 
 func (b AccountUsageBalance) validate() error {
-	if err := validateAccountMeasurement(b.ID, b.Label, b.ObservedAt, b.StaleAt, b.ResetInterval, b.ResetsAt); err != nil {
+	if err := validateAccountMeasurement(b.ID, b.Label, b.ObservedAt, b.ResetInterval, b.ResetsAt); err != nil {
 		return err
 	}
 
@@ -113,7 +107,7 @@ func (b AccountUsageBalance) validate() error {
 }
 
 func (l AccountUsageRequestLimit) validate() error {
-	if err := validateAccountMeasurement(l.ID, l.Label, l.ObservedAt, l.StaleAt, l.ResetInterval, l.ResetsAt); err != nil {
+	if err := validateAccountMeasurement(l.ID, l.Label, l.ObservedAt, l.ResetInterval, l.ResetsAt); err != nil {
 		return err
 	}
 

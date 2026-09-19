@@ -114,7 +114,6 @@ func decode(response usagehttp.Response, accountID string) (wire.AccountUsageRes
 				ID: limit.Feature + "/" + item.suffix, Label: strings.TrimSpace(limit.Name),
 				UsedPercent: *w.UsedPercent, WindowSeconds: w.Seconds, UsageAllowed: limit.Limit.Allowed,
 				ObservedAt: wire.AccountUsageTime(response.ObservedAt),
-				StaleAt:    wire.AccountUsageTime(response.ObservedAt.Add(wire.AccountUsageFreshness)),
 			}
 			if w.ResetsAt > 0 {
 				entry.ResetsAt = wire.AccountUsageTime(time.Unix(w.ResetsAt, 0))

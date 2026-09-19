@@ -93,11 +93,8 @@ func TestOpenRouterKeepsKeyCapLifetimeSpendAndAccountBalanceSeparate(t *testing.
 	require.Equal(t, int64(38), requests.Remaining)
 	require.Equal(t, "daily", requests.ResetInterval)
 	for _, balance := range response.Balances {
-		observed, parseErr := time.Parse(time.RFC3339, balance.ObservedAt)
+		_, parseErr := time.Parse(time.RFC3339, balance.ObservedAt)
 		require.NoError(t, parseErr)
-		stale, parseErr := time.Parse(time.RFC3339, balance.StaleAt)
-		require.NoError(t, parseErr)
-		require.Equal(t, wire.AccountUsageFreshness, stale.Sub(observed))
 	}
 }
 
@@ -329,11 +326,8 @@ func TestCodexUsagePreservesAccountAndIndependentWindows(t *testing.T) {
 	require.Nil(t, response.UsageAllowed)
 	require.Empty(t, response.Balances, "subscription credits do not establish a dollar balance")
 	for _, window := range response.Limits {
-		observed, parseErr := time.Parse(time.RFC3339, window.ObservedAt)
+		_, parseErr := time.Parse(time.RFC3339, window.ObservedAt)
 		require.NoError(t, parseErr)
-		stale, parseErr := time.Parse(time.RFC3339, window.StaleAt)
-		require.NoError(t, parseErr)
-		require.Equal(t, wire.AccountUsageFreshness, stale.Sub(observed))
 	}
 }
 

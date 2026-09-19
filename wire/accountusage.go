@@ -25,10 +25,6 @@ const AccountUsageCapabilityKey = "accountUsage"
 // request.
 const AccountUsageReadTimeout = 30 * time.Second
 
-// AccountUsageFreshness is how long one account-usage observation stays
-// current; staleAt is observedAt plus this.
-const AccountUsageFreshness = time.Minute
-
 // AccountUsageScope names what a sibling's account-usage read is bound to.
 type AccountUsageScope string
 
@@ -189,8 +185,6 @@ func decodeAccountUsageMembers(params json.RawMessage) (map[string]json.RawMessa
 type AccountUsageLimit struct {
 	// ObservedAt is when the harness supplied this window.
 	ObservedAt string `json:"observedAt"`
-	// StaleAt is when this observation expires or was invalidated.
-	StaleAt string `json:"staleAt"`
 	// ID is unique within one response and stable across reads of the same
 	// account.
 	ID string `json:"id"`
@@ -318,10 +312,6 @@ func (r AccountUsageResponse) validateUnavailable() error {
 
 func (l AccountUsageLimit) validate() error {
 	if err := validateAccountUsageTime(l.ObservedAt, "observedAt"); err != nil {
-		return err
-	}
-
-	if err := validateAccountUsageTime(l.StaleAt, "staleAt"); err != nil {
 		return err
 	}
 

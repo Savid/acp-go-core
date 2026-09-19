@@ -48,14 +48,14 @@ type Money struct {
 // Response projects one native observation without renewing its timestamps.
 func (o Observation) Response(plan string, observedAt time.Time) (wire.AccountUsageResponse, error) {
 	result := wire.AccountUsageResponse{Available: true, Plan: strings.TrimSpace(plan)}
-	observed, stale := wire.AccountUsageTime(observedAt), wire.AccountUsageTime(observedAt.Add(wire.AccountUsageFreshness))
+	observed := wire.AccountUsageTime(observedAt)
 
 	for _, limit := range o.Limits {
 		if limit.Percent == nil {
 			return wire.AccountUsageResponse{}, errors.New("anthropic usage percentage is missing")
 		}
 
-		entry := wire.AccountUsageLimit{ID: strings.TrimSpace(limit.Kind), UsedPercent: *limit.Percent, ObservedAt: observed, StaleAt: stale}
+		entry := wire.AccountUsageLimit{ID: strings.TrimSpace(limit.Kind), UsedPercent: *limit.Percent, ObservedAt: observed}
 		if limit.Scope != nil && limit.Scope.Model != nil {
 			if entry.Label = strings.TrimSpace(limit.Scope.Model.DisplayName); entry.Label != "" {
 				entry.ID += "/" + entry.Label
@@ -86,7 +86,7 @@ func (o Observation) Response(plan string, observedAt time.Time) (wire.AccountUs
 		}
 
 		result.Balances = append(result.Balances, wire.AccountUsageBalance{
-			ID: "usage_credits", Used: used, Limit: limit, ObservedAt: observed, StaleAt: stale,
+			ID: "usage_credits", Used: used, Limit: limit, ObservedAt: observed,
 		})
 	}
 

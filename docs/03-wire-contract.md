@@ -149,8 +149,8 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
   "plan": "pro",
   "usageAllowed": true,
   "limits": [
-    {"id": "session", "observedAt": "2026-09-17T02:41:03Z", "staleAt": "2026-09-17T02:42:03Z", "windowSeconds": 18000, "usedPercent": 4, "resetsAt": "2026-09-17T03:30:00Z"},
-    {"id": "weekly", "observedAt": "2026-09-17T02:41:03Z", "staleAt": "2026-09-17T02:42:03Z", "label": "Weekly", "usedPercent": 22, "resetsAt": "2026-09-19T08:00:00Z"}
+    {"id": "session", "observedAt": "2026-09-17T02:41:03Z", "windowSeconds": 18000, "usedPercent": 4, "resetsAt": "2026-09-17T03:30:00Z"},
+    {"id": "weekly", "observedAt": "2026-09-17T02:41:03Z", "label": "Weekly", "usedPercent": 22, "resetsAt": "2026-09-19T08:00:00Z"}
   ]
 }
 ```
@@ -159,12 +159,11 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 {"available": false, "reason": "not_authenticated"}
 ```
 
-- Every measurement MUST carry `observedAt` and `staleAt`. `observedAt` is when its
-  measurement was received; `staleAt` is its freshness expiry or invalidation
-  time. Serving cached data MUST NOT renew either timestamp. Uncached reads
-  expire after one minute. A consumer MUST also expire a window at `resetsAt`
-  when it is earlier.
-- `observedAt`, `staleAt`, and every `resetsAt` are RFC 3339 UTC instants with whole
+- Every measurement MUST carry `observedAt`, when its measurement was
+  received from the provider. Serving cached data MUST NOT renew it. How long
+  a measurement stays useful is the host's decision; a sibling reports no
+  expiry.
+- `observedAt` and every `resetsAt` are RFC 3339 UTC instants with whole
   seconds and the `Z` suffix, as `wire.AccountUsageTime` renders them; it
   renders an instant outside years 0001 through 9999 as the empty string, and
   the member is then omitted. `windowSeconds` and `resetsAt` appear only when
@@ -193,8 +192,8 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
   `retryAt` when its Retry-After header supplies a valid future retry time.
   `retryAt` is an RFC 3339 UTC instant with whole seconds. A host MUST NOT
   repeat that provider read before `retryAt`. HTTP bodies and credentials MUST
-  NOT appear in error data. Independently
-  observed cached windows MUST retain their individual timestamps. A native version without
+  NOT appear in error data. Independently observed cached windows MUST
+  retain their individual `observedAt`. A native version without
   the read answers the same class; the registry's verification record names
   the version each read was verified on.
   `wire.AccountUsageResponse.Validate` gates every available response a

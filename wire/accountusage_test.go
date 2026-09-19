@@ -80,8 +80,8 @@ func TestAccountUsageResponseValidate(t *testing.T) {
 	require.Empty(t, AccountUsageTime(time.Unix(-62135596801, 0)), "year zero has no fixed form")
 
 	valid := AccountUsageResponse{Available: true, Plan: "pro", Limits: []AccountUsageLimit{
-		{ObservedAt: observed, StaleAt: "2026-09-17T01:42:03Z", ID: "codex/primary", WindowSeconds: 604800, UsedPercent: 23, ResetsAt: "2026-09-21T12:02:18Z"},
-		{ObservedAt: observed, StaleAt: "2026-09-17T01:42:03Z", ID: "codex_spark/primary", Label: "Spark", UsedPercent: 0},
+		{ObservedAt: observed, ID: "codex/primary", WindowSeconds: 604800, UsedPercent: 23, ResetsAt: "2026-09-21T12:02:18Z"},
+		{ObservedAt: observed, ID: "codex_spark/primary", Label: "Spark", UsedPercent: 0},
 	}}
 	require.NoError(t, valid.Validate())
 	require.NoError(t, AccountUsageUnavailable(AccountUsageNotAuthenticated).Validate())
@@ -105,7 +105,6 @@ func TestAccountUsageResponseValidate(t *testing.T) {
 		"window without observed at":     mutate(func(r *AccountUsageResponse) { r.Limits[0].ObservedAt = "" }),
 		"observed at with offset":        mutate(func(r *AccountUsageResponse) { r.Limits[0].ObservedAt = "2026-09-17T03:41:03+02:00" }),
 		"observed at with fraction":      mutate(func(r *AccountUsageResponse) { r.Limits[0].ObservedAt = "2026-09-17T01:41:03.5Z" }),
-		"window without expiry":          mutate(func(r *AccountUsageResponse) { r.Limits[0].StaleAt = "" }),
 		"available without limits":       mutate(func(r *AccountUsageResponse) { r.Limits = nil }),
 		"plan with whitespace":           mutate(func(r *AccountUsageResponse) { r.Plan = " pro" }),
 		"empty limit id":                 mutate(func(r *AccountUsageResponse) { r.Limits[0].ID = "" }),
@@ -139,17 +138,17 @@ func TestAccountUsageResponseWire(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"available":false,"reason":"not_authenticated"}`, string(encoded))
 
-	encoded, err = json.Marshal(AccountUsageResponse{Available: true, Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", StaleAt: "2026-09-17T01:42:03Z", ID: "session", UsedPercent: 4}}})
+	encoded, err = json.Marshal(AccountUsageResponse{Available: true, Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", ID: "session", UsedPercent: 4}}})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"available":true,"limits":[{"observedAt":"2026-09-17T01:41:03Z","staleAt":"2026-09-17T01:42:03Z","id":"session","usedPercent":4}]}`, string(encoded))
+	require.JSONEq(t, `{"available":true,"limits":[{"observedAt":"2026-09-17T01:41:03Z","id":"session","usedPercent":4}]}`, string(encoded))
 
-	encoded, err = json.Marshal(AccountUsageResponse{Available: true, Plan: "pro", Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", StaleAt: "2026-09-17T01:42:03Z", ID: "weekly", UsedPercent: 0}}})
+	encoded, err = json.Marshal(AccountUsageResponse{Available: true, Plan: "pro", Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", ID: "weekly", UsedPercent: 0}}})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"available":true,"plan":"pro","limits":[{"observedAt":"2026-09-17T01:41:03Z","staleAt":"2026-09-17T01:42:03Z","id":"weekly","usedPercent":0}]}`, string(encoded), "a zero utilization is carried and an unstated usageAllowed is omitted")
+	require.JSONEq(t, `{"available":true,"plan":"pro","limits":[{"observedAt":"2026-09-17T01:41:03Z","id":"weekly","usedPercent":0}]}`, string(encoded), "a zero utilization is carried and an unstated usageAllowed is omitted")
 
-	encoded, err = json.Marshal(AccountUsageResponse{Available: true, UsageAllowed: new(false), Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", StaleAt: "2026-09-17T01:42:03Z", ID: "weekly", UsedPercent: 100}}})
+	encoded, err = json.Marshal(AccountUsageResponse{Available: true, UsageAllowed: new(false), Limits: []AccountUsageLimit{{ObservedAt: "2026-09-17T01:41:03Z", ID: "weekly", UsedPercent: 100}}})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"available":true,"usageAllowed":false,"limits":[{"observedAt":"2026-09-17T01:41:03Z","staleAt":"2026-09-17T01:42:03Z","id":"weekly","usedPercent":100}]}`, string(encoded), "a stated false is carried, not omitted")
+	require.JSONEq(t, `{"available":true,"usageAllowed":false,"limits":[{"observedAt":"2026-09-17T01:41:03Z","id":"weekly","usedPercent":100}]}`, string(encoded), "a stated false is carried, not omitted")
 
 	require.Equal(t, map[string]any{"method": "_x/accountUsage", "scope": "session"}, AccountUsageAdvertisement("_x/accountUsage", AccountUsageScopeSession))
 	require.Equal(t, map[string]any{"method": "_x/accountUsage", "scope": "agent"}, AccountUsageAdvertisement("_x/accountUsage", AccountUsageScopeAgent))
@@ -157,7 +156,7 @@ func TestAccountUsageResponseWire(t *testing.T) {
 
 func TestAccountUsageAmounts(t *testing.T) {
 	t.Parallel()
-	balance := AccountUsageBalance{ID: "key", ObservedAt: "2026-09-18T00:00:00Z", StaleAt: "2026-09-18T00:01:00Z", Remaining: &AccountUsageMoney{Amount: -0.001, Currency: "USD"}}
+	balance := AccountUsageBalance{ID: "key", ObservedAt: "2026-09-18T00:00:00Z", Remaining: &AccountUsageMoney{Amount: -0.001, Currency: "USD"}}
 	response := AccountUsageResponse{Available: true, Balances: []AccountUsageBalance{balance}}
 	require.NoError(t, response.Validate())
 	for name, change := range map[string]func(*AccountUsageBalance){
@@ -175,7 +174,7 @@ func TestAccountUsageAmounts(t *testing.T) {
 			require.Error(t, (AccountUsageResponse{Available: true, Balances: []AccountUsageBalance{b}}).Validate())
 		})
 	}
-	response.RequestLimits = []AccountUsageRequestLimit{{ID: "key", ObservedAt: balance.ObservedAt, StaleAt: balance.StaleAt, Used: 1, Limit: 2, Remaining: 1}}
+	response.RequestLimits = []AccountUsageRequestLimit{{ID: "key", ObservedAt: balance.ObservedAt, Used: 1, Limit: 2, Remaining: 1}}
 	require.Error(t, response.Validate(), "IDs are unique across measurement types")
 	response.RequestLimits[0].ID = "requests"
 	require.NoError(t, response.Validate())
