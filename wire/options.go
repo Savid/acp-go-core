@@ -145,3 +145,12 @@ func StructuredOutputAdvertisement(vendor string) map[string]any {
 		"schema": "json_schema",
 	}
 }
+
+// ValidateConcurrencyLimits refuses negative session and client-call bounds.
+func ValidateConcurrencyLimits(maxActiveSessions, maxConcurrentClientCalls int) error {
+	if maxActiveSessions < 0 || maxConcurrentClientCalls < 0 {
+		return errors.New("concurrency limits must not be negative")
+	}
+
+	return nil
+}

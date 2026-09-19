@@ -19,6 +19,9 @@ const ConfigSubpath = "config"
 // Commit publishes the native rows and configuration atomically. Failure
 // leaves the previous generation intact, including its configuration.
 func Commit(ctx context.Context, store acpcore.SessionStore, sessionID string, rows [][]byte, record any) error {
+	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
+	defer cancel()
+
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode session record: %w", err)
@@ -46,6 +49,9 @@ func Commit(ctx context.Context, store acpcore.SessionStore, sessionID string, r
 // session with no rows is a committed conversation whose native history is
 // still empty.
 func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, record any) (rows [][]byte, found bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
+	defer cancel()
+
 	generation, err := store.Load(ctx, sessionID)
 	if err != nil || generation == nil {
 		return nil, false, err

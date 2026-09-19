@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -152,4 +153,37 @@ func TestLoadKeepsGenerationTogether(t *testing.T) {
 	var row testRecord
 	require.NoError(t, json.Unmarshal(rows[0], &row))
 	require.Equal(t, row.Model, record.Model, "Load returned native rows and configuration from different committed generations")
+}
+
+type deadlineStore struct {
+	acpcore.SessionStore
+	deadline time.Time
+}
+
+func (s *deadlineStore) Load(ctx context.Context, id string) (map[string][]acpcore.SessionStoreEntry, error) {
+	s.deadline, _ = ctx.Deadline()
+
+	return s.SessionStore.Load(ctx, id)
+}
+
+func (s *deadlineStore) Replace(ctx context.Context, main acpcore.SessionKey, replacements []acpcore.SessionStoreReplacement) error {
+	s.deadline, _ = ctx.Deadline()
+
+	return s.SessionStore.Replace(ctx, main, replacements)
+}
+
+func TestStoreCallsBoundTheirDeadline(t *testing.T) {
+	t.Parallel()
+	store := &deadlineStore{SessionStore: acpcore.NewInMemorySessionStore()}
+	started := time.Now()
+	require.NoError(t, Commit(t.Context(), store, "s", nil, testRecord{Model: "model"}))
+	require.False(t, store.deadline.IsZero())
+	require.WithinDuration(t, started.Add(acpcore.SessionStoreTimeout), store.deadline, time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	expected, _ := ctx.Deadline()
+	var record testRecord
+	_, _, err := Load(ctx, store, "s", &record)
+	require.NoError(t, err)
+	require.Equal(t, expected, store.deadline)
 }

@@ -67,6 +67,9 @@ beside its own scoped key, never inside `SessionKey`.
 | `Delete` | Durable tombstone first. Deleting main cascades to all subpaths; deleting a subpath deletes only it. Missing keys succeed. |
 | `ListSessions` | Committed, non-tombstoned main keys, newest `UpdatedAtUnixMilli` first, then `SessionID`. |
 
+Every store call MUST be bounded by `SessionStoreTimeout`. `sessionlog.Load`
+and `sessionlog.Commit` apply that bound to the calls they own.
+
 All timestamps are Unix milliseconds. An empty `SessionID` makes delete a
 no-op and load return nil; every replace fails `ErrSessionIDRequired`.
 

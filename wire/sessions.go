@@ -28,6 +28,14 @@ func AcquireSessionGate(gate chan struct{}, limit string) (func(), error) {
 	}
 }
 
+// HoldSessionGate takes an unpublished session's foreground gate, which must
+// be free. Its release function is safe to call more than once.
+func HoldSessionGate(gate chan struct{}) func() {
+	gate <- struct{}{}
+
+	return sync.OnceFunc(func() { <-gate })
+}
+
 // SessionRequests reserves session identities while an establishing request is
 // in flight. Its zero value is ready to use.
 type SessionRequests struct {

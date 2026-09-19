@@ -216,8 +216,8 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | claude | `model`, `mode`, `effort`, `output_style` | Model and permission mode use native control requests. Effort and output style use `apply_flag_settings` followed by `get_settings`. Optional selectors require native availability and a known current value. |
 | codex | `model`, `mode`, `effort`, `service_tier`, `personality` | Values forward to the next `turn/start`; only `mode`, `effort`, and `personality` reject empty. `mode` is `default` or `plan`, sent as `collaborationMode`. `service_tier` and `personality` appear only while set. |
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
-| hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back; refused with `session_prompt` backpressure while a turn is in flight. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
-| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt; a set is refused with `session_prompt` backpressure while a turn is in flight. Model IDs must be provider-qualified. `effort` appears only while set. |
+| hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
+| opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
 | amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
 
 ### How each model catalog is built

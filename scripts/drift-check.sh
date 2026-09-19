@@ -61,10 +61,10 @@ check_sibling() {
     rg -q --type go -g '!*_test.go' "AccountUsageMethod += \"_$vendor/accountUsage\"" "$repo" || fail "$name: AccountUsageMethod is not canonical"
     rg -q --type go -g '!*_test.go' 'wire\.DecodeAccountUsageRequest\(' "$repo" || fail "$name: account usage request is not decoded through core"
     rg -q --type go -g '!*_test.go' 'wire\.AccountUsageCapabilityKey' "$repo" || fail "$name: account usage is not advertised through core's key"
-    assembling=$(rg -l --type go -g '!*_test.go' 'wire\.AccountUsageResponse\{[^}]|reader\.Read\(' "$repo" || true)
+    assembling=$(rg -l --type go -g '!*_test.go' 'wire\.AccountUsageResponse\{[^}]|reader\.Read\(|usage\.ReadVerified\(' "$repo" || true)
     [[ -n "$assembling" ]] || fail "$name: no response assembly or shared provider read"
     while IFS= read -r f; do
-      [[ -z "$f" ]] || rg -q '\.Validate\(\)' "$f" || fail "$name: $(basename "$f") handles an account-usage response without Validate"
+      [[ -z "$f" ]] || rg -q '\.Validate\(\)|usage\.ReadVerified\(' "$f" || fail "$name: $(basename "$f") handles an account-usage response without Validate"
     done <<< "$assembling"
     printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`(session|agent)\` \|" || fail "$name: registry Account Usage row does not record a scope"
   else
@@ -78,7 +78,7 @@ check_sibling() {
     [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
   done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
-  rg -q --type go -g '!*_test.go' 'StderrLastLine\(' "$repo" || fail "$name: process death does not report core's stderr tail"
+  rg -q --type go -g '!*_test.go' 'StderrLastLine\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
   rg -q 'ConfiguredModels +\[\]string' "$repo/options.go" && rg -q 'func WithConfiguredModels\(ids \[\]string\) Option' "$repo/options.go" || fail "$name: WithConfiguredModels surface missing"
   for f in 'wire.MediaEnvelopeKey|acp-go.dev/mediaEnvelope' 'wire.HandoffKey|acp-go.dev/handoff' 'wire.LifecycleKey|acp-go.dev/lifecycle'; do
