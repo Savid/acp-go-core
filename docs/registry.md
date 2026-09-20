@@ -29,7 +29,7 @@ defines storage and wire publication.
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
 | hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
 | opencode | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
-| amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed uniquely under the native plugin directory and removed after its process is reaped. |
+| amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
 ## Session Stores
 
@@ -94,7 +94,7 @@ prompt process and removes image payloads.
 | Sibling | Tolerance and remaining fences |
 |---|---|
 | claude | Unmodelled system records remain session-scoped. Invalid JSON fails the transport. A changed native session id poisons the session. Native control cancellation resolves its matching callback. |
-| codex | Usage reports, retried `error` notifications, and unmodelled methods are session-scoped and open nothing. Notifications for threads this Agent does not hold are dropped. Records naming a turn other than the cycle's are ignored. Repeated text completion frames contribute only their new suffix. |
+| codex | Usage reports, retried `error` notifications, and unmodelled methods are session-scoped and open nothing. Notifications for threads this Agent does not hold are dropped. Records naming a turn other than the cycle's are ignored. Repeated text completion frames contribute only their new suffix. Each session has a bounded 256-event queue; overflow contains that session, fails its work with a transport cause, and fences it while the shared app-server and its peers keep running. |
 | pi | Queue reports, compaction and retry pairs, custom messages, and unmodelled types are session-scoped and open nothing. A wrapper extension error fails the cycle with cause `extension`; an operator extension error is pi's own. |
 | hermes | `streaming` owns the current turn; `queued` waits for the next native start after its response. `redirected` and `steered` keep work with the running native turn and return a non-retry failure. Unknown dispositions fail the generation. Events use one bounded 256-record queue; unbound live ids are dropped. |
 | opencode | Only held native session IDs reach a binding. Message parent IDs correlate prompt ownership; completed submissions reject late frames. Unknown event kinds are inert. Each binding has a bounded 256-event queue; overflow ends that binding. |
@@ -487,6 +487,13 @@ native transcript can contain multiple entries with one API message id.
   refuses replacement of an existing id, so a shorter native conversation fails
   restore. The gateway process starts before import; session binding waits until
   import and validation finish.
+- **Hermes gateway authentication and port:** the loopback WebSocket at
+  `/api/ws` authenticates only through the `?token=` query parameter; a
+  request carrying the session token as a header alone is refused `403`
+  (verified on `0.21.3` on 2026-09-20). The HTTP persistence endpoints take
+  the token as the `X-Hermes-Session-Token` header. `hermes serve` binds a
+  concrete `--port`, with no pre-bound-socket or port-0 handshake a caller can
+  read back, so the adapter selects the port by bind-then-close before launch.
 
 - **Claude canonicalises `cwd`:** the transcript project directory derives
   from the resolved path, so `session/new`, `session/load`, and
