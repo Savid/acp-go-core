@@ -244,7 +244,7 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | Sibling | Source | Metadata |
 |---|---|---|
 | claude | `initialize.models`, snapshotted once per process | `modelId` and native `supportedEffortLevels`; configured and selected ids append after the native entries. Unknown full ids forward unchanged. |
-| codex | `model/list`, the presets the CLI build ships, read once per app-server generation; when the active `model_provider` routes through a gateway publishing `/v1/models`, that list replaces the presets, each id naming its upstream | `modelId`, plus `contextWindow` and `supportedEffortLevels` when the row carries them; the effort menu is the selected model's `supportedReasoningEfforts`, else a fixed menu once an effort is set |
+| codex | `model/list`, the presets the CLI build ships, read once per app-server generation; when the active `model_provider` routes through a gateway publishing `/v1/models`, that list replaces the presets, each id naming its upstream; an id whose last path segment is a preset carries that preset's efforts and default | `modelId`, plus `contextWindow` and `supportedEffortLevels` when the row carries them; the effort menu is the selected model's `supportedReasoningEfforts`, else a fixed menu once an effort is set |
 | pi | `get_available_models`, pi's own registry filtered by its configured providers, snapshotted once at native start | `modelId`, plus `contextWindow` and `maxOutputTokens` when the row carries them |
 | hermes | `model.options` provider catalogs | Provider-qualified `modelId`. Configured and selected ids append after native entries. |
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
@@ -501,8 +501,9 @@ native transcript can contain multiple entries with one API message id.
   naming `cwd`. A `session/list` filter that cannot be resolved matches no
   session.
 
-- **Codex publishes the CLI build's presets** whatever provider the home
-  routes to, and snapshots them once per app-server generation.
+- **Codex publishes the CLI build's presets**, or the gateway's list when
+  the active provider publishes one, snapshotted once per app-server
+  generation.
 - **Codex stored restore:** restore materializes
   `$CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<threadId>.jsonl`
   from the `session_meta` row's timestamp, then resumes by the recorded native
