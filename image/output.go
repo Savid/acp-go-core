@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,7 +89,8 @@ func DecodeInline(data string, limit int64) ([]byte, string, int64, *OutputError
 
 // ReadFile reads one harness-returned artifact path under the allowed roots,
 // bounded by limit, and sniffs its MIME. The path is resolved and compared with
-// roots resolved to the same degree.
+// roots resolved to the same degree, then opened through the root it fell in,
+// so a symlink swapped in after resolution cannot lead outside that root.
 func ReadFile(path string, roots []string, limit int64) ([]byte, string, *OutputError) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -98,19 +101,27 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be resolved safely"}
 	}
 
-	if !withinRoots(resolved, roots) {
+	root, relative, ok := containingRoot(resolved, roots)
+	if !ok {
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path is outside the allowed roots"}
 	}
 
+	confined, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output root cannot be opened"}
+	}
+
+	defer func() { _ = confined.Close() }()
+
 	// O_NONBLOCK stops a FIFO or a device node swapped in after resolution
 	// from parking open(2); the descriptor is inspected once it exists.
-	file, err := os.OpenFile(resolved, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := confined.OpenFile(relative, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file is missing"}
 		}
 
-		return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file cannot be opened"}
+		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be opened safely"}
 	}
 
 	defer func() { _ = file.Close() }()
@@ -151,32 +162,30 @@ func readContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
 	return data, mimeType, nil
 }
 
-// withinRoots reports whether an already-resolved path sits under any root.
-// Each root is resolved before the lexical comparison.
-func withinRoots(resolved string, roots []string) bool {
+// containingRoot returns the resolved root holding path and path's location
+// relative to it.
+func containingRoot(path string, roots []string) (string, string, bool) {
+	if path == "" {
+		return "", "", false
+	}
+
 	for _, root := range roots {
-		if withinRoot(resolved, root) {
-			return true
+		if root == "" {
+			continue
 		}
+
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+
+		relative, err := filepath.Rel(resolvedRoot, path)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+
+		return resolvedRoot, relative, true
 	}
 
-	return false
-}
-
-func withinRoot(path, root string) bool {
-	if path == "" || root == "" {
-		return false
-	}
-
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return false
-	}
-
-	relative, err := filepath.Rel(resolvedRoot, path)
-	if err != nil {
-		return false
-	}
-
-	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	return "", "", false
 }

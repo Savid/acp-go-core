@@ -388,6 +388,13 @@ func TestOutput(t *testing.T) {
 	_, _, verdict = ReadFile(root, []string{root}, FrameClamp)
 	require.Equal(t, ReasonPathNotAllowed, verdict.Reason)
 
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	require.NoError(t, os.WriteFile(outside, data, 0o600))
+	escape := filepath.Join(root, "escape.png")
+	require.NoError(t, os.Symlink(outside, escape))
+	_, _, verdict = ReadFile(escape, []string{root}, FrameClamp)
+	require.Equal(t, ReasonPathNotAllowed, verdict.Reason, "a symlink out of the root is refused")
+
 	fifo := filepath.Join(root, "out.fifo")
 	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
 	_, _, verdict = ReadFile(fifo, []string{root}, FrameClamp)

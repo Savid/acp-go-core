@@ -426,8 +426,9 @@ a harness-returned path, not a host handoff path.
 Output limits clamp to 7,864,155 decoded bytes. Base64 of that is 10,485,540
 characters; the pinned SDK's line scanner is bounded at 10,485,760 bytes, which
 leaves 220 bytes for the JSON-RPC envelope. The scanner bound is an unexported
-SDK constant, so a shared-pin move re-derives this clamp. An oversized inbound
-frame disconnects before dispatch and produces no verdict.
+SDK constant, so a shared-pin move re-derives this clamp. The transport refuses
+an inbound line past the same bound before retaining it, so an oversized frame
+disconnects before dispatch and produces no verdict.
 
 ## Vendor `_meta` Contract
 

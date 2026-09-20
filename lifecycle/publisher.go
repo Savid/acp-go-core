@@ -5,14 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
-	"time"
 )
-
-// deliverTimeout bounds one delivery of a lifecycle envelope to the host. A
-// client that has stopped reading cannot pin this session's fence, idle, or
-// close past it; the timeout fences the stream the same as a failed delivery.
-// It is a var only so a test can lower it.
-var deliverTimeout = 30 * time.Second
 
 // Cycle identifies a foreground turn and the native cause that owns it.
 type Cycle struct {
@@ -24,8 +17,9 @@ type Cycle struct {
 
 // Publisher owns one session's lifecycle incarnation and blocking actions. It
 // serializes its own publications; its zero value is ready. The deliver
-// function given to Open runs under the publisher's lock and MUST NOT call
-// back into the Publisher.
+// function given to Open runs synchronously under the publisher's lock, on a
+// context the caller's cancellation does not reach, and MUST NOT call back
+// into the Publisher. A failed delivery fences the stream.
 type Publisher struct {
 	mu       sync.Mutex
 	stream   *stream
@@ -254,10 +248,7 @@ func (p *Publisher) emit(ctx context.Context, event Event) error {
 	}
 
 	if p.deliver != nil {
-		deliverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliverTimeout)
-		defer cancel()
-
-		if err := p.deliver(deliverCtx, envelope); err != nil {
+		if err := p.deliver(context.WithoutCancel(ctx), envelope); err != nil {
 			p.fence()
 
 			return err

@@ -276,3 +276,23 @@ func registerTransportHook(t *testing.T, tr *Transport, id string, sessionID acp
 func actionMeta(streamID, actionID string) map[string]any {
 	return map[string]any{LifecycleKey: map[string]any{"version": 1, "streamId": streamID, "action": map[string]any{"actionId": actionID}}}
 }
+
+func TestTransportRefusesOverlongInboundLine(t *testing.T) {
+	t.Parallel()
+
+	transport := NewTransport(strings.NewReader(strings.Repeat("x", maxInboundLine+1)+"\n"), io.Discard)
+	transport.Start()
+	t.Cleanup(transport.Close)
+
+	n, err := transport.Reader().Read(make([]byte, 1))
+	require.Zero(t, n)
+	require.ErrorIs(t, err, errInboundLineTooLong)
+
+	transport = NewTransport(strings.NewReader(strings.Repeat("x", maxInboundLine-1)+"\n"), io.Discard)
+	transport.Start()
+	t.Cleanup(transport.Close)
+
+	line, err := io.ReadAll(transport.Reader())
+	require.NoError(t, err)
+	require.Len(t, line, maxInboundLine)
+}

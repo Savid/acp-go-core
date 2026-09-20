@@ -13,6 +13,13 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
+// maxInboundLine bounds one inbound frame before any of it is retained. It
+// equals the pinned SDK scanner's bound, so a longer line ends the connection
+// before dispatch instead of being buffered ahead of the scanner.
+const maxInboundLine = 10 * 1024 * 1024
+
+var errInboundLineTooLong = errors.New("inbound frame exceeds the line bound")
+
 // Transport wraps the JSON-RPC streams Serve hands to the SDK. It reads every
 // inbound frame to keep the raw params the lifecycle strictness needs and the
 // request ids the establishing responses answer, and it watches every outbound
@@ -96,7 +103,7 @@ func (r *transportReader) Read(p []byte) (int, error) {
 	<-r.transport.started
 
 	if len(r.pending) == 0 {
-		line, err := r.lines.ReadBytes('\n')
+		line, err := r.readLine()
 		if len(line) > 0 {
 			r.transport.observeInbound(line)
 			line = r.transport.bindInbound(line)
@@ -113,6 +120,25 @@ func (r *transportReader) Read(p []byte) (int, error) {
 	r.pending = r.pending[n:]
 
 	return n, nil
+}
+
+// readLine reads one newline-terminated frame, refusing it once it exceeds
+// maxInboundLine.
+func (r *transportReader) readLine() ([]byte, error) {
+	var line []byte
+
+	for {
+		chunk, err := r.lines.ReadSlice('\n')
+		if len(line)+len(chunk) > maxInboundLine {
+			return nil, errInboundLineTooLong
+		}
+
+		line = append(line, chunk...)
+
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return line, err
+		}
+	}
 }
 
 type transportWriter struct {
