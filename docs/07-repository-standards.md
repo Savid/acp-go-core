@@ -201,7 +201,11 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
   stems, matching test stems, and scratch allocation ownership;
 - README process-option and flag coverage, tracked dot-file names, and CI
   matrix, triggers, permissions, and action pins;
-- that no sibling carries a copy of the lifecycle fixture battery.
+- that no sibling carries a copy of the lifecycle fixture battery;
+- the [evidence gate](08-testing.md#conformance-tests): a sibling whose
+  `agent.go` advertises `updatesOutsidePrompt: true` carries
+  `testdata/native/agent-origin.json` with its `README.md` provenance, and a
+  test replays that fixture.
 
 A missing checkout is reported and skipped. A pass proves the enumerated
 structure, not behavior. Every rule the list above names has an assertion in
