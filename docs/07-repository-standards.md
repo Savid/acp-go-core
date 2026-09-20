@@ -192,6 +192,7 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
   every sibling and in this module's own `go.mod`, and one version per module
   across every family `go.mod`, indirect requirements included;
 - the [surface presence](#surface-presence) symbols;
+- a test calling `lifecycle.CheckAttribution`;
 - that README, AGENTS.md, and doc.go name no other sibling;
 - byte-identical `LICENSE`, `.gitignore`, and `.golangci.yml`
   across siblings;

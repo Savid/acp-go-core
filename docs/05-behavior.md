@@ -179,8 +179,7 @@ never a second copy of the base64.
 
 Context-window and cost usage is authoritative only through ACP
 `usage_update`. Vendor token breakdowns MAY appear under `_meta.<vendor>` for
-debugging; hosts must not depend on them. Optional `_meta.<vendor>.messageId`
-correlates usage to a streamed message.
+debugging; hosts must not depend on them.
 
 `size` is the model's true context window in tokens, never fabricated. An
 adapter that cannot determine it sets `size: 0`.

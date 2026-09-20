@@ -31,6 +31,10 @@ Every sibling proves, against the current ACP v1 schema:
 - Initialize shape: `authMethods` empty; no fork, MCP, NES, providers, modes,
   or document capabilities advertised.
 - Position-encoding selection.
+- **Ordinary content attribution:** `lifecycle.CheckAttribution` accepts the
+  recorded stream of a prompt turn and, on a sibling answering
+  `updatesOutsidePrompt: true`, of an agent-origin turn
+  ([03-wire-contract.md](03-wire-contract.md#ordinary-content)).
 - Stable `session/fork` returns method-not-found; `session/set_mode` returns
   method-not-found; `authenticate` echoes the method id; `logout` returns
   method-not-found; every extension method the sibling does not advertise

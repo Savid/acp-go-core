@@ -567,6 +567,20 @@ variant.
 A host reduces the envelope from the notification stream in arrival order,
 never from a coalesced projection.
 
+### Ordinary Content
+
+Every content update a sibling emits for a session, meaning
+`agent_message_chunk`, `agent_thought_chunk`, `user_message_chunk`,
+`tool_call`, `tool_call_update`, `plan`, and `usage_update`, belongs to the
+foreground turn and MUST arrive while that session's foreground is `running`
+or `requires_action`. Between-prompt native work is delivered under an
+agent-origin turn, never beside an idle foreground. A sibling MUST NOT
+correlate content by hint: no `_meta.<vendor>` namespace on a notification
+carries `turnId` or `messageId`. Tool progress correlates through its own
+`toolCallId`. `lifecycle.CheckAttribution` proves the rule over a recorded
+stream, and every sibling proves it
+([08-testing.md](08-testing.md#conformance-tests)).
+
 ### The Closed Event Set
 
 `event.type` is exactly one of `lifecycle_snapshot`, `prompt_accepted`,

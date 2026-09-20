@@ -78,6 +78,7 @@ check_sibling() {
     [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
   done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
+  rg -q --type go -g '*_test.go' 'lifecycle\.CheckAttribution\(' "$repo" || fail "$name: no test proves ordinary content attribution"
   rg -q '^func SetModelRequest\(sessionID acp\.SessionId, model string\) acp\.SetSessionConfigOptionRequest' "$repo/request_builders.go" || fail "$name: SetModelRequest is not declared in request_builders.go"
   rg -q --type go -g '!*_test.go' 'StderrTail\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
