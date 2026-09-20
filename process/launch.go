@@ -265,7 +265,7 @@ func (p *Process) signalGroup(signal syscall.Signal) error {
 }
 
 // Close closes stdin and stdout, allows the stderr copier a bounded drain,
-// then closes stderr and joins the copier. The deadline interrupts a read
+// then closes stderr and joins the copier. Closing the parent end ends a read
 // held open by a live child or descendant. An already closed pipe is not an
 // error; concurrent Close calls are safe.
 func (p *Process) Close() error {

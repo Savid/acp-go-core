@@ -98,6 +98,27 @@ func TestOpenRouterKeepsKeyCapLifetimeSpendAndAccountBalanceSeparate(t *testing.
 	}
 }
 
+func TestOpenCodeGoEntitlementRefusalIsNotReported(t *testing.T) {
+	reader := opencodego.Reader{Transport: fixtureTransport(t, "opencode.ai", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, err := io.WriteString(w, `{"error":{"type":"EntitlementError","message":"no subscription"}}`)
+		require.NoError(t, err)
+	})}
+	response, err := reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key"})
+	require.NoError(t, err)
+	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), response)
+
+	reader = opencodego.Reader{Transport: fixtureTransport(t, "opencode.ai", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, writeErr := io.WriteString(w, `{"error":{"type":"Forbidden"}}`)
+		require.NoError(t, writeErr)
+	})}
+	_, err = reader.Read(t.Context(), usage.Credential{Token: "sk-ant-oat01-fixture-key"})
+	var httpErr *usage.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, http.StatusForbidden, httpErr.StatusCode)
+}
+
 func TestOpenRouterRetainsUncappedUsageWhenAccountBalanceIsUnavailable(t *testing.T) {
 	for _, status := range []int{401, 403, 429, 500} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {

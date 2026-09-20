@@ -50,3 +50,41 @@ func TestWriteSeedFiles(t *testing.T) {
 		require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{bad: "x"}), &seedErr, bad)
 	}
 }
+
+func TestWriteSeedFilesRefusesSymlinksAndStagesTheManifest(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "agent")
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	var seedErr *SeedFileError
+
+	require.NoError(t, os.Symlink(filepath.Join(outside, "escaped.conf"), filepath.Join(dir, "dangling.conf")))
+	require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{"dangling.conf": "x"}), &seedErr, "a dangling symlink at a seed name is refused")
+	require.NoFileExists(t, filepath.Join(outside, "escaped.conf"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "target.conf"), []byte("operator"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "target.conf"), filepath.Join(dir, "linked.conf")))
+	require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{"linked.conf": "x"}), &seedErr, "a symlink at a seed name is refused")
+	target, err := os.ReadFile(filepath.Join(outside, "target.conf"))
+	require.NoError(t, err)
+	require.Equal(t, "operator", string(target))
+
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "away")))
+	require.Error(t, WriteSeedFiles(dir, map[string]string{"away/escaped.conf": "x"}), "a symlinked directory leaving the root is refused")
+	require.NoFileExists(t, filepath.Join(outside, "escaped.conf"))
+
+	require.NoError(t, WriteSeedFiles(dir, map[string]string{"config.toml": "a = 1\n"}))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+
+	require.ElementsMatch(t, []string{seedManifestFileName, "away", "config.toml", "dangling.conf", "linked.conf"}, names, "no manifest staging file is left behind")
+	require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{seedManifestFileName + ".staging": "x"}), &seedErr, "manifest staging names are reserved")
+}

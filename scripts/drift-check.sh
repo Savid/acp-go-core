@@ -182,8 +182,11 @@ for repo in repos[1:]:
     for source in repo.rglob("*.go"):
         if source.name.endswith("_test.go") or source.name == "scratch.go":
             continue
-        if re.search(r'os\.(?:MkdirTemp|CreateTemp)\(\s*""\s*,', source.read_text()):
+        text = source.read_text()
+        if re.search(r'os\.(?:MkdirTemp|CreateTemp)\(\s*""\s*,', text):
             fail(f"{repo.name}: {source.relative_to(repo)} allocates system scratch outside scratch.go")
+        if re.search(r'os\.MkdirTemp\(', text):
+            fail(f"{repo.name}: {source.relative_to(repo)} allocates a scratch directory outside scratch.go")
     tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo, text=True).split("\0")
     for path in tracked:
         if path.startswith(".") and path.split("/")[0] not in {".github", ".gitignore", ".golangci.yml"}:

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const outputTooLargeMessage = "image output exceeds the configured per-image limit"
@@ -101,12 +102,21 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path is outside the allowed roots"}
 	}
 
-	info, err := os.Stat(resolved)
+	// O_NONBLOCK stops a FIFO or a device node swapped in after resolution
+	// from parking open(2); the descriptor is inspected once it exists.
+	file, err := os.OpenFile(resolved, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file is missing"}
 		}
 
+		return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file cannot be opened"}
+	}
+
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
 		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be inspected safely"}
 	}
 
@@ -117,13 +127,6 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 	if info.Size() > limit {
 		return nil, "", &OutputError{Reason: ReasonTooLarge, Message: outputTooLargeMessage, SizeBytes: info.Size(), MaxBytes: limit}
 	}
-
-	file, err := os.Open(resolved)
-	if err != nil {
-		return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file cannot be opened"}
-	}
-
-	defer func() { _ = file.Close() }()
 
 	return readContents(file, limit)
 }

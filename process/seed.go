@@ -2,6 +2,7 @@ package process
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +72,9 @@ func (s *SeedFileFlag) Set(value string) error {
 // adapter never overwrites a file it did not create: a pre-existing unmanaged
 // target fails closed before anything is written, and every new path is
 // recorded in the manifest before its file exists, so an interrupted write
-// leaves only managed files behind.
+// leaves only managed files behind. Every path is opened relative to dir with
+// os.Root, and a symlink at a seed name is refused, so no write can leave the
+// seed root.
 func WriteSeedFiles(dir string, files map[string]string) error {
 	if len(files) == 0 {
 		return nil
@@ -81,6 +84,12 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 		return fmt.Errorf("create native home: %w", err)
 	}
 
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open native home: %w", err)
+	}
+	defer root.Close()
+
 	names := slices.Sorted(func(yield func(string) bool) {
 		for name := range files {
 			if !yield(name) {
@@ -89,7 +98,7 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 		}
 	})
 
-	manifest, err := loadSeedManifest(dir)
+	manifest, err := loadSeedManifest(root)
 	if err != nil {
 		return err
 	}
@@ -107,14 +116,18 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 			return &SeedFileError{Name: name}
 		}
 
-		path := filepath.Join(dir, filepath.FromSlash(name))
+		path := filepath.FromSlash(name)
 
-		_, statErr := os.Stat(path)
+		info, statErr := root.Lstat(path)
 		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 			return fmt.Errorf("stat seed file: %w", statErr)
 		}
 
 		exists := statErr == nil
+		if exists && !info.Mode().IsRegular() {
+			return &SeedFileError{Name: name}
+		}
+
 		if _, managed := manifest[filepath.ToSlash(name)]; exists && !managed {
 			return &SeedFileError{Name: name}
 		}
@@ -132,7 +145,7 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	}
 
 	if added {
-		if err := writeSeedManifest(dir, manifest); err != nil {
+		if err := writeSeedManifest(root, manifest); err != nil {
 			return err
 		}
 	}
@@ -141,7 +154,7 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 		contents := []byte(files[item.name])
 
 		if item.exists {
-			current, readErr := os.ReadFile(item.path)
+			current, readErr := root.ReadFile(item.path)
 			if readErr != nil {
 				return fmt.Errorf("read managed seed file: %w", readErr)
 			}
@@ -151,11 +164,13 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 			}
 		}
 
-		if err := os.MkdirAll(filepath.Dir(item.path), 0o700); err != nil {
-			return fmt.Errorf("create seed file directory: %w", err)
+		if parent := filepath.Dir(item.path); parent != "." {
+			if err := root.MkdirAll(parent, 0o700); err != nil {
+				return fmt.Errorf("create seed file directory: %w", err)
+			}
 		}
 
-		if err := os.WriteFile(item.path, contents, 0o600); err != nil {
+		if err := root.WriteFile(item.path, contents, 0o600); err != nil {
 			return fmt.Errorf("write seed file: %w", err)
 		}
 	}
@@ -163,8 +178,8 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	return nil
 }
 
-func loadSeedManifest(dir string) (map[string]struct{}, error) {
-	data, err := os.ReadFile(filepath.Join(dir, seedManifestFileName))
+func loadSeedManifest(root *os.Root) (map[string]struct{}, error) {
+	data, err := root.ReadFile(seedManifestFileName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return make(map[string]struct{}), nil
@@ -186,7 +201,10 @@ func loadSeedManifest(dir string) (map[string]struct{}, error) {
 	return manifest, nil
 }
 
-func writeSeedManifest(dir string, manifest map[string]struct{}) error {
+// writeSeedManifest publishes the manifest atomically: a private staging file
+// is written and synced, then renamed over the manifest, so a crash leaves
+// either the previous manifest or the complete new one.
+func writeSeedManifest(root *os.Root, manifest map[string]struct{}) error {
 	entries := slices.Sorted(func(yield func(string) bool) {
 		for entry := range manifest {
 			if !yield(entry) {
@@ -198,8 +216,35 @@ func writeSeedManifest(dir string, manifest map[string]struct{}) error {
 	// A string slice cannot fail to marshal.
 	data, _ := json.Marshal(entries)
 
-	if err := os.WriteFile(filepath.Join(dir, seedManifestFileName), data, 0o600); err != nil {
-		return fmt.Errorf("write seed manifest: %w", err)
+	staging := seedManifestFileName + "." + rand.Text()
+
+	file, err := root.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("stage seed manifest: %w", err)
+	}
+
+	_, writeErr := file.Write(data)
+	if writeErr == nil {
+		writeErr = file.Sync()
+	}
+
+	if closeErr := file.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+
+	if writeErr == nil {
+		writeErr = root.Rename(staging, seedManifestFileName)
+	}
+
+	if writeErr != nil {
+		_ = root.Remove(staging)
+
+		return fmt.Errorf("write seed manifest: %w", writeErr)
+	}
+
+	if directory, openErr := root.Open("."); openErr == nil {
+		_ = directory.Sync()
+		_ = directory.Close()
 	}
 
 	return nil
@@ -212,7 +257,8 @@ func validSeedFilePath(name string) bool {
 		filepath.IsAbs(name) ||
 		strings.HasPrefix(name, "/") ||
 		strings.Contains(name, "\x00") ||
-		cleanName == seedManifestFileName {
+		cleanName == seedManifestFileName ||
+		strings.HasPrefix(cleanName, seedManifestFileName+".") {
 		return false
 	}
 

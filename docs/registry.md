@@ -233,7 +233,7 @@ entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
 | Sibling | Advertised IDs | Value authority and read-back |
 |---|---|---|
 | claude | `model`, `mode`, `effort`, `output_style` | Model and permission mode use native control requests. Effort and output style use `apply_flag_settings` followed by `get_settings`. Optional selectors require native availability and a known current value. |
-| codex | `model`, `mode`, `effort`, `service_tier`, `personality` | Values forward to the next `turn/start`; only `mode`, `effort`, and `personality` reject empty. `mode` is `default` or `plan`, sent as `collaborationMode`. `service_tier` and `personality` appear only while set. |
+| codex | `model`, `mode`, `effort`, `service_tier`, `personality` | Values forward to the next `turn/start`. `mode` is `default` or `plan`, sent as `collaborationMode`. `service_tier` and `personality` appear only while set. |
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
 | hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
 | opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
@@ -488,6 +488,12 @@ native transcript can contain multiple entries with one API message id.
   restore. The gateway process starts before import; session binding waits until
   import and validation finish.
 
+- **Claude canonicalises `cwd`:** the transcript project directory derives
+  from the resolved path, so `session/new`, `session/load`, and
+  `session/resume` refuse a `cwd` that cannot be resolved as `unsupported`
+  naming `cwd`. A `session/list` filter that cannot be resolved matches no
+  session.
+
 - **Codex publishes the CLI build's presets** whatever provider the home
   routes to, and snapshots them once per app-server generation.
 - **Codex stored restore:** restore materializes
@@ -532,7 +538,7 @@ Off-prompt `-32603` reachability where it differs:
 | codex | when a replacement app-server cannot start | never |
 | pi | never | `native_session_identity_drift` |
 | hermes | never | `native_session_identity_drift` |
-| opencode | when a replacement server cannot start | `native_session_id_drift` on native deletion |
+| opencode | when a replacement server cannot start | `native_session_identity_drift` on native deletion |
 | amp | never | `native_session_identity_drift` |
 
 Hermes and OpenCode re-hydrate on a lazy relaunch, so `_restore_failed` is

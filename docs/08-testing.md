@@ -71,7 +71,8 @@ Every sibling proves, against the current ACP v1 schema:
   a deltas-free fixture yields one chunk; a multi-message turn yields each
   message once.
 - Elicitation capability gating for all six client-capability cases, with the
-  both-null case exercised through JSON decoding.
+  both-null case exercised through JSON decoding, on a sibling with an
+  elicitation surface.
 - Native stdout and stderr noise cannot corrupt ACP stdout.
 - Command advertisement: native-list-only, shared sanitizer, full replacement,
   initial snapshot including the explicit empty one, re-emission after a

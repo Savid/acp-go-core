@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -386,6 +387,11 @@ func TestOutput(t *testing.T) {
 
 	_, _, verdict = ReadFile(root, []string{root}, FrameClamp)
 	require.Equal(t, ReasonPathNotAllowed, verdict.Reason)
+
+	fifo := filepath.Join(root, "out.fifo")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	_, _, verdict = ReadFile(fifo, []string{root}, FrameClamp)
+	require.Equal(t, ReasonPathNotAllowed, verdict.Reason, "a FIFO with no writer is refused without blocking")
 
 	bmp, ok := sniffMIME([]byte("BM\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"))
 	require.True(t, ok)

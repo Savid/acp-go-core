@@ -123,12 +123,14 @@ cannot establish. It MUST revalidate that binding after the read and discard
 the observation if the binding changed. Shared readers MUST NOT discover
 credentials, select identities, follow redirects, retry, or return credential
 material or response bodies in errors. Each HTTP request is bounded to ten
-seconds and 64 KiB; an optional account-balance read is bounded to five seconds.
+seconds and 64 KiB; an optional account-balance read is bounded to five
+seconds; a gateway model-list read (`usage/gateway.Models`) is bounded to
+8 MiB.
 An unavailable optional balance MUST NOT erase a successful key observation.
 
 The request members are `sessionId`, `providerId`, and `_meta`.
 A sibling advertising `providers` requires a nonempty `providerId` from that
-list; other siblings refuse `providerId` as unsupported. Any other member, and any
+list. Any other member, and any
 repeated member, is refused with `{"error":"unsupported","field":"<member>"}`;
 absent or `null` params are the empty object, and any other params that are
 not one object are refused naming `params`; and

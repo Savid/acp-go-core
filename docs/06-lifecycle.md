@@ -12,9 +12,11 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
 
 - The harness is launched through `process.Start`: resolved executable, merged
   [environment](02-public-api.md#process-environment), session cwd, its own
-  process group, and three dedicated pipes. Native stdout and stderr never
-  inherit ACP stdout and are routed to logs only after JSON-RPC separation is
-  guaranteed.
+  process group, and dedicated pipes for stdin, stdout, and stderr. Native
+  stdout and stderr never inherit ACP stdout and are routed to logs only after
+  JSON-RPC separation is guaranteed. A short-lived native command that is not
+  the harness may write its stdout to a caller-owned file instead of a pipe
+  (`process.Request.Stdout`).
 - Shared writable native state has exactly one writer. A sibling that owns
   shared writable native state holds an exclusive lock on it from before
   seeding until the process exits and is waited on; the

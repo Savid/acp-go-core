@@ -74,10 +74,9 @@ func GetWithin(ctx context.Context, transport http.RoundTripper, endpoint, token
 	observedAt := time.Now().UTC()
 
 	result := Response{StatusCode: response.StatusCode, ObservedAt: observedAt, RetryAt: retryAt(response.Header.Get("Retry-After"), observedAt)}
-	if response.StatusCode != http.StatusOK {
-		return result, nil
-	}
 
+	// A refusal body is read within the same bound: a provider states the
+	// reason for a 403 there, and a reader classifies it.
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
 
 	if ctx.Err() != nil {
