@@ -109,8 +109,8 @@ check_sibling() {
   [[ -d "$repo/docs" ]] && fail "$name: docs site directory present"
   [[ -d "$repo/testdata/lifecycle" || -d "$repo/fixtures/lifecycle" ]] && fail "$name: sibling carries a lifecycle fixture copy"
   if rg -q --type go -g '!*_test.go' 'UpdatesOutsidePrompt: +true' "$repo/agent.go"; then
-    [[ -f "$repo/testdata/native/agent-origin.json" && -f "$repo/testdata/native/README.md" ]] || fail "$name: advertises updatesOutsidePrompt without testdata/native evidence"
-    rg -q 'testdata/native/agent-origin.json' "$repo"/*_test.go || fail "$name: no test replays testdata/native/agent-origin.json"
+    [[ -f "$repo/testdata/native/README.md" ]] && compgen -G "$repo/testdata/native/*.json" > /dev/null || fail "$name: advertises updatesOutsidePrompt without testdata/native evidence"
+    rg -q 'testdata/native/[a-z-]+\.json' "$repo"/*_test.go || fail "$name: no test replays a testdata/native fixture"
   fi
 
   return 0

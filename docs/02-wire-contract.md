@@ -66,9 +66,9 @@ Position encoding: prefer `utf8`, else `utf16`, never `utf32`; default to
 
 `authMethods` is always `[]`: the harness authenticates itself in its home.
 `activityKinds` is `[]` for every sibling. `updatesOutsidePrompt` is answered
-under the [evidence gate](07-testing.md#lifecycle-fixtures): a sibling whose
-native channel runs work outside a client turn answers `true` and delivers
-that work as ordinary updates under agent-origin turns. The routes behind
+under the [evidence gate](07-testing.md#lifecycle-fixtures): a sibling with a
+permanent native channel keeps one incarnation across prompts and answers
+`true`; one that opens a channel per prompt answers `false`. The routes behind
 every absent capability are listed under [Banned SDK Routes](#banned-sdk-routes).
 
 ## Extension Constants
@@ -521,7 +521,7 @@ active configuration:
 | Field | Rule |
 |---|---|
 | `version` | Exact integer `1`. Any other value, a duplicate key, an unknown field, or trailing input is refused. |
-| `updatesOutsidePrompt` | `true` only when the sibling delivers `session/update` notifications while no prompt is in flight, and drops none. |
+| `updatesOutsidePrompt` | `true` when the sibling keeps one lifecycle incarnation across prompts and delivers any native work between prompts as agent-origin turns, dropping none; `false` when it opens one incarnation per prompt. |
 | `activityKinds` | The kinds this sibling emits, a duplicate-free subset of `task`, `subagent`. `[]` when none, never `null`. |
 
 - Every field is a proven structured fact for the active configuration, never
