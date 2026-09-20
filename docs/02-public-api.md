@@ -145,7 +145,7 @@ Rules:
   mapped to that harness's own home variable, recorded in the
   [registry](registry.md#vendor-process-options). Unset, the harness resolves
   its home from the inherited environment exactly as it would from a shell.
-  `Home` never acts as a scratch parent.
+  Set, it MUST be absolute. `Home` never acts as a scratch parent.
 - `WithScratchDir` is the parent for all ephemeral state, such as extension
   staging. Empty means `os.TempDir()`; otherwise it MUST be absolute, and a
   relative path is a construction failure. A missing directory is created
@@ -199,13 +199,14 @@ wins:
    variable when `WithHome` is set, and any process marker it needs.
 
 The only names removed are the sibling's own `ACP_GO_<VENDOR>_INTERNAL_*`
-markers, dropped from the inherited layers before the owned keys apply.
+markers, dropped from the inherited, agent, and session layers before the
+owned keys apply.
 Nothing else is scrubbed, allowlisted, or refused by name. A name MUST be
 non-empty and contain neither `=` nor NUL; a value MUST contain no NUL. An
 invalid entry in `WithEnv` fails construction; one in session `env` fails the
 request with `{"error":"unsupported","field":"_meta.<vendor>.options.env.<key>"}`.
-Empty values are forwarded as `KEY=`. Native home and file paths that are
-relative MUST be resolved against the native process cwd for adapter file I/O.
+Empty values are forwarded as `KEY=`. Native file paths that are relative
+MUST be resolved against the native process cwd for adapter file I/O.
 
 `PATH` is composed last: the session's ordered `extraPathDirs`, then the
 `PATH` the merge produced, joined with `os.PathListSeparator` and omitting

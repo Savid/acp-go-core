@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -90,13 +91,7 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	}
 	defer root.Close()
 
-	names := slices.Sorted(func(yield func(string) bool) {
-		for name := range files {
-			if !yield(name) {
-				return
-			}
-		}
-	})
+	names := slices.Sorted(maps.Keys(files))
 
 	manifest, err := loadSeedManifest(root)
 	if err != nil {
@@ -178,14 +173,29 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	return nil
 }
 
+// seedManifestMaxBytes bounds the manifest read back from a harness-owned
+// directory.
+const seedManifestMaxBytes = 1 << 20
+
 func loadSeedManifest(root *os.Root) (map[string]struct{}, error) {
-	data, err := root.ReadFile(seedManifestFileName)
+	file, err := root.Open(seedManifestFileName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return make(map[string]struct{}), nil
 		}
 
+		return nil, fmt.Errorf("open seed manifest: %w", err)
+	}
+
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(file, seedManifestMaxBytes+1))
+	if err != nil {
 		return nil, fmt.Errorf("read seed manifest: %w", err)
+	}
+
+	if int64(len(data)) > seedManifestMaxBytes {
+		return nil, errors.New("seed manifest exceeds its bound")
 	}
 
 	var entries []string
@@ -205,13 +215,7 @@ func loadSeedManifest(root *os.Root) (map[string]struct{}, error) {
 // is written and synced, then renamed over the manifest, so a crash leaves
 // either the previous manifest or the complete new one.
 func writeSeedManifest(root *os.Root, manifest map[string]struct{}) error {
-	entries := slices.Sorted(func(yield func(string) bool) {
-		for entry := range manifest {
-			if !yield(entry) {
-				return
-			}
-		}
-	})
+	entries := slices.Sorted(maps.Keys(manifest))
 
 	// A string slice cannot fail to marshal.
 	data, _ := json.Marshal(entries)

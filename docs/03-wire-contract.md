@@ -494,11 +494,6 @@ elicitations keep their surfaces and meaning; this extension adds only what
 ACP v1 does not carry: prompt-acceptance correlation, an ordered event stream
 with a global sequence, and causal activity and action ownership.
 
-It follows the shape of the ACP v2
-[prompt lifecycle RFD](https://agentclientprotocol.com/rfds/v2/prompt), which
-answers a prompt on acceptance and reports turns and background work through
-session updates.
-
 Every value in this section lives only in `_meta`, carries exact scalar
 `version: 1`, and rejects an unknown member. Every opaque identifier is a
 non-empty string of at most 4096 bytes; an empty one is `malformed_envelope`.

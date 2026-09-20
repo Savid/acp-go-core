@@ -70,7 +70,7 @@ func Start(ctx context.Context, request Request) (*Process, error) {
 	}
 
 	cmd := exec.Command(request.Executable, request.Args...) //nolint:gosec // The executable is the resolved harness the sibling was configured with.
-	cmd.Env = append([]string(nil), request.Env...)
+	cmd.Env = append(make([]string, 0, len(request.Env)), request.Env...)
 	cmd.Dir = request.Dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 

@@ -70,7 +70,8 @@ shape and output surfaces.
 - Each adapter keeps an internal selected-model image-input state of
   `supported`, `unsupported`, or `unknown`, sourced only from an authoritative
   field of the harness. Model-name inference and static catalogs yield
-  `unknown`. The gate runs at prompt time against the selected model and is
+  `unknown`, as do an absent model, an absent field, and an empty list. The
+  gate runs at prompt time against the selected model and is
   never cached across a switch. `unsupported` rejects pre-turn with
   `unsupported_by_model`; `supported` and `unknown` forward.
 - Generator availability is never advertised or inferred from tool names.
@@ -78,7 +79,7 @@ shape and output surfaces.
 ### Image Input
 
 - Handoff reads hold an `os.Root` on the configured root and open paths
-  relative to it, so confinement is atomic with the open. On Unix the open carries
+  relative to it, so confinement is atomic with the open. The open carries
   `O_NONBLOCK`. Stat the descriptor, never the path, and require a regular
   file. Verdicts: regular file and relative in-root symlink read; absolute,
   escaping, or dangling-absolute symlinks and non-regular files are

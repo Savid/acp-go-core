@@ -62,8 +62,8 @@ Session `env` and ordered `extraPathDirs` are per-session configuration.
   values the request supplies; live native state is never mutated in place.
 - **Recovery reconstructs them** from the session record before launching the
   native process.
-- Executable resolution uses the base environment before session path
-  directories apply.
+- Executable resolution follows
+  [02-public-api.md](02-public-api.md#process-options).
 
 ## Shutdown Ladder
 
@@ -160,8 +160,8 @@ the error.
 
 ## Startup Capability Gating
 
-- Resolve the executable from the base environment before session path
-  directories apply.
+- Resolve the executable as
+  [02-public-api.md](02-public-api.md#process-options) states.
 - Fail fast with an actionable error if required methods, events, or
   permission surfaces are missing. Never silently downgrade: if a dependent
   surface is unavailable, do not advertise the capability and fail its use

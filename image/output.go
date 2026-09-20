@@ -94,11 +94,17 @@ func DecodeInline(data string, limit int64) ([]byte, string, int64, *OutputError
 func ReadFile(path string, roots []string, limit int64) ([]byte, string, *OutputError) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file is missing"}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be resolved safely"}
 		}
 
-		return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path cannot be resolved safely"}
+		// A missing path is reported as missing only when its spelling falls
+		// inside a root, so existence outside every root is never disclosed.
+		if _, _, inside := containingRoot(filepath.Clean(path), roots); !inside {
+			return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path is outside the allowed roots"}
+		}
+
+		return nil, "", &OutputError{Reason: ReasonMissingFile, Message: "image output file is missing"}
 	}
 
 	root, relative, ok := containingRoot(resolved, roots)

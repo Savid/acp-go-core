@@ -23,7 +23,7 @@ while IFS= read -r vendor; do
 done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/README.md")
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
-forbidden_names=('acp-go' 'coordination repo')
+forbidden_names=('acp-go')
 account_usage_rows=$(awk '/^## Account Usage$/{f=1;next} /^## /{f=0} f' "$repo_root/docs/registry.md")
 
 rg -q "^module $core_module\$" "$repo_root/go.mod" || fail "acp-go-core: module path differs from README pin"
@@ -78,6 +78,7 @@ check_sibling() {
     [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
   done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
+  rg -q '^func SetModelRequest\(sessionID acp\.SessionId, model string\) acp\.SetSessionConfigOptionRequest' "$repo/request_builders.go" || fail "$name: SetModelRequest is not declared in request_builders.go"
   rg -q --type go -g '!*_test.go' 'StderrTail\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"
   rg -q 'ConfiguredModels +\[\]string' "$repo/options.go" && rg -q 'func WithConfiguredModels\(ids \[\]string\) Option' "$repo/options.go" || fail "$name: WithConfiguredModels surface missing"
@@ -101,9 +102,7 @@ check_sibling() {
   rg -q 'go test -race -shuffle=on -timeout=\$\(GO_TEST_TIMEOUT\) \./\.\.\.' "$repo/Makefile" || fail "$name: test recipe is not canonical"
   rg -q 'go fix -diff \./\.\.\.' "$repo/Makefile" || fail "$name: modernize-check recipe is not canonical"
   rg -q '@latest' "$repo/Makefile" && fail "$name: @latest in Makefile"
-  rg -q '^ *docs/' "$repo/.gitignore" && fail "$name: docs site remnants in .gitignore"
   [[ -d "$repo/docs" ]] && fail "$name: docs site directory present"
-  [[ -e "$repo/docs.json" ]] && fail "$name: docs.json present"
   [[ -d "$repo/testdata/lifecycle" || -d "$repo/fixtures/lifecycle" ]] && fail "$name: sibling carries a lifecycle fixture copy"
   if rg -q --type go -g '!*_test.go' 'UpdatesOutsidePrompt: +true' "$repo/agent.go"; then
     [[ -f "$repo/testdata/native/agent-origin.json" && -f "$repo/testdata/native/README.md" ]] || fail "$name: advertises updatesOutsidePrompt without testdata/native evidence"

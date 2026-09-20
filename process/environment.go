@@ -14,9 +14,9 @@ import (
 )
 
 // Environment is the merge that produces a harness environment. Later layers
-// win. Nothing is scrubbed except inherited names under InternalPrefix; the
-// Owned layer is applied after that drop, so the sibling's own markers reach
-// the child.
+// win. Nothing is scrubbed except names under InternalPrefix, dropped from
+// the inherited, agent, and session layers; the Owned layer is applied after
+// that drop, so the sibling's own markers reach the child.
 type Environment struct {
 	// Process is the sibling's own environment, in KEY=value form, read once at
 	// construction.
@@ -73,7 +73,7 @@ func validName(key string) bool {
 }
 
 // ValidateOptionalAbsolutePath accepts an unset path and refuses a relative
-// one. It guards the home, scratch, and executable path options.
+// one. It guards the home and scratch path options.
 func ValidateOptionalAbsolutePath(path string) error {
 	if path == "" || filepath.IsAbs(path) {
 		return nil

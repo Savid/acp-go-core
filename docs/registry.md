@@ -149,7 +149,7 @@ prompt process and removes image payloads.
 | claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. `rate_limits.five_hour` is the `session` limit, `rate_limits.seven_day` is `weekly_all`; `seven_day_oauth_apps`, `seven_day_opus`, and `seven_day_sonnet` retain their native keys as distinct ids without labels; each `rate_limits.model_scoped[]` entry is `weekly_scoped/<display_name>` with that name as `label`; a window without `utilization` is left out; a `get_usage` window carries no `windowSeconds`. When supplied, enabled native `spend` uses the shared Anthropic projection, with currency and unit exponent supplied by the source. `rate_limits_available: false` or an observation without windows or spending is `not_reported`; the CLI reports a logged-out home the same way. `rate_limits_available: true` with a null `rate_limits` is `not_reported` before the process completes a turn, since claude fills the report from its first API response, and afterwards a report claude could not fetch: the `account_usage` internal failure, unless an effective setup token supplies windows through the probe. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`; these carry `windowSeconds` of 18000 and 604800. Native turn quota events update or invalidate those cached windows. `providers`: `anthropic` natively; `openai-codex`, `opencode-go`, and `openrouter` only through the gateway `ANTHROPIC_BASE_URL` names, which also answers `anthropic` when neither the native report nor a probe supplies windows. | `subscription_type` | absent |
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. `providers`: `openai-codex` natively, and every provider through the routes `config.toml` `model_providers` declares with a `base_url`, keyed by `env_key`, in name order. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. A provider pi holds no native account for is read through the routes of extension-registered providers in registration order; the first gateway reporting the provider answers. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
-| hermes | `agent` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`, each only through the routes `config.yaml` `providers` declares with an `api` base, keyed by `key_env`, in name order; hermes exposes no provider credentials natively. `providerId` is required. | absent | absent account-wide; gateway windows carry their status |
+| hermes | `agent` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`, each only through the routes `config.yaml` `providers` declares with an `api` base, keyed by `key_env`, in name order; hermes exposes no provider credentials natively. | absent | absent account-wide; gateway windows carry their status |
 | opencode | `session` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider and unverified overrides are refused. `anthropic` and `openai-codex` are read only through the gateways the catalog routes to: providers with their own `baseURL`, keyed by the catalog's key or an `{env:NAME}` reference resolved from the session environment; `opencode-go` and `openrouter` fall back to those gateways when no native account holds them. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
@@ -196,10 +196,10 @@ are not exposed by the native catalog.
 
 ## Delegated Agents
 
-- **Tagged (claude).** Native `parent_tool_use_id` is retained as
-  `_meta.claude.parentToolUseId` on derived updates.
+- **Tagged (claude, amp).** The native parent tool-use id is retained as
+  `_meta.<vendor>.parentToolUseId` on derived updates.
 
-- **Not applicable (amp, codex, hermes, opencode, pi).** No subscribed provenance channel; nothing is
+- **Not applicable (codex, hermes, opencode, pi).** No subscribed provenance channel; nothing is
   synthesized.
 
 ## Vendor Session Options
@@ -337,7 +337,7 @@ declare neither.
 | opencode | Provider catalog `capabilities.input.image` | yes; missing metadata remains unknown |
 | amp | No authoritative native modality field | never; unknown forwards |
 
-An absent model, absent field, or empty list resolves to `unknown`. A failed
+A failed
 catalog call fails the app-server generation start (codex) or session
 establishment (claude, hermes, opencode, pi).
 

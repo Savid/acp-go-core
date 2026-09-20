@@ -13,9 +13,9 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
-// maxInboundLine bounds one inbound frame before any of it is retained. It
-// equals the pinned SDK scanner's bound, so a longer line ends the connection
-// before dispatch instead of being buffered ahead of the scanner.
+// maxInboundLine bounds one inbound frame. It equals the pinned SDK scanner's
+// bound, so a longer line ends the connection before dispatch instead of being
+// buffered ahead of the scanner.
 const maxInboundLine = 10 * 1024 * 1024
 
 var errInboundLineTooLong = errors.New("inbound frame exceeds the line bound")
@@ -97,10 +97,16 @@ type transportReader struct {
 	transport *Transport
 	lines     *bufio.Reader
 	pending   []byte
+	// refused latches an oversize frame so no later read hands out its tail.
+	refused error
 }
 
 func (r *transportReader) Read(p []byte) (int, error) {
 	<-r.transport.started
+
+	if r.refused != nil {
+		return 0, r.refused
+	}
 
 	if len(r.pending) == 0 {
 		line, err := r.readLine()
@@ -130,7 +136,9 @@ func (r *transportReader) readLine() ([]byte, error) {
 	for {
 		chunk, err := r.lines.ReadSlice('\n')
 		if len(line)+len(chunk) > maxInboundLine {
-			return nil, errInboundLineTooLong
+			r.refused = errInboundLineTooLong
+
+			return nil, r.refused
 		}
 
 		line = append(line, chunk...)
@@ -184,7 +192,7 @@ func (t *Transport) observeInbound(line []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	id := string(f.ID)
+	id := frameID(f.ID)
 	t.requests[id] = inboundRequest{method: f.Method, sessionID: params.SessionID}
 
 	switch f.Method {
@@ -194,6 +202,17 @@ func (t *Transport) observeInbound(line []byte) {
 		key := rawKeyPrompt(params.SessionID)
 		t.raw[key] = append(t.raw[key], rawParams{id: id, params: f.Params})
 	}
+}
+
+// frameID keys a request by its id's canonical JSON, so the id the SDK echoes
+// on the response, re-encoded with escaping, matches the id that arrived.
+func frameID(raw json.RawMessage) string {
+	canonical, err := json.Marshal(raw)
+	if err != nil {
+		return string(raw)
+	}
+
+	return string(canonical)
 }
 
 func rawKeyPrompt(sessionID acp.SessionId) string {
@@ -385,7 +404,7 @@ func (t *Transport) observeOutboundFrame(line []byte) {
 		return
 	}
 
-	id := string(f.ID)
+	id := frameID(f.ID)
 
 	t.mu.Lock()
 	request, ok := t.requests[id]

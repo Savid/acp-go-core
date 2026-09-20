@@ -29,7 +29,7 @@ a passing skip.
 Every sibling proves, against the current ACP v1 schema:
 
 - Initialize shape: `authMethods` empty; no fork, MCP, NES, providers, modes,
-  goals, import, or document capabilities advertised.
+  or document capabilities advertised.
 - Position-encoding selection.
 - Stable `session/fork` returns method-not-found; `session/set_mode` returns
   method-not-found; `authenticate` echoes the method id; `logout` returns

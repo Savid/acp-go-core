@@ -217,7 +217,9 @@ func (r *Reducer) reduceDuplicate(delivery Delivery) error {
 
 func (r *Reducer) commit(delivery Delivery) {
 	r.state.ReducedThrough = delivery.Sequence
-	r.frames[delivery.Sequence] = delivery.Frame
+	if r.frames != nil {
+		r.frames[delivery.Sequence] = delivery.Frame
+	}
 }
 
 func (r *Reducer) fail(delivery Delivery, kind ViolationKind, detail string) error {
@@ -234,7 +236,9 @@ func (r *Reducer) apply(delivery Delivery) error {
 		return r.applyStateUpdate(delivery)
 	case EventActivityUpdate:
 		return r.applyActivityUpdate(delivery)
-	default:
+	case EventActionUpdate:
 		return r.applyActionUpdate(delivery)
+	default:
+		return r.fail(delivery, ViolationMalformedEnvelope, "event type "+string(delivery.Event.Type))
 	}
 }

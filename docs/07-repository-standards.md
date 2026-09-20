@@ -80,8 +80,8 @@ The structural gate checks these symbols and literals in every sibling:
   `observer/exporters.Configure`.
 - The executable is resolved through `process.ResolveExecutable` against the
   base environment.
-- `request_builders.go` declares only the vendor option constructors, each
-  returning `wire.SessionRequestOption`.
+- `request_builders.go` declares the vendor option constructors, each
+  returning `wire.SessionRequestOption`, and `SetModelRequest`.
 - Native process death reports its stderr tail through
   `process.(*Process).StderrTail`.
 - A sibling that exports `AccountUsageMethod` in non-test Go spells it
@@ -97,8 +97,7 @@ The structural gate checks these symbols and literals in every sibling:
 ## Dot Files
 
 The tracked dot files are `.github/`, `.gitignore`, and `.golangci.yml`.
-Agent scratch directories are never committed. `.golangci.yml` uses the
-strictest configuration in the family.
+Agent scratch directories are never committed.
 
 ## Command Binary
 
@@ -168,8 +167,9 @@ may be named.
 
 `AGENTS.md` carries, in order: purpose, project map, working commands, coding
 rules, verification, and boundaries. `CLAUDE.md` is only the heading and the
-`@AGENTS.md` import. Sibling instructions are self-contained and mention no
-other repository.
+`@AGENTS.md` import. Sibling instructions are self-contained: they name no
+other sibling, this repository's contract, or any host; this module may be
+named.
 
 ## Code Standards
 
@@ -192,8 +192,7 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
   every sibling and in this module's own `go.mod`, and one version per module
   across every family `go.mod`, indirect requirements included;
 - the [surface presence](#surface-presence) symbols;
-- that README, AGENTS.md, and doc.go name no other sibling or this
-  repository;
+- that README, AGENTS.md, and doc.go name no other sibling;
 - byte-identical `LICENSE`, `.gitignore`, and `.golangci.yml`
   across siblings;
 - the Makefile audit composition, identical-class recipes, and integration gates;

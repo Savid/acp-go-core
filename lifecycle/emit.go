@@ -17,7 +17,12 @@ type stream struct {
 // native lifecycle source lifetime: it never rotates while that source
 // survives, and it never outlives it.
 func newStream(id string, negotiated Negotiated) *stream {
-	return &stream{id: id, reducer: NewReducer(Options{Negotiated: negotiated})}
+	reducer := NewReducer(Options{Negotiated: negotiated})
+	// An emitter never sees a retransmission of its own frames, so the
+	// validating reducer keeps none of them.
+	reducer.frames = nil
+
+	return &stream{id: id, reducer: reducer}
 }
 
 // fence ends the incarnation by recording its close on the reducer that judges
@@ -152,11 +157,13 @@ func encodeEvent(event Event) map[string]any {
 			fieldType:     string(EventActivityUpdate),
 			fieldActivity: encodeActivity(*event.Activity),
 		}
-	default:
+	case EventActionUpdate:
 		return map[string]any{
 			fieldType:   string(EventActionUpdate),
 			fieldAction: encodeAction(*event.Action),
 		}
+	default:
+		return nil
 	}
 }
 

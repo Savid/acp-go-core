@@ -93,7 +93,7 @@ func decodeRecord(data []byte, record any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 
-	if err := uniqueValue(decoder); err != nil {
+	if err := uniqueValue(decoder, 0); err != nil {
 		return err
 	}
 
@@ -111,7 +111,15 @@ func decodeRecord(data []byte, record any) error {
 	return nil
 }
 
-func uniqueValue(decoder *json.Decoder) error {
+// maxRecordDepth bounds record nesting so a hostile record cannot exhaust
+// the stack; it matches the depth encoding/json accepts.
+const maxRecordDepth = 10000
+
+func uniqueValue(decoder *json.Decoder, depth int) error {
+	if depth > maxRecordDepth {
+		return errors.New("record nesting exceeds its bound")
+	}
+
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -143,7 +151,7 @@ func uniqueValue(decoder *json.Decoder) error {
 			seen[name] = struct{}{}
 		}
 
-		if valueErr := uniqueValue(decoder); valueErr != nil {
+		if valueErr := uniqueValue(decoder, depth+1); valueErr != nil {
 			return valueErr
 		}
 	}

@@ -42,7 +42,10 @@ func RequestError(vendor string, err error) *acp.RequestError {
 
 	var provider *HTTPError
 	if errors.As(err, &provider) {
-		data, _ := failure.Data.(map[string]any)
+		data, ok := failure.Data.(map[string]any)
+		if !ok {
+			return failure
+		}
 
 		data["statusCode"] = provider.StatusCode
 		if !provider.RetryAt.IsZero() {

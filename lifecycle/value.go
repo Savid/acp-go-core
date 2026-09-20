@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
+	"strconv"
 	"strings"
 )
-
-// bigTen is the radix the exponent reader accumulates in.
-var bigTen = big.NewInt(10)
 
 // decodeValue reads one JSON document as the value form every comparison in this
 // extension runs on. Numbers are retained as their literals rather than collapsed
@@ -112,32 +110,21 @@ func normalizedNumber(lexeme string) string {
 		return "0"
 	}
 
-	scale := exponentValue(exponent)
-	scale.Sub(scale, big.NewInt(int64(len(fraction)-(len(coefficient)-len(digits)))))
+	var scale int64
 
-	return sign + digits + "e" + scale.String()
-}
+	if exponent != "" {
+		parsed, err := strconv.ParseInt(exponent, 10, 64)
+		if err != nil {
+			// An exponent past int64 names no number a frame can carry, so the
+			// lexeme stands as its own normalized form.
+			return lexeme
+		}
 
-// exponentValue reads a lexeme's exponent part as an exact integer.
-func exponentValue(exponent string) *big.Int {
-	value := new(big.Int)
-	if exponent == "" {
-		return value
+		scale = parsed
 	}
 
-	negative := exponent[0] == '-'
-	if negative || exponent[0] == '+' {
-		exponent = exponent[1:]
-	}
+	adjusted := new(big.Int).SetInt64(scale)
+	adjusted.Sub(adjusted, big.NewInt(int64(len(fraction)-(len(coefficient)-len(digits)))))
 
-	for index := range len(exponent) {
-		value.Mul(value, bigTen)
-		value.Add(value, big.NewInt(int64(exponent[index]-'0')))
-	}
-
-	if negative {
-		value.Neg(value)
-	}
-
-	return value
+	return sign + digits + "e" + adjusted.String()
 }

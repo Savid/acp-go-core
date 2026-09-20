@@ -48,10 +48,11 @@ const (
 
 // Account-usage request and advertisement members.
 const (
-	accountUsageFieldParams = "params"
-	accountUsageFieldMeta   = "_meta"
-	accountUsageFieldMethod = "method"
-	accountUsageFieldScope  = "scope"
+	accountUsageFieldParams     = "params"
+	accountUsageFieldMeta       = "_meta"
+	accountUsageFieldProviderID = "providerId"
+	accountUsageFieldMethod     = "method"
+	accountUsageFieldScope      = "scope"
 )
 
 // AccountUsageAdvertisement is the _meta.<vendor>.accountUsage value a sibling
@@ -102,14 +103,14 @@ func DecodeAccountUsageRequest(params json.RawMessage, scope AccountUsageScope) 
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(members)) {
-		if name != fieldSessionID && name != "providerId" && name != accountUsageFieldMeta {
+		if name != fieldSessionID && name != accountUsageFieldProviderID && name != accountUsageFieldMeta {
 			return request, Unsupported(name)
 		}
 	}
 
-	if raw, present := members["providerId"]; present {
+	if raw, present := members[accountUsageFieldProviderID]; present {
 		if json.Unmarshal(raw, &request.ProviderID) != nil || request.ProviderID == "" || request.ProviderID != strings.TrimSpace(request.ProviderID) {
-			return request, Unsupported("providerId")
+			return request, Unsupported(accountUsageFieldProviderID)
 		}
 	}
 

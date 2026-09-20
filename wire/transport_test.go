@@ -284,9 +284,14 @@ func TestTransportRefusesOverlongInboundLine(t *testing.T) {
 	transport.Start()
 	t.Cleanup(transport.Close)
 
-	n, err := transport.Reader().Read(make([]byte, 1))
+	reader := transport.Reader()
+	n, err := reader.Read(make([]byte, 1))
 	require.Zero(t, n)
 	require.ErrorIs(t, err, errInboundLineTooLong)
+
+	n, err = reader.Read(make([]byte, 1))
+	require.Zero(t, n)
+	require.ErrorIs(t, err, errInboundLineTooLong, "the refusal is terminal for the reader")
 
 	transport = NewTransport(strings.NewReader(strings.Repeat("x", maxInboundLine-1)+"\n"), io.Discard)
 	transport.Start()

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -155,45 +156,45 @@ func New(config Config) *Observer {
 		propagator:   propagator,
 		tracer:       tracerProvider.Tracer(InstrumentationName(config.Vendor), tracerOptions...),
 	}
-	observer.acpRequestCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".acp.request.count", "ACP requests.")
-	observer.acpRequestDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".acp.request.duration", "ACP request duration.")
-	observer.genAIOperationDuration = mustFloat64Histogram(meter, "gen_ai.client.operation.duration", "Prompt operation duration.")
-	observer.genAITokenUsage = mustInt64Histogram(meter, "gen_ai.client.token.usage", "{token}", "Token usage.")
-	observer.promptCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".session.prompt.count", "Prompt turns.")
-	observer.promptDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".session.prompt.duration", "Prompt turn duration.")
-	observer.promptCancelCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".session.cancel.count", "Cancelled prompt turns.")
-	observer.sessionActive = mustInt64UpDownCounter(meter, "acp_go_"+config.Vendor+".session.active", "Active sessions.")
-	observer.permissionCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".permission.request.count", "Permission requests.")
-	observer.permissionDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".permission.request.duration", "Permission request duration.")
-	observer.elicitationCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".elicitation.request.count", "Elicitation requests.")
-	observer.elicitationDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".elicitation.request.duration", "Elicitation request duration.")
-	observer.sessionStoreOperationDuration = mustFloat64Histogram(meter, "acp_go_"+config.Vendor+".session_store.operation.duration", "Session store operation duration.")
-	observer.sessionStoreErrorCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".session_store.error.count", "Session store errors.")
-	observer.rawMessageEmitErrorCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".raw_message.emit.error.count", "Raw event emission errors.")
-	observer.processExitCount = mustInt64Counter(meter, "acp_go_"+config.Vendor+".process.exit.count", "native process exits.")
+	observer.acpRequestCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".acp.request.count", "ACP requests.")
+	observer.acpRequestDuration = newFloat64Histogram(meter, "acp_go_"+config.Vendor+".acp.request.duration", "ACP request duration.")
+	observer.genAIOperationDuration = newFloat64Histogram(meter, "gen_ai.client.operation.duration", "Prompt operation duration.")
+	observer.genAITokenUsage = newInt64Histogram(meter, "gen_ai.client.token.usage", "{token}", "Token usage.")
+	observer.promptCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".session.prompt.count", "Prompt turns.")
+	observer.promptDuration = newFloat64Histogram(meter, "acp_go_"+config.Vendor+".session.prompt.duration", "Prompt turn duration.")
+	observer.promptCancelCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".session.cancel.count", "Cancelled prompt turns.")
+	observer.sessionActive = newInt64UpDownCounter(meter, "acp_go_"+config.Vendor+".session.active", "Active sessions.")
+	observer.permissionCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".permission.request.count", "Permission requests.")
+	observer.permissionDuration = newFloat64Histogram(meter, "acp_go_"+config.Vendor+".permission.request.duration", "Permission request duration.")
+	observer.elicitationCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".elicitation.request.count", "Elicitation requests.")
+	observer.elicitationDuration = newFloat64Histogram(meter, "acp_go_"+config.Vendor+".elicitation.request.duration", "Elicitation request duration.")
+	observer.sessionStoreOperationDuration = newFloat64Histogram(meter, "acp_go_"+config.Vendor+".session_store.operation.duration", "Session store operation duration.")
+	observer.sessionStoreErrorCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".session_store.error.count", "Session store errors.")
+	observer.rawMessageEmitErrorCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".raw_message.emit.error.count", "Raw event emission errors.")
+	observer.processExitCount = newInt64Counter(meter, "acp_go_"+config.Vendor+".process.exit.count", "native process exits.")
 
 	return observer
 }
 
-func mustInt64Counter(meter metric.Meter, name string, description string) metric.Int64Counter {
+func newInt64Counter(meter metric.Meter, name string, description string) metric.Int64Counter {
 	instrument, _ := meter.Int64Counter(name, metric.WithDescription(description))
 
 	return instrument
 }
 
-func mustInt64Histogram(meter metric.Meter, name string, unit string, description string) metric.Int64Histogram {
+func newInt64Histogram(meter metric.Meter, name string, unit string, description string) metric.Int64Histogram {
 	instrument, _ := meter.Int64Histogram(name, metric.WithUnit(unit), metric.WithDescription(description))
 
 	return instrument
 }
 
-func mustFloat64Histogram(meter metric.Meter, name string, description string) metric.Float64Histogram {
+func newFloat64Histogram(meter metric.Meter, name string, description string) metric.Float64Histogram {
 	instrument, _ := meter.Float64Histogram(name, metric.WithUnit("s"), metric.WithDescription(description))
 
 	return instrument
 }
 
-func mustInt64UpDownCounter(meter metric.Meter, name string, description string) metric.Int64UpDownCounter {
+func newInt64UpDownCounter(meter metric.Meter, name string, description string) metric.Int64UpDownCounter {
 	instrument, _ := meter.Int64UpDownCounter(name, metric.WithDescription(description))
 
 	return instrument
@@ -243,7 +244,7 @@ func (o *Observer) startACP(ctx context.Context, meta map[string]any, method str
 	ctx, span := o.tracer.Start(ctx, spanNameForACPMethod(method), trace.WithAttributes(spanAttrs...))
 
 	return ctx, func(result acpResult) {
-		allAttrs := append(slicesClone(spanAttrs), result.Extra...)
+		allAttrs := append(slices.Clone(spanAttrs), result.Extra...)
 		outcome := outcomeFromError(result.Err)
 		allAttrs = append(allAttrs, attribute.String(attrOutcome, outcome))
 
@@ -293,7 +294,7 @@ func (o *Observer) StartPrompt(ctx context.Context, meta map[string]any, model s
 		}
 
 		outcome := outcomeFromPrompt(result)
-		metricAttrs := append(slicesClone(promptAttrs), attribute.String(attrOutcome, outcome))
+		metricAttrs := append(slices.Clone(promptAttrs), attribute.String(attrOutcome, outcome))
 
 		if errType := errorType(result.Err); errType != "" {
 			metricAttrs = append(metricAttrs, attribute.String(attrErrorType, errType))
@@ -388,7 +389,7 @@ func (o *Observer) StartPermission(ctx context.Context, toolName string, mode st
 	ctx, span := o.tracer.Start(ctx, "acp.permission.request", trace.WithAttributes(attrs...))
 
 	return ctx, func(result PermissionResult) {
-		finalAttrs := slicesClone(attrs)
+		finalAttrs := slices.Clone(attrs)
 		if result.Behavior != "" {
 			finalAttrs = append(finalAttrs, attribute.String(attrOutcome, result.Behavior))
 		} else {
@@ -441,7 +442,7 @@ func (o *Observer) StartElicitation(ctx context.Context) (context.Context, func(
 			outcome = outcomeError
 		}
 
-		finalAttrs := append(slicesClone(attrs), attribute.String(attrOutcome, outcome))
+		finalAttrs := append(slices.Clone(attrs), attribute.String(attrOutcome, outcome))
 		if errType := errorType(result.Err); errType != "" {
 			finalAttrs = append(finalAttrs, attribute.String(attrErrorType, errType))
 
@@ -536,13 +537,13 @@ func promptUsageAttrs(result PromptResult) []attribute.KeyValue {
 }
 
 func appendTokenType(attrs []attribute.KeyValue, tokenType string) []attribute.KeyValue {
-	cloned := slicesClone(attrs)
+	cloned := slices.Clone(attrs)
 
 	return append(cloned, attribute.String(attrGenAITokenType, tokenType))
 }
 
 func removeAttribute(attrs []attribute.KeyValue, key string) []attribute.KeyValue {
-	filtered := attrs[:0]
+	filtered := make([]attribute.KeyValue, 0, len(attrs))
 	for _, attr := range attrs {
 		if string(attr.Key) == key {
 			continue
@@ -624,8 +625,4 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
-}
-
-func slicesClone[T any](values []T) []T {
-	return append([]T(nil), values...)
 }
