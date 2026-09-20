@@ -22,9 +22,9 @@ import (
 	"github.com/savid/acp-go-core/wire"
 )
 
-// Path is where a gateway publishes its report, beneath the API root the
-// harness is configured with.
-const Path = "/v1/usage"
+// usagePath is where a gateway publishes its report, beneath the API root
+// the harness is configured with.
+const usagePath = "/v1/usage"
 
 // The gateway's window ids for the windows every provider shares.
 const (
@@ -33,44 +33,39 @@ const (
 	windowMonthly  = "monthly"
 )
 
-// Reader reads one upstream provider's section of the report published at the
+// reader reads one upstream provider's section of the report published at the
 // credential's base. It uses the supplied transport or http.DefaultTransport
 // and never acquires credentials.
-type Reader struct {
+type reader struct {
 	Transport  http.RoundTripper
 	ProviderID string
 }
 
-// Endpoint is the report address beneath base: the API root the harness sends
+// endpoint is the report address beneath base: the API root the harness sends
 // requests to, with or without its trailing /v1 segment.
-func Endpoint(base string) (string, error) {
+func endpoint(base string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(base))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("gateway base is not an http origin")
 	}
 
-	parsed.Path = strings.TrimSuffix(strings.TrimSuffix(parsed.Path, "/"), "/v1") + Path
+	parsed.Path = strings.TrimSuffix(strings.TrimSuffix(parsed.Path, "/"), "/v1") + usagePath
 	parsed.RawPath = ""
 
 	return parsed.String(), nil
 }
 
-// Read observes the provider's section of the report at credential.BaseURL
-// with the bearer the harness sends there. A base that publishes no report is
-// a plain proxy and answers not_reported.
-func (r Reader) Read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
-	response, _, err := r.read(ctx, credential)
-
-	return response, err
-}
-
-func (r Reader) read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, bool, error) {
-	endpoint, err := Endpoint(credential.BaseURL)
+// read observes the provider's section of the report at credential.BaseURL
+// with the bearer the harness sends there and reports whether the section
+// covers the provider. A base that publishes no report is a plain proxy and
+// answers not_reported.
+func (r reader) read(ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, bool, error) {
+	address, err := endpoint(credential.BaseURL)
 	if err != nil {
 		return wire.AccountUsageResponse{}, false, err
 	}
 
-	response, err := usagehttp.Get(ctx, r.Transport, endpoint, credential.Token, nil)
+	response, err := usagehttp.Get(ctx, r.Transport, address, credential.Token, nil)
 	if err != nil {
 		return wire.AccountUsageResponse{}, false, err
 	}
@@ -127,7 +122,7 @@ type limit struct {
 // decode projects the provider's section: percent limits become windows, usd
 // amounts balances, request counts request limits, and any other unit is left
 // out. A section the gateway could not fetch is a failed read.
-func (r Reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, bool, error) {
+func (r reader) decode(response usagehttp.Response) (wire.AccountUsageResponse, bool, error) {
 	var body report
 
 	published := response.Decode(&body) == nil && body.Reports != nil
@@ -317,7 +312,7 @@ func money(amount *json.Number) *wire.AccountUsageMoney {
 
 	value, _ := amount.Float64()
 
-	return &wire.AccountUsageMoney{Amount: value, Currency: "USD"}
+	return &wire.AccountUsageMoney{Amount: value, Currency: currencyUSD}
 }
 
 // Route is one custom provider route a harness is configured with: the base
@@ -339,11 +334,11 @@ func ReadRoutes(ctx context.Context, transport http.RoundTripper, resolve func(c
 	}
 
 	for _, route := range routes {
-		if _, err := Endpoint(route.BaseURL); err != nil || strings.TrimSpace(route.Token) == "" {
+		if _, err := endpoint(route.BaseURL); err != nil || strings.TrimSpace(route.Token) == "" {
 			continue
 		}
 
-		response, covered, err := (Reader{Transport: transport, ProviderID: providerID}).read(ctx, usage.Credential{Token: route.Token, BaseURL: route.BaseURL})
+		response, covered, err := (reader{Transport: transport, ProviderID: providerID}).read(ctx, usage.Credential{Token: route.Token, BaseURL: route.BaseURL})
 		if err != nil {
 			return wire.AccountUsageResponse{}, err
 		}
@@ -365,12 +360,15 @@ func ReadRoutes(ctx context.Context, transport http.RoundTripper, resolve func(c
 	return fallback, nil
 }
 
-// ModelsPath is where a gateway publishes the models it routes to, beneath
+// modelsPath is where a gateway publishes the models it routes to, beneath
 // the API root the harness is configured with.
-const ModelsPath = "/v1/models"
+const modelsPath = "/v1/models"
 
 // modelsMaxBytes bounds a model list, which runs to thousands of entries.
 const modelsMaxBytes = 8 << 20
+
+// currencyUSD is the currency every gateway money amount is reported in.
+const currencyUSD = "USD"
 
 // Model is one entry of a gateway's model list.
 type Model struct {
@@ -383,27 +381,27 @@ type Model struct {
 	Inputs []string
 }
 
-// ModelsEndpoint is the model list address beneath base, with or without its
+// modelsEndpoint is the model list address beneath base, with or without its
 // trailing /v1 segment.
-func ModelsEndpoint(base string) (string, error) {
-	endpoint, err := Endpoint(base)
+func modelsEndpoint(base string) (string, error) {
+	address, err := endpoint(base)
 	if err != nil {
 		return "", err
 	}
 
-	return strings.TrimSuffix(endpoint, Path) + ModelsPath, nil
+	return strings.TrimSuffix(address, usagePath) + modelsPath, nil
 }
 
 // Models reads the model list a gateway publishes at the route's base with the
 // bearer the harness sends there, in the gateway's order. A base that
 // publishes no list answers none.
 func Models(ctx context.Context, transport http.RoundTripper, route Route) ([]Model, error) {
-	endpoint, err := ModelsEndpoint(route.BaseURL)
+	address, err := modelsEndpoint(route.BaseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := usagehttp.GetWithin(ctx, transport, endpoint, route.Token, nil, modelsMaxBytes)
+	response, err := usagehttp.GetWithin(ctx, transport, address, route.Token, nil, modelsMaxBytes)
 	if err != nil {
 		return nil, err
 	}

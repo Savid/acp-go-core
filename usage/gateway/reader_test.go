@@ -1,4 +1,4 @@
-package gateway_test
+package gateway
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/savid/acp-go-core/usage"
-	"github.com/savid/acp-go-core/usage/gateway"
 	"github.com/savid/acp-go-core/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -45,19 +44,19 @@ func TestEndpointDerivesTheReportAddressFromTheAPIRoot(t *testing.T) {
 	t.Parallel()
 
 	for base, want := range map[string]string{
-		"http://127.0.0.1:4000":            "http://127.0.0.1:4000/v1/usage",
-		"http://127.0.0.1:4000/":           "http://127.0.0.1:4000/v1/usage",
-		"http://127.0.0.1:4000/v1":         "http://127.0.0.1:4000/v1/usage",
-		"http://127.0.0.1:4000/v1/":        "http://127.0.0.1:4000/v1/usage",
-		"https://gateway.example/proxy/v1": "https://gateway.example/proxy/v1/usage",
+		"http://127.0.0.1:4000":     "http://127.0.0.1:4000/v1/usage",
+		"http://127.0.0.1:4000/":    "http://127.0.0.1:4000/v1/usage",
+		"http://127.0.0.1:4000/v1":  "http://127.0.0.1:4000/v1/usage",
+		"http://127.0.0.1:4000/v1/": "http://127.0.0.1:4000/v1/usage",
+		"https://example/proxy/v1":  "https://example/proxy/v1/usage",
 	} {
-		got, err := gateway.Endpoint(base)
+		got, err := endpoint(base)
 		require.NoError(t, err, base)
 		require.Equal(t, want, got, base)
 	}
 
-	for _, base := range []string{"", "gateway.example", "ftp://gateway.example", "http://user:pw@gateway.example", "http://gateway.example/v1?x=1"} {
-		_, err := gateway.Endpoint(base)
+	for _, base := range []string{"", "example", "ftp://example", "http://user:pw@example", "http://example/v1?x=1"} {
+		_, err := endpoint(base)
 		require.Error(t, err, base)
 	}
 }
@@ -68,7 +67,7 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	server := gatewayServer(t)
 	credential := usage.Credential{Token: "gateway-key", BaseURL: server.URL + "/v1"}
 
-	anthropic, err := gateway.Reader{ProviderID: "anthropic"}.Read(t.Context(), credential)
+	anthropic, err := readSection("anthropic", t.Context(), credential)
 	require.NoError(t, err)
 	require.NoError(t, anthropic.Validate())
 	require.True(t, anthropic.Available)
@@ -79,7 +78,7 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 		{ObservedAt: "2026-09-19T08:40:37Z", ID: "weekly_scoped/Fable", Label: "Fable", UsedPercent: 0, UsageAllowed: new(true), ResetsAt: "2026-09-26T07:59:59Z"},
 	}, anthropic.Limits, "windows carry the names and shape Anthropic's own reader gives them")
 
-	codex, err := gateway.Reader{ProviderID: "openai-codex"}.Read(t.Context(), credential)
+	codex, err := readSection("openai-codex", t.Context(), credential)
 	require.NoError(t, err)
 	require.NoError(t, codex.Validate())
 	require.Equal(t, "plus", codex.Plan)
@@ -93,22 +92,22 @@ func TestReadProjectsOneProviderSection(t *testing.T) {
 	require.Empty(t, codex.Limits[0].Label)
 	require.Equal(t, int64(18000), codex.Limits[0].WindowSeconds, "only ChatGPT windows carry a length")
 
-	openrouter, err := gateway.Reader{ProviderID: "openrouter"}.Read(t.Context(), credential)
+	openrouter, err := readSection("openrouter", t.Context(), credential)
 	require.NoError(t, err)
 	require.NoError(t, openrouter.Validate())
 	require.Empty(t, openrouter.Limits, "a token count has no wire form and is left out")
 
-	goWindows, err := gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), usage.Credential{Token: "gateway-key", BaseURL: server.URL + "/v1"})
+	goWindows, err := readSection("opencode-go", t.Context(), usage.Credential{Token: "gateway-key", BaseURL: server.URL + "/v1"})
 	require.Error(t, err)
 	require.Nil(t, goWindows.Limits)
 	require.Equal(t, []wire.AccountUsageBalance{{ID: "credits", Label: "Credits", ObservedAt: "2026-09-19T08:40:37Z",
-		Used: &wire.AccountUsageMoney{Amount: 40.81, Currency: "USD"}, Remaining: &wire.AccountUsageMoney{Amount: 9.19, Currency: "USD"}}}, openrouter.Balances)
+		Used: &wire.AccountUsageMoney{Amount: 40.81, Currency: currencyUSD}, Remaining: &wire.AccountUsageMoney{Amount: 9.19, Currency: currencyUSD}}}, openrouter.Balances)
 	require.Equal(t, []wire.AccountUsageRequestLimit{{ID: "free-daily", Label: "Free requests", ObservedAt: "2026-09-19T08:40:37Z", Used: 12, Limit: 1000, Remaining: 988, ResetsAt: "2026-09-19T16:00:00Z"}}, openrouter.RequestLimits)
 
-	_, err = gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), credential)
+	_, err = readSection("opencode-go", t.Context(), credential)
 	require.Error(t, err, "a section the gateway could not fetch is a failed read")
 
-	missing, err := gateway.Reader{ProviderID: "xai"}.Read(t.Context(), credential)
+	missing, err := readSection("xai", t.Context(), credential)
 	require.NoError(t, err)
 	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), missing)
 }
@@ -118,24 +117,24 @@ func TestReadDistinguishesProxiesAndBadBearers(t *testing.T) {
 
 	server := gatewayServer(t)
 
-	refused, err := gateway.Reader{ProviderID: "anthropic"}.Read(t.Context(), usage.Credential{Token: "wrong", BaseURL: server.URL})
+	refused, err := readSection("anthropic", t.Context(), usage.Credential{Token: "wrong", BaseURL: server.URL})
 	require.NoError(t, err)
 	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated), refused)
 
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
 	t.Cleanup(proxy.Close)
 
-	plain, err := gateway.Reader{ProviderID: "anthropic"}.Read(t.Context(), usage.Credential{Token: "gateway-key", BaseURL: proxy.URL + "/v1"})
+	plain, err := readSection("anthropic", t.Context(), usage.Credential{Token: "gateway-key", BaseURL: proxy.URL + "/v1"})
 	require.NoError(t, err)
 	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), plain)
 
-	_, err = gateway.Reader{ProviderID: "anthropic"}.Read(t.Context(), usage.Credential{Token: "gateway-key", BaseURL: "not a url"})
+	_, err = readSection("anthropic", t.Context(), usage.Credential{Token: "gateway-key", BaseURL: "not a url"})
 	require.Error(t, err, "a base that is not an http origin is the caller's mistake")
 
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
 	t.Cleanup(broken.Close)
 
-	_, err = gateway.Reader{ProviderID: "anthropic"}.Read(t.Context(), usage.Credential{Token: "gateway-key", BaseURL: broken.URL})
+	_, err = readSection("anthropic", t.Context(), usage.Credential{Token: "gateway-key", BaseURL: broken.URL})
 	var failure *usage.HTTPError
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, http.StatusBadGateway, failure.StatusCode)
@@ -149,23 +148,23 @@ func TestReadRoutesAnswersWithTheFirstCoveringRoute(t *testing.T) {
 	t.Cleanup(proxy.Close)
 
 	fallback := wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated)
-	routes := []gateway.Route{
-		{Provider: "broken", BaseURL: "gateway.example", Token: "x"},
+	routes := []Route{
+		{Provider: "broken", BaseURL: "example", Token: "x"},
 		{Provider: "empty", BaseURL: proxy.URL, Token: " "},
 		{Provider: "proxy", BaseURL: proxy.URL + "/v1", Token: "proxy-key"},
 		{Provider: "gateway", BaseURL: server.URL + "/v1", Token: "gateway-key"},
 	}
 
-	response, err := gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "anthropic", fallback)
+	response, err := ReadRoutes(t.Context(), nil, func(context.Context) ([]Route, error) { return routes, nil }, "anthropic", fallback)
 	require.NoError(t, err)
 	require.True(t, response.Available)
 	require.Len(t, response.Limits, 3)
 
-	response, err = gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "xai", fallback)
+	response, err = ReadRoutes(t.Context(), nil, func(context.Context) ([]Route, error) { return routes, nil }, "xai", fallback)
 	require.NoError(t, err)
 	require.Equal(t, fallback, response, "a provider no route covers keeps the fallback")
 
-	_, err = gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) { return routes, nil }, "opencode-go", fallback)
+	_, err = ReadRoutes(t.Context(), nil, func(context.Context) ([]Route, error) { return routes, nil }, "opencode-go", fallback)
 	require.Error(t, err, "a gateway that could not fetch the provider is a failed read")
 }
 
@@ -181,7 +180,7 @@ func TestReadNamesOpenCodeGoWindowsNatively(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	response, err := gateway.Reader{ProviderID: "opencode-go"}.Read(t.Context(), usage.Credential{Token: "k", BaseURL: server.URL})
+	response, err := readSection("opencode-go", t.Context(), usage.Credential{Token: "k", BaseURL: server.URL})
 	require.NoError(t, err)
 	require.Equal(t, "OpenCode Go", response.Plan)
 	require.Equal(t, []wire.AccountUsageLimit{
@@ -215,25 +214,25 @@ func TestModelsReadsTheGatewayList(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	endpoint, err := gateway.ModelsEndpoint(server.URL + "/v1")
+	endpoint, err := modelsEndpoint(server.URL + "/v1")
 	require.NoError(t, err)
 	require.Equal(t, server.URL+"/v1/models", endpoint)
 
-	models, err := gateway.Models(t.Context(), nil, gateway.Route{Provider: "gateway", BaseURL: server.URL + "/v1", Token: "gateway-key"})
+	models, err := Models(t.Context(), nil, Route{Provider: "gateway", BaseURL: server.URL + "/v1", Token: "gateway-key"})
 	require.NoError(t, err)
-	require.Equal(t, []gateway.Model{
+	require.Equal(t, []Model{
 		{ID: "openai-codex/gpt-5.6-luna", Name: "GPT-5.6-Luna", ContextWindow: 400000, MaxTokens: 128000, Inputs: []string{"text", "image"}},
 		{ID: "opencode-go/qwen3.8-flash", Name: "opencode-go/qwen3.8-flash"},
 	}, models, "an entry without an id is left out; a missing display name falls back to the id")
 
-	none, err := gateway.Models(t.Context(), nil, gateway.Route{BaseURL: server.URL + "/v1", Token: "wrong"})
+	none, err := Models(t.Context(), nil, Route{BaseURL: server.URL + "/v1", Token: "wrong"})
 	require.NoError(t, err)
 	require.Nil(t, none, "a refused bearer publishes no list to this caller")
 
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
 	t.Cleanup(proxy.Close)
 
-	none, err = gateway.Models(t.Context(), nil, gateway.Route{BaseURL: proxy.URL, Token: "k"})
+	none, err = Models(t.Context(), nil, Route{BaseURL: proxy.URL, Token: "k"})
 	require.NoError(t, err)
 	require.Nil(t, none)
 }
@@ -254,7 +253,7 @@ func TestModelsReadsAListLargerThanAUsageReport(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	models, err := gateway.Models(t.Context(), nil, gateway.Route{BaseURL: server.URL + "/v1", Token: "k"})
+	models, err := Models(t.Context(), nil, Route{BaseURL: server.URL + "/v1", Token: "k"})
 	require.NoError(t, err)
 	require.Len(t, models, 1500)
 }
@@ -264,7 +263,7 @@ func TestGatewayRejectsErroredSectionWithMeasurements(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"anthropic","fetchedAt":1789807237000,"error":"upstream read failed after first window","limits":[{"id":"anthropic:5h","window":{"id":"5h"},"amount":{"unit":"percent","used":25}}]}]}`)
 	}))
 	t.Cleanup(server.Close)
-	response, err := (gateway.Reader{ProviderID: "anthropic"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+	response, err := readSection("anthropic", t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
 	require.Error(t, err, "explicit upstream failure must not turn its partial measurements into success: %+v", response)
 }
 func TestGatewayRejectsNonIntegerRequestCounts(t *testing.T) {
@@ -274,7 +273,7 @@ func TestGatewayRejectsNonIntegerRequestCounts(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"reports":[{"provider":"openrouter","fetchedAt":1789807237000,"limits":[{"id":"requests","amount":{"unit":"requests","used":%s,"limit":10,"remaining":8}}]}]}`, used)
 			}))
 			t.Cleanup(server.Close)
-			response, err := (gateway.Reader{ProviderID: "openrouter"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+			response, err := readSection("openrouter", t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
 			require.Error(t, err, "malformed source count must not be rounded into a valid observation: %+v", response)
 		})
 	}
@@ -284,7 +283,7 @@ func TestGatewayPreservesIntegerRequestCounts(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"openrouter","fetchedAt":1789807237000,"limits":[{"id":"requests","amount":{"unit":"requests","used":9007199254740993,"limit":9007199254740993,"remaining":0}}]}]}`)
 	}))
 	t.Cleanup(server.Close)
-	response, err := (gateway.Reader{ProviderID: "openrouter"}).Read(t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
+	response, err := readSection("openrouter", t.Context(), usage.Credential{Token: "key", BaseURL: server.URL})
 	require.NoError(t, err)
 	require.Len(t, response.RequestLimits, 1)
 	require.Equal(t, int64(9007199254740993), response.RequestLimits[0].Used)
@@ -295,16 +294,16 @@ func TestReadRoutesRevalidatesNativeBinding(t *testing.T) {
 	t.Parallel()
 	server := gatewayServer(t)
 	calls := 0
-	resolve := func(context.Context) ([]gateway.Route, error) {
+	resolve := func(context.Context) ([]Route, error) {
 		calls++
 		token := "gateway-key"
 		if calls > 1 {
 			token = "rotated-key"
 		}
 
-		return []gateway.Route{{Provider: "gateway", BaseURL: server.URL, Token: token}}, nil
+		return []Route{{Provider: "gateway", BaseURL: server.URL, Token: token}}, nil
 	}
-	response, err := gateway.ReadRoutes(t.Context(), nil, resolve, "anthropic", wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated))
+	response, err := ReadRoutes(t.Context(), nil, resolve, "anthropic", wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated))
 	require.Error(t, err)
 	require.False(t, response.Available)
 	require.Equal(t, 2, calls)
@@ -316,8 +315,8 @@ func TestReadRoutesPreservesConnectedUnreportedAccount(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"reports":[{"provider":"anthropic","limits":[]}]}`)
 	}))
 	t.Cleanup(server.Close)
-	response, err := gateway.ReadRoutes(t.Context(), nil, func(context.Context) ([]gateway.Route, error) {
-		return []gateway.Route{{BaseURL: server.URL, Token: "key"}}, nil
+	response, err := ReadRoutes(t.Context(), nil, func(context.Context) ([]Route, error) {
+		return []Route{{BaseURL: server.URL, Token: "key"}}, nil
 	}, "anthropic", wire.AccountUsageUnavailable(wire.AccountUsageNotAuthenticated))
 	require.NoError(t, err)
 	require.Equal(t, wire.AccountUsageUnavailable(wire.AccountUsageNotReported), response)
@@ -333,11 +332,19 @@ func TestGatewayPreservesUnmappedWindowNames(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"reports":[{"provider":%q,"fetchedAt":1789807237000,"limits":[{"id":%q,"label":"Bonus","window":{"id":"promo"},"amount":{"unit":"percent","used":25}}]}]}`, provider, id)
 			}))
 			t.Cleanup(server.Close)
-			response, err := (gateway.Reader{ProviderID: provider}).Read(t.Context(), usage.Credential{BaseURL: server.URL, Token: "key"})
+			response, err := readSection(provider, t.Context(), usage.Credential{BaseURL: server.URL, Token: "key"})
 			require.NoError(t, err)
 			require.Len(t, response.Limits, 1)
 			require.Equal(t, id, response.Limits[0].ID)
 			require.Equal(t, "Bonus", response.Limits[0].Label)
 		})
 	}
+}
+
+// readSection reads one provider's section the way ReadRoutes does, without
+// the route revalidation.
+func readSection(providerID string, ctx context.Context, credential usage.Credential) (wire.AccountUsageResponse, error) {
+	response, _, err := (reader{ProviderID: providerID}).read(ctx, credential)
+
+	return response, err
 }

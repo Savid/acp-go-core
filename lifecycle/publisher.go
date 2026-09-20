@@ -5,7 +5,14 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 )
+
+// deliverTimeout bounds one delivery of a lifecycle envelope to the host. A
+// client that has stopped reading cannot pin this session's fence, idle, or
+// close past it; the timeout fences the stream the same as a failed delivery.
+// It is a var only so a test can lower it.
+var deliverTimeout = 30 * time.Second
 
 // Cycle identifies a foreground turn and the native cause that owns it.
 type Cycle struct {
@@ -247,7 +254,10 @@ func (p *Publisher) emit(ctx context.Context, event Event) error {
 	}
 
 	if p.deliver != nil {
-		if err := p.deliver(context.WithoutCancel(ctx), envelope); err != nil {
+		deliverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliverTimeout)
+		defer cancel()
+
+		if err := p.deliver(deliverCtx, envelope); err != nil {
 			p.fence()
 
 			return err

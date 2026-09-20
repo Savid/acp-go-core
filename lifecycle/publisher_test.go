@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -109,4 +110,31 @@ func TestPublisherRejectsAnAgentCycleFromAnotherIncarnation(t *testing.T) {
 	require.Error(t, publisher.OpenAgentCycle(t.Context(), cycle))
 	require.True(t, publisher.Active())
 	require.NoError(t, publisher.OpenAgentCycle(t.Context(), publisher.NewAgentCycle()))
+}
+
+func TestPublisherBoundsAStalledDelivery(t *testing.T) {
+	previous := deliverTimeout
+	deliverTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { deliverTimeout = previous })
+
+	var publisher Publisher
+	blocked := func(ctx context.Context, _ map[string]any) error {
+		<-ctx.Done()
+
+		return ctx.Err()
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- publisher.Open(t.Context(), "incarnation", Negotiated{Version: Version, UpdatesOutsidePrompt: true, ActivityKinds: []ActivityKind{}}, blocked)
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "a stalled delivery ends within the bound rather than pinning the publisher")
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stalled delivery pinned the publisher past its bound")
+	}
+
+	require.False(t, publisher.Active(), "a stalled delivery fences the stream")
 }
