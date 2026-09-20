@@ -12,7 +12,7 @@ not authorize native or live execution or changes to product behavior.
 ## Establish the current workflow
 
 Use [snapshot preflight](../align-check/SKILL.md#snapshot-preflight) for
-source identity. Read the [docs standards](../../../docs/07-repository-standards.md#docs).
+source identity. Read the [docs standards](../../../docs/06-repository-standards.md#docs).
 
 Verify the instructions against the repository itself: its file layout,
 Makefile recipes, test gates, public API, and native ownership. Inspect

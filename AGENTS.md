@@ -118,7 +118,7 @@ make drift-check     # family structural contract across sibling checkouts
   needs no sibling checkout.
 - Run `make drift-check` after structural rule changes. A pass proves the
   enumerated structure, not behavior.
-- A new or changed structural rule in `docs/07` has an assertion in
+- A new or changed structural rule in `docs/06` has an assertion in
   `scripts/drift-check.sh` in the same change.
 - Run sibling checks from that sibling's checkout using its own Makefile.
   Live model-token runs require explicit operator intent; nothing in this
@@ -128,8 +128,8 @@ make drift-check     # family structural contract across sibling checkouts
 
 ## Ask Before
 
-Unless already authorized, ask before changing family policy in `docs/02`
-through `docs/08`, shared pins, family membership, the numbering of `docs/`,
+Unless already authorized, ask before changing family policy in `docs/01`
+through `docs/07`, shared pins, family membership, the numbering of `docs/`,
 or an exported Go symbol. A correction supported by the current contract and
 code does not require a new decision. Do independent preparation before
 asking about an unresolved decision.

@@ -79,7 +79,7 @@ func TestFixtureManifestListsEveryVector(t *testing.T) {
 		require.NotEmpty(t, entry.Invariant, entry.File)
 	}
 
-	entries, err := fs.ReadDir(Fixtures, FixtureDir)
+	entries, err := fs.ReadDir(Fixtures, fixtureDir)
 	require.NoError(t, err)
 
 	for _, entry := range entries {
@@ -107,12 +107,12 @@ func TestFixtureBatteryPinsEveryViolationToken(t *testing.T) {
 		}
 	}
 
-	for _, token := range Vocabulary {
+	for _, token := range vocabulary {
 		require.Contains(t, pinned, token, "no vector pins %s", token)
 	}
 
 	for token, file := range pinned {
-		require.Contains(t, Vocabulary, token, "%s names a token outside the vocabulary", file)
+		require.Contains(t, vocabulary, token, "%s names a token outside the vocabulary", file)
 	}
 }
 
@@ -203,7 +203,7 @@ func requireLatched(t *testing.T, reducer *Reducer, vector fixture, refusal *Vio
 func loadManifest(t *testing.T) manifest {
 	t.Helper()
 
-	data, err := Fixtures.ReadFile(path.Join(FixtureDir, "manifest.json"))
+	data, err := Fixtures.ReadFile(path.Join(fixtureDir, "manifest.json"))
 	require.NoError(t, err)
 
 	var index manifest
@@ -217,7 +217,7 @@ func loadManifest(t *testing.T) manifest {
 func loadFixture(t *testing.T, file string) fixture {
 	t.Helper()
 
-	data, err := Fixtures.ReadFile(path.Join(FixtureDir, file))
+	data, err := Fixtures.ReadFile(path.Join(fixtureDir, file))
 	require.NoError(t, err)
 
 	var vector fixture

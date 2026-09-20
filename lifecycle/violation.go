@@ -68,10 +68,10 @@ const (
 	ViolationUnknownEntity ViolationKind = "unknown_entity"
 )
 
-// Vocabulary is the closed violation set in full, in the contract's order.
+// vocabulary is the closed violation set in full, in the contract's order.
 // Enumerating it is what lets the fixture battery prove every token is pinned
 // by a vector rather than merely declared here.
-var Vocabulary = []ViolationKind{
+var vocabulary = []ViolationKind{
 	ViolationUnsupportedVersion,
 	ViolationUnknownField,
 	ViolationMalformedEnvelope,

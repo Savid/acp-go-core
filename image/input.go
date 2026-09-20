@@ -124,10 +124,10 @@ func ValidatePrompt(ctx context.Context, blocks []acp.ContentBlock, options Opti
 		if options.HandoffRoot != "" && handoffForm(media) {
 			handoffBlocks++
 
-			if handoffBlocks > MaxHandoffBlocksPerPrompt {
+			if handoffBlocks > maxHandoffBlocksPerPrompt {
 				return nil, &InputError{
 					Code: ErrorTooLarge, Field: media.kind.field(), Index: index,
-					SizeBytes: handoffBlocks, MaxBytes: MaxHandoffBlocksPerPrompt,
+					SizeBytes: handoffBlocks, MaxBytes: maxHandoffBlocksPerPrompt,
 				}, nil
 			}
 		}
@@ -234,7 +234,7 @@ func decodeEmbedded(media promptMedia, index int) ([]byte, *InputError) {
 		return nil, &InputError{Code: ErrorMissingData, Field: field, Index: index}
 	}
 
-	if !slices.Contains(Formats, media.mimeType) {
+	if !slices.Contains(formats, media.mimeType) {
 		return nil, &InputError{Code: ErrorInvalidMediaType, Field: field, Index: index}
 	}
 
@@ -275,10 +275,10 @@ func decodeHandoff(ctx context.Context, media promptMedia, index int, maxImageBy
 // checkRaster runs the decode-free structural gates in their pinned order:
 // format recognition, dimensions, animation, then declared-versus-sniffed.
 func checkRaster(data []byte, mimeType, field string, index int) *InputError {
-	raster, err := Inspect(data)
+	raster, err := inspect(data)
 
 	switch {
-	case errors.Is(err, ErrUnknownRaster):
+	case errors.Is(err, errUnknownRaster):
 		return &InputError{Code: ErrorMediaTypeMismatch, Field: field, Index: index}
 	case err != nil:
 		return &InputError{Code: ErrorInvalidDimensions, Field: field, Index: index}

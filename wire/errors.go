@@ -66,6 +66,20 @@ func Missing(field string) *acp.RequestError {
 	return acp.NewInvalidParams(map[string]any{FieldError: VerdictMissing, FieldField: field})
 }
 
+// SessionIDMaxBytes bounds a session id on every session-addressed request.
+// Siblings mint ids far below it; a longer id names no session and is refused
+// before any lookup or retention.
+const SessionIDMaxBytes = 4096
+
+// CheckSessionID refuses an id past SessionIDMaxBytes as an unknown session.
+func CheckSessionID(id acp.SessionId) *acp.RequestError {
+	if len(id) > SessionIDMaxBytes {
+		return UnknownSession()
+	}
+
+	return nil
+}
+
 // UnknownSession answers a session-scoped request that found no eligible
 // session.
 func UnknownSession() *acp.RequestError {

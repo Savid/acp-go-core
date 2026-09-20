@@ -23,7 +23,7 @@ and deviations, with native verification where a run has been recorded.
 ## Packages
 
 The package list and what each owns is in
-[docs/02](docs/02-public-api.md#this-module).
+[docs/01](docs/01-public-api.md#this-module).
 
 ```go
 import (
@@ -81,7 +81,7 @@ syntax. It runs without sibling checkouts and needs Bash, Make, and Python 3
 with PyYAML.
 
 `make drift-check` verifies the enumerable structural rules in
-[docs/07](docs/07-repository-standards.md#drift-check) against the sibling
+[docs/06](docs/06-repository-standards.md#drift-check) against the sibling
 checkouts beside this repo. It needs Bash, Git, Python 3, and `rg`. Missing
 checkouts are reported and skipped. A pass proves the enumerated structure,
 not behavior.
@@ -97,13 +97,13 @@ The family principles are stated once, in
 | Page | Scope |
 |---|---|
 | [00 · Overview](docs/00-overview.md) | Ownership, identity, reserved literals, error vocabulary |
-| [02 · Public API](docs/02-public-api.md) | This module, agent surface, options, builders |
-| [03 · Wire contract](docs/03-wire-contract.md) | Capabilities, methods, metadata, envelopes |
-| [04 · Sessions and store](docs/04-sessions-and-store.md) | Persistence, commit ordering, restore, identity |
-| [05 · Behavior](docs/05-behavior.md) | Config, models, images, usage, permissions, commands, delete |
-| [06 · Lifecycle](docs/06-lifecycle.md) | Process model, cancellation, shutdown, concurrency |
-| [07 · Repository standards](docs/07-repository-standards.md) | Layout, tooling, CI, docs |
-| [08 · Testing](docs/08-testing.md) | Unit, conformance, fixtures, integration |
+| [01 · Public API](docs/01-public-api.md) | This module, agent surface, options, builders |
+| [02 · Wire contract](docs/02-wire-contract.md) | Capabilities, methods, metadata, envelopes |
+| [03 · Sessions and store](docs/03-sessions-and-store.md) | Persistence, commit ordering, restore, identity |
+| [04 · Behavior](docs/04-behavior.md) | Config, models, images, usage, permissions, commands, delete |
+| [05 · Lifecycle](docs/05-lifecycle.md) | Process model, cancellation, shutdown, concurrency |
+| [06 · Repository standards](docs/06-repository-standards.md) | Layout, tooling, CI, docs |
+| [07 · Testing](docs/07-testing.md) | Unit, conformance, fixtures, integration |
 | [Registry](docs/registry.md) | Current per-sibling facts and deviations |
 
 The [lifecycle manifest](lifecycle/testdata/fixtures/manifest.json) is the

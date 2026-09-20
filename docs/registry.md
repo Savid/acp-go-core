@@ -17,7 +17,7 @@ changes its public surface.
 
 Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
 session key, OpenCode session ID, Pi session UUID, or Amp thread id. The
-[identity contract](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
+[identity contract](03-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
 defines storage and wire publication.
 
 ## Native Surfaces and Process Models
@@ -61,7 +61,7 @@ Only pi adds a vendor cause: `extension`.
 |---|---|
 | claude | Native error results supply `errors`, `error`, or `result`. |
 | codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. |
-| pi | Command rejection preserves native text. Wrapper extension failure is `extension` with the fixed text `a pi extension failed`. |
+| pi | Command rejection preserves native text. Wrapper extension failure is `extension` carrying the extension's own error text. |
 | hermes | Native result status or RPC rejection supplies provider detail. |
 | opencode | Native HTTP errors or assistant error records supply provider detail. |
 | amp | A native receipt status `error` or an error stream record supplies provider detail. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
@@ -83,7 +83,7 @@ prompt process and removes image payloads.
 | Sibling | Open / delivery / settle |
 |---|---|
 | claude | Assistant, user, or stream work outside a prompt opens an agent-origin cycle. Native `result` or an agent-origin `task_notification` settles it. Delegated records retain their parent tool-use provenance. |
-| codex | The channel is permanent, but no supported path starts thread work outside a client turn: nothing follows `turn/completed`, a native `codex exec resume` on the app-server's thread is refused by the thread-store writer lock, and `thread/resume` emits only status, token-usage, goal, and MCP records, which are session-scoped and open nothing (verified on `0.155.1` on 2026-09-20). Unsolicited `turn/started`, item, plan, or diff notifications would open an agent-origin turn and `turn/completed` would drive mirror → idle. |
+| codex | The channel is permanent, but no supported path starts thread work outside a client turn: nothing follows `turn/completed`, a native `codex exec resume` on the app-server's thread is refused by the thread-store writer lock, and `thread/resume` emits only status, token-usage, goal, and MCP records, which are session-scoped and open nothing (verified on `0.155.1` on 2026-09-20). A record that arrives with no prompt in flight is session-scoped and opens nothing. |
 | pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage → mirror → idle. |
 | hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
@@ -116,7 +116,7 @@ prompt process and removes image payloads.
 | Sibling | `session/close` |
 |---|---|
 | claude | Cancels callbacks and the turn, signals and waits the process, commits final transcript rows, terminalizes an agent-origin cycle, and fences. |
-| codex | Cancels the turn and its dialogs, interrupts the native turn, unsubscribes the thread, commits rollout rows and the session record, terminalizes an open agent-origin cycle, and fences. The app-server and its other threads continue. |
+| codex | Cancels the turn and its dialogs, interrupts the native turn, unsubscribes the thread, commits rollout rows and the session record, and fences. The app-server and its other threads continue. |
 | pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
 | hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. |
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
@@ -146,7 +146,7 @@ prompt process and removes image payloads.
 
 | Sibling | Scope | Native source and mapping | Native `plan` | Native `usageAllowed` |
 |---|---|---|---|---|
-| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. `rate_limits.five_hour` is the `session` limit, `rate_limits.seven_day` is `weekly_all`; `seven_day_oauth_apps`, `seven_day_opus`, and `seven_day_sonnet` retain their native keys as distinct ids without labels; each `rate_limits.model_scoped[]` entry is `weekly_scoped/<display_name>` with that name as `label`; a window without `utilization` is left out; a `get_usage` window carries no `windowSeconds`. When supplied, enabled native `spend` uses the shared Anthropic projection, with currency and unit exponent supplied by the source. `rate_limits_available: false` or an observation without windows or spending is `not_reported`; the CLI reports a logged-out home the same way. `rate_limits_available: true` with a null `rate_limits` is `not_reported` before the process completes a turn, since claude fills the report from its first API response, and afterwards a report claude could not fetch: the `account_usage` internal failure, unless an effective setup token supplies windows through the probe. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](03-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`; these carry `windowSeconds` of 18000 and 604800. Native turn quota events update or invalidate those cached windows. `providers`: `anthropic` natively; `openai-codex`, `opencode-go`, and `openrouter` only through the gateway `ANTHROPIC_BASE_URL` names, which also answers `anthropic` when neither the native report nor a probe supplies windows. | `subscription_type` | absent |
+| claude | `session` | `get_usage` control request with `skip_behaviors: true` on the session's process. `rate_limits.five_hour` is the `session` limit, `rate_limits.seven_day` is `weekly_all`; `seven_day_oauth_apps`, `seven_day_opus`, and `seven_day_sonnet` retain their native keys as distinct ids without labels; each `rate_limits.model_scoped[]` entry is `weekly_scoped/<display_name>` with that name as `label`; a window without `utilization` is left out; a `get_usage` window carries no `windowSeconds`. When supplied, enabled native `spend` uses the shared Anthropic projection, with currency and unit exponent supplied by the source. `rate_limits_available: false` or an observation without windows or spending is `not_reported`; the CLI reports a logged-out home the same way. `rate_limits_available: true` with a null `rate_limits` is `not_reported` before the process completes a turn, since claude fills the report from its first API response, and afterwards a report claude could not fetch: the `account_usage` internal failure, unless an effective setup token supplies windows through the probe. `CLAUDE_CONFIG_DIR` selects the native credential location; that location must have its own login. Effective setup tokens use the [bounded probe exception](02-wire-contract.md#claude-setup-token-probes): Haiku supplies `session` and `weekly_all`; a Fable request supplies `weekly_scoped/Fable`; these carry `windowSeconds` of 18000 and 604800. Native turn quota events update or invalidate those cached windows. `providers`: `anthropic` natively; `openai-codex`, `opencode-go`, and `openrouter` only through the gateway `ANTHROPIC_BASE_URL` names, which also answers `anthropic` when neither the native report nor a probe supplies windows. | `subscription_type` | absent |
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. `providers`: `openai-codex` natively, and every provider through the routes `config.toml` `model_providers` declares with a `base_url`, keyed by `env_key`, in name order. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. A provider pi holds no native account for is read through the routes of extension-registered providers in registration order; the first gateway reporting the provider answers. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
 | hermes | `agent` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`, each only through the routes `config.yaml` `providers` declares with an `api` base, keyed by `key_env`, in name order; hermes exposes no provider credentials natively. | absent | absent account-wide; gateway windows carry their status |
@@ -315,7 +315,7 @@ declare neither.
 | Sibling | Input shape |
 |---|---|
 | amp, claude, codex, opencode | Ordered content arrays preserve text/image interleaving. |
-| pi, hermes | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](05-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
+| pi, hermes | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](04-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
 
 ### Non-raster blobs
 
@@ -530,7 +530,8 @@ native transcript can contain multiple entries with one API message id.
 
 - **Amp models and permissions:** modes select the model; no model catalog,
   permission, elicitation, or slash-command surface exists. Native tool
-  permissions stay native.
+  permissions stay native, so amp makes no client calls and
+  `MaxConcurrentClientCalls` is validated and never consumed.
 - **Amp compaction:** the remote thread actor compacts on its own and inserts an
   `info` summary message the plugin message API does not expose. Verification
   compares the conversation around such messages. A compacted thread cannot be

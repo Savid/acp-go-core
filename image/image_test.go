@@ -140,10 +140,10 @@ func TestMediaEnvelope(t *testing.T) {
 	t.Parallel()
 
 	envelope := MediaEnvelope(DefaultLimits(), Envelope{})
-	require.Equal(t, DefaultLimitBytes, envelope["maxBytes"])
-	require.Equal(t, DefaultLimitBytes, envelope["maxPromptBytes"])
+	require.Equal(t, defaultLimitBytes, envelope["maxBytes"])
+	require.Equal(t, defaultLimitBytes, envelope["maxPromptBytes"])
 	require.Equal(t, int64(0), envelope["maxDimension"])
-	require.Equal(t, Formats, envelope["imageFormats"])
+	require.Equal(t, formats, envelope["imageFormats"])
 	require.Equal(t, []string{}, envelope["documentFormats"])
 
 	disabled := MediaEnvelope(Limits{}, Envelope{NativeCeiling: 921_600, MaxDimension: 8000, DocumentFormats: []string{"application/pdf"}})
@@ -290,16 +290,16 @@ func TestHandoffForm(t *testing.T) {
 	_, refusal = validate(t, options, acp.ContentBlock{Image: &acp.ContentBlockImage{MimeType: MIMEPNG}})
 	require.Equal(t, ErrorMissingData, refusal.Code, "empty data with no handoff intent stays missing_data")
 
-	blocks := make([]acp.ContentBlock, 0, MaxHandoffBlocksPerPrompt+1)
-	for range MaxHandoffBlocksPerPrompt + 1 {
+	blocks := make([]acp.ContentBlock, 0, maxHandoffBlocksPerPrompt+1)
+	for range maxHandoffBlocksPerPrompt + 1 {
 		blocks = append(blocks, handoffBlock(uri, MIMEPNG, data, int64(len(data))))
 	}
 
 	_, refusal = validate(t, Options{Limits: Limits{MaxInputBytesPerImage: FrameClamp}, HandoffRoot: root}, blocks...)
 	require.Equal(t, ErrorTooLarge, refusal.Code)
-	require.Equal(t, MaxHandoffBlocksPerPrompt, refusal.Index)
-	require.Equal(t, int64(MaxHandoffBlocksPerPrompt+1), refusal.SizeBytes)
-	require.Equal(t, int64(MaxHandoffBlocksPerPrompt), refusal.MaxBytes)
+	require.Equal(t, maxHandoffBlocksPerPrompt, refusal.Index)
+	require.Equal(t, int64(maxHandoffBlocksPerPrompt+1), refusal.SizeBytes)
+	require.Equal(t, int64(maxHandoffBlocksPerPrompt), refusal.MaxBytes)
 }
 
 func TestResourceBlocks(t *testing.T) {
@@ -453,27 +453,27 @@ func TestWebPInspection(t *testing.T) {
 	t.Parallel()
 
 	lossless := webpBytes(webpChunk("VP8L", []byte{0x2f, 0x09, 0x40, 0x00, 0x00}))
-	raster, err := Inspect(lossless)
+	raster, err := inspect(lossless)
 	require.NoError(t, err)
 	require.Equal(t, MIMEWebP, raster.MIME)
 	require.False(t, raster.Animated)
 
 	extended := webpBytes(webpChunk("VP8X", []byte{0x00, 0, 0, 0, 0x03, 0, 0, 0x01, 0, 0}))
-	raster, err = Inspect(extended)
+	raster, err = inspect(extended)
 	require.NoError(t, err)
 	require.False(t, raster.Animated)
 
 	animated := webpBytes(webpChunk("VP8X", []byte{0x02, 0, 0, 0, 0x03, 0, 0, 0x01, 0, 0}))
-	raster, err = Inspect(animated)
+	raster, err = inspect(animated)
 	require.NoError(t, err)
 	require.True(t, raster.Animated)
 
 	truncated := webpBytes(webpChunk("VP8X", []byte{0x02, 0, 0, 0}), webpChunk("VP8L", []byte{0x2f, 0x09, 0x40, 0x00, 0x00}))
-	_, err = Inspect(truncated)
+	_, err = inspect(truncated)
 	require.Error(t, err, "a VP8X that cannot state its animation flag is refused, not read as a still")
 
 	lossy := webpBytes(webpChunk("VP8 ", []byte{0x00, 0x00, 0x00, 0x9d, 0x01, 0x2a, 0x05, 0x00, 0x03, 0x00}))
-	raster, err = Inspect(lossy)
+	raster, err = inspect(lossy)
 	require.NoError(t, err)
 	require.False(t, raster.Animated)
 
@@ -512,7 +512,7 @@ func TestAPNGIsRefused(t *testing.T) {
 
 	for _, frames := range []uint32{2, 1} {
 		data := withACTL(t, pngBytes(t), frames)
-		raster, err := Inspect(data)
+		raster, err := inspect(data)
 		require.NoError(t, err)
 		require.True(t, raster.Animated, "an acTL chunk marks the PNG animated whatever its frame count")
 
@@ -552,4 +552,18 @@ func TestHandoffDirectoryAliases(t *testing.T) {
 			require.Equal(t, ErrorPathNotAllowed, refusal.Code)
 		})
 	}
+}
+
+func TestHandoffAliasRootWithMissingParentIsMissing(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	alias := filepath.Join(base, "alias")
+	require.NoError(t, os.Symlink(root, alias))
+
+	_, verdict := openHandoff(alias, filepath.Join(alias, "absent", "image.png"))
+	require.NotNil(t, verdict)
+	require.Equal(t, ErrorMissingFile, verdict.code)
 }

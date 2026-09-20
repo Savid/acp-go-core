@@ -7,18 +7,18 @@ import (
 	"slices"
 )
 
-// DefaultLimitBytes is the default decoded-byte bound applied to every Limits
+// defaultLimitBytes is the default decoded-byte bound applied to every Limits
 // field: 6 MiB.
-const DefaultLimitBytes int64 = 6 * 1024 * 1024
+const defaultLimitBytes int64 = 6 * 1024 * 1024
 
 // FrameClamp is the largest decoded image the pinned ACP SDK can carry in one
 // JSON-RPC frame. Its base64 form plus 220 bytes of envelope fits the SDK's
 // 10,485,760-byte line scanner.
 const FrameClamp int64 = 7_864_155
 
-// MaxHandoffBlocksPerPrompt bounds how many handoff-form blocks one prompt may
+// maxHandoffBlocksPerPrompt bounds how many handoff-form blocks one prompt may
 // read.
-const MaxHandoffBlocksPerPrompt = 64
+const maxHandoffBlocksPerPrompt = 64
 
 // The inbound media-type allowlist, in the order the media envelope advertises
 // it.
@@ -29,9 +29,9 @@ const (
 	MIMEWebP = "image/webp"
 )
 
-// Formats is the inbound allowlist. The advertisement is a copy of this slice,
+// formats is the inbound allowlist. The advertisement is a copy of this slice,
 // so an accepted format and an advertised format cannot become different sets.
-var Formats = []string{MIMEPNG, MIMEJPEG, MIMEGIF, MIMEWebP}
+var formats = []string{MIMEPNG, MIMEJPEG, MIMEGIF, MIMEWebP}
 
 // Limits bounds decoded image bytes accepted from prompts and emitted as output.
 // Every field counts decoded bytes. A zero disables that policy limit and never
@@ -43,13 +43,13 @@ type Limits struct {
 	MaxOutputBytesPerToolCall int64
 }
 
-// DefaultLimits returns every field at DefaultLimitBytes.
+// DefaultLimits returns every field at defaultLimitBytes.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxInputBytesPerImage:     DefaultLimitBytes,
-		MaxInputBytesPerPrompt:    DefaultLimitBytes,
-		MaxOutputBytesPerImage:    DefaultLimitBytes,
-		MaxOutputBytesPerToolCall: DefaultLimitBytes,
+		MaxInputBytesPerImage:     defaultLimitBytes,
+		MaxInputBytesPerPrompt:    defaultLimitBytes,
+		MaxOutputBytesPerImage:    defaultLimitBytes,
+		MaxOutputBytesPerToolCall: defaultLimitBytes,
 	}
 }
 
@@ -133,7 +133,7 @@ func MediaEnvelope(limits Limits, envelope Envelope) map[string]any {
 		"maxBytes":        limits.effectiveInputPerImage(envelope.NativeCeiling),
 		"maxPromptBytes":  limits.effectiveInputPerPrompt(),
 		"maxDimension":    envelope.MaxDimension,
-		"imageFormats":    slices.Clone(Formats),
+		"imageFormats":    slices.Clone(formats),
 		"documentFormats": slices.Clone(documents),
 	}
 }

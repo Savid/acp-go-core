@@ -167,6 +167,8 @@ func WithListSessionsMeta(meta map[string]any) ListSessionsRequestOption {
 	return func(req *acp.ListSessionsRequest) { req.Meta = MergeMap(req.Meta, cloned) }
 }
 
+// rejectReservedMeta panics: a reserved key in a builder's meta is a
+// programming error, not a request a host can be refused.
 func rejectReservedMeta(builder string, meta map[string]any) {
 	if err := CheckReservedMeta(meta); err != nil {
 		panic(builder + ": " + err.Error())

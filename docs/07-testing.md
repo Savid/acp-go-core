@@ -1,7 +1,7 @@
 # Testing
 
 Test tiers use the Makefile targets in
-[07-repository-standards.md](07-repository-standards.md#makefile-targets).
+[06-repository-standards.md](06-repository-standards.md#makefile-targets).
 
 ## Unit Tests
 
@@ -34,13 +34,13 @@ Every sibling proves, against the current ACP v1 schema:
 - **Ordinary content attribution:** `lifecycle.CheckAttribution` accepts the
   recorded stream of a prompt turn and, on a sibling answering
   `updatesOutsidePrompt: true`, of an agent-origin turn
-  ([03-wire-contract.md](03-wire-contract.md#ordinary-content)).
+  ([02-wire-contract.md](02-wire-contract.md#ordinary-content)).
 - Stable `session/fork` returns method-not-found; `session/set_mode` returns
   method-not-found; `authenticate` echoes the method id; `logout` returns
   method-not-found; every extension method the sibling does not advertise
   returns method-not-found.
 - **Account usage**, on a sibling that advertises it: the scripted fake's
-  allowance is answered in the [contract shape](03-wire-contract.md#account-usage)
+  allowance is answered in the [contract shape](02-wire-contract.md#account-usage)
   and the advertisement carries the method and scope; an unknown request
   member is refused naming it; a session-scoped sibling refuses a missing
   `sessionId` as `missing`, and an unknown one is refused as unknown session;
@@ -209,7 +209,7 @@ captured native frames. The fixture and its provenance live under
 Runs against an installed native binary, skips cleanly when the binary is
 absent, spends no tokens, and proves initialization, session creation,
 deterministic close and delete paths, and, on a sibling that
-advertises it, an [account-usage](03-wire-contract.md#account-usage) read
+advertises it, an [account-usage](02-wire-contract.md#account-usage) read
 whose answer passes `Validate` and, when the isolated home cannot report
 windows, is asserted to be the `not_reported` answer.
 

@@ -61,10 +61,18 @@ type SessionStore interface {
 // InMemorySessionStore is the default store when a host provides none, and the
 // reference implementation the store contract battery is written against.
 type InMemorySessionStore struct {
-	mu         sync.Mutex
-	entries    map[SessionKey][]SessionStoreEntry
-	updatedAt  map[SessionKey]int64
-	tombstones map[SessionKey]int64
+	mu       sync.Mutex
+	sessions map[string]*storedSession
+	// deleted holds every session id whose main record was deleted. A deleted
+	// session never comes back: a later Replace is a no-op and Load reports it
+	// missing, so a delete that races the session's first write wins.
+	deleted map[string]struct{}
+}
+
+// storedSession is one session's live generation, keyed by subpath.
+type storedSession struct {
+	subpaths  map[string][]SessionStoreEntry
+	updatedAt int64
 }
 
 var _ SessionStore = (*InMemorySessionStore)(nil)
@@ -72,9 +80,8 @@ var _ SessionStore = (*InMemorySessionStore)(nil)
 // NewInMemorySessionStore creates an empty process-local store.
 func NewInMemorySessionStore() *InMemorySessionStore {
 	return &InMemorySessionStore{
-		entries:    make(map[SessionKey][]SessionStoreEntry),
-		updatedAt:  make(map[SessionKey]int64),
-		tombstones: make(map[SessionKey]int64),
+		sessions: make(map[string]*storedSession),
+		deleted:  make(map[string]struct{}),
 	}
 }
 
@@ -88,22 +95,14 @@ func (s *InMemorySessionStore) Load(ctx context.Context, sessionID string) (map[
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if sessionID == "" || s.isTombstonedLocked(SessionKey{SessionID: sessionID}) {
-		return nil, nil //nolint:nilnil // Missing or tombstoned sessions have no generation.
+	record := s.sessions[sessionID]
+	if record == nil {
+		return nil, nil //nolint:nilnil // A missing or deleted session has no generation.
 	}
 
-	var generation map[string][]SessionStoreEntry
-
-	for key, entries := range s.entries {
-		if key.SessionID != sessionID || s.isTombstonedLocked(key) {
-			continue
-		}
-
-		if generation == nil {
-			generation = make(map[string][]SessionStoreEntry)
-		}
-
-		generation[key.Subpath] = cloneEntries(entries)
+	generation := make(map[string][]SessionStoreEntry, len(record.subpaths))
+	for subpath, entries := range record.subpaths {
+		generation[subpath] = cloneEntries(entries)
 	}
 
 	return generation, nil
@@ -130,27 +129,16 @@ func (s *InMemorySessionStore) Replace(ctx context.Context, main SessionKey, rep
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// A tombstone this write did not create is final. The store enforces that
-	// itself rather than trusting a sibling-level deletion marker.
-	if s.isTombstonedLocked(main) {
+	if _, gone := s.deleted[main.SessionID]; gone {
 		return nil
 	}
 
-	now := time.Now().UnixMilli()
-
-	for candidate := range s.entries {
-		if candidate.SessionID == main.SessionID {
-			delete(s.entries, candidate)
-			delete(s.updatedAt, candidate)
-			s.tombstones[candidate] = now
-		}
-	}
-
+	record := &storedSession{subpaths: make(map[string][]SessionStoreEntry, len(replacements)), updatedAt: time.Now().UnixMilli()}
 	for _, replacement := range replacements {
-		s.entries[replacement.Key] = cloneEntries(replacement.Entries)
-		s.updatedAt[replacement.Key] = now
-		delete(s.tombstones, replacement.Key)
+		record.subpaths[replacement.Key.Subpath] = cloneEntries(replacement.Entries)
 	}
+
+	s.sessions[main.SessionID] = record
 
 	return nil
 }
@@ -186,7 +174,7 @@ func validateReplacements(main SessionKey, replacements []SessionStoreReplacemen
 	return nil
 }
 
-// ListSessions lists committed, non-tombstoned main sessions, newest first.
+// ListSessions lists committed sessions, newest first.
 func (s *InMemorySessionStore) ListSessions(ctx context.Context) ([]SessionSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -195,17 +183,10 @@ func (s *InMemorySessionStore) ListSessions(ctx context.Context) ([]SessionSumma
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	summaries := make([]SessionSummary, 0)
+	summaries := make([]SessionSummary, 0, len(s.sessions))
 
-	for key := range s.entries {
-		if key.SessionID == "" || key.Subpath != SessionStoreMainSubpath || s.isTombstonedLocked(key) {
-			continue
-		}
-
-		summaries = append(summaries, SessionSummary{
-			SessionID:          key.SessionID,
-			UpdatedAtUnixMilli: s.updatedAt[key],
-		})
+	for sessionID, record := range s.sessions {
+		summaries = append(summaries, SessionSummary{SessionID: sessionID, UpdatedAtUnixMilli: record.updatedAt})
 	}
 
 	slices.SortFunc(summaries, func(left, right SessionSummary) int {
@@ -219,8 +200,9 @@ func (s *InMemorySessionStore) ListSessions(ctx context.Context) ([]SessionSumma
 	return summaries, nil
 }
 
-// Delete writes a tombstone. Deleting the main key cascades to subpaths.
-// Deleting a key with an empty SessionID is a no-op.
+// Delete removes one subrecord, or the whole session when the main key is
+// named; a deleted session stays deleted. Deleting a key with an empty
+// SessionID is a no-op.
 func (s *InMemorySessionStore) Delete(ctx context.Context, key SessionKey) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -233,30 +215,15 @@ func (s *InMemorySessionStore) Delete(ctx context.Context, key SessionKey) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now().UnixMilli()
-	matched := false
-
-	for candidate := range s.entries {
-		if candidate.SessionID != key.SessionID {
-			continue
-		}
-
-		if key.Subpath != SessionStoreMainSubpath && candidate.Subpath != key.Subpath {
-			continue
-		}
-
-		delete(s.entries, candidate)
-		delete(s.updatedAt, candidate)
-		s.tombstones[candidate] = now
-		matched = true
-	}
-
-	if !matched {
-		s.tombstones[key] = now
-	}
-
 	if key.Subpath == SessionStoreMainSubpath {
-		s.tombstones[mainKey(key.SessionID)] = now
+		delete(s.sessions, key.SessionID)
+		s.deleted[key.SessionID] = struct{}{}
+
+		return nil
+	}
+
+	if record := s.sessions[key.SessionID]; record != nil {
+		delete(record.subpaths, key.Subpath)
 	}
 
 	return nil
@@ -281,22 +248,4 @@ func cloneEntries(entries []SessionStoreEntry) []SessionStoreEntry {
 	}
 
 	return clone
-}
-
-func (s *InMemorySessionStore) isTombstonedLocked(key SessionKey) bool {
-	if _, ok := s.tombstones[key]; ok {
-		return true
-	}
-
-	if key.Subpath != SessionStoreMainSubpath {
-		_, ok := s.tombstones[mainKey(key.SessionID)]
-
-		return ok
-	}
-
-	return false
-}
-
-func mainKey(sessionID string) SessionKey {
-	return SessionKey{SessionID: sessionID, Subpath: SessionStoreMainSubpath}
 }

@@ -57,8 +57,8 @@ itself address. How each sibling builds its catalog is in the
 
 Images use standard ACP image content or resource links. Custom image types,
 `outputModalities`, and client `canReceiveImages` negotiation are forbidden.
-Wire shapes and errors are in [03-wire-contract.md](03-wire-contract.md#image-content);
-limits in [02-public-api.md](02-public-api.md#effective-image-limits). The
+Wire shapes and errors are in [02-wire-contract.md](02-wire-contract.md#image-content);
+limits in [01-public-api.md](01-public-api.md#effective-image-limits). The
 `image` package runs every gate; a sibling supplies only its native input
 shape and output surfaces.
 
@@ -185,7 +185,7 @@ debugging; hosts must not depend on them.
 adapter that cannot determine it sets `size: 0`.
 
 Account allowance is a separate on-demand read,
-[`_<vendor>/accountUsage`](03-wire-contract.md#account-usage); it never rides
+[`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides
 `usage_update`.
 
 ## Assistant Text Streaming
@@ -256,7 +256,7 @@ A sibling emits an event only from a structured native signal, through the
 - A terminal turn never reopens.
 - Completion requires the first ending `idle` and, for a prompt-origin turn,
   the matching prompt response or error. The terminal event follows the
-  [foreground commit](04-sessions-and-store.md#lifecycle-commit-points) and
+  [foreground commit](03-sessions-and-store.md#lifecycle-commit-points) and
   precedes the response.
 - If the foreground commit fails, fail the prompt without terminal `idle`, end
   the incarnation, and let the next incarnation's snapshot state the truth.
@@ -273,10 +273,10 @@ progress remains ordinary tool-call updates.
 ### Actions
 
 Actions follow the closed states and blocking order in
-[03-wire-contract.md](03-wire-contract.md#the-closed-event-set). The sibling
+[02-wire-contract.md](02-wire-contract.md#the-closed-event-set). The sibling
 registers the wire request before announcing the action and resolves it
 exactly once. Cancellation, connection loss, and the
-[shutdown ladder](06-lifecycle.md#shutdown-ladder) terminalize it; an
+[shutdown ladder](05-lifecycle.md#shutdown-ladder) terminalize it; an
 unanswerable action never remains `pending`.
 
 ### Violation Behavior
@@ -345,7 +345,7 @@ catalogs.
 1. Write a durable tombstone first.
 2. Close and cancel any active session with the same id.
 3. Delete store entries. Native state is left in place
-   ([Hydrate In](04-sessions-and-store.md#hydrate-in)).
+   ([Hydrate In](03-sessions-and-store.md#hydrate-in)).
 4. Hide tombstoned sessions from `session/list`, `session/load`, and
    `session/resume`.
 5. Retry partial cleanup on future list, load, resume, and delete paths.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies the structural rules in docs/07 against local sibling checkouts.
+# Verifies the structural rules in docs/06 against local sibling checkouts.
 set -euo pipefail
 export LC_ALL=C
 
@@ -79,6 +79,9 @@ check_sibling() {
   done <<< "$resolving"
   rg -q 'wire\.SessionRequestOption' "$repo/request_builders.go" || fail "$name: request builders are not core's"
   rg -q --type go -g '*_test.go' 'lifecycle\.CheckAttribution\(' "$repo" || fail "$name: no test proves ordinary content attribution"
+  rg -q --type go -g '!*_test.go' 'wire\.CheckSessionID\(' "$repo" || fail "$name: session ids are not bounded through wire.CheckSessionID"
+  rg -q --type go -g '!*_test.go' 'wire\.LifecycleCarrier\(' "$repo" || fail "$name: lifecycle envelopes are not delivered as wire.LifecycleCarrier"
+  rg -q --type go -g '!*_test.go' 'os\.MkdirTemp\(' "$repo" && fail "$name: scratch directories bypass process.ScratchDir"
   rg -q '^func SetModelRequest\(sessionID acp\.SessionId, model string\) acp\.SetSessionConfigOptionRequest' "$repo/request_builders.go" || fail "$name: SetModelRequest is not declared in request_builders.go"
   rg -q --type go -g '!*_test.go' 'StderrTail\(|wire\.TransportFailure\(' "$repo" || fail "$name: process death does not report core's stderr tail"
   rg -q 'InputHandoffRoot +string' "$repo/options.go" && rg -q 'func WithInputHandoffRoot\(dir string\) Option' "$repo/options.go" || fail "$name: WithInputHandoffRoot surface missing"

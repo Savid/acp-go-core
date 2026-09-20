@@ -10,5 +10,5 @@ import "embed"
 //go:embed testdata/fixtures/*.json
 var Fixtures embed.FS
 
-// FixtureDir is the directory inside Fixtures that holds the battery.
-const FixtureDir = "testdata/fixtures"
+// fixtureDir is the directory inside Fixtures that holds the battery.
+const fixtureDir = "testdata/fixtures"

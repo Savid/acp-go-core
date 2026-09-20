@@ -11,7 +11,7 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
 ## Native Process Model
 
 - The harness is launched through `process.Start`: resolved executable, merged
-  [environment](02-public-api.md#process-environment), session cwd, its own
+  [environment](01-public-api.md#process-environment), session cwd, its own
   process group, and dedicated pipes for stdin, stdout, and stderr. Native
   stdout and stderr never inherit ACP stdout and are routed to logs only after
   JSON-RPC separation is guaranteed. A short-lived native command that is not
@@ -40,7 +40,7 @@ A multiplexed sibling treats the loss of its shared runtime as an epoch fence:
   in-flight turn fails exactly once.
 - **The next explicit operation starts one replacement.** `session/new`,
   `session/load`, `session/resume`, a prompt on an unbound session, and an
-  agent-scoped [account-usage read](03-wire-contract.md#account-usage) each
+  agent-scoped [account-usage read](02-wire-contract.md#account-usage) each
   admit a fresh runtime generation and rebind through it. A sibling never
   requires an adapter restart to recover from a runtime that exited, and never
   starts a replacement speculatively.
@@ -63,7 +63,7 @@ Session `env` and ordered `extraPathDirs` are per-session configuration.
 - **Recovery reconstructs them** from the session record before launching the
   native process.
 - Executable resolution follows
-  [02-public-api.md](02-public-api.md#process-options).
+  [01-public-api.md](01-public-api.md#process-options).
 
 ## Shutdown Ladder
 
@@ -121,6 +121,10 @@ incarnation ends the stream.
 
 - `streamId` does not rotate on a reconnect to the same surviving source and
   does not survive the incarnation.
+- Envelope delivery blocks on the host reading the connection. A host that
+  stops reading holds every publication behind it, the fence, the terminal
+  `idle`, `session/close`, and `Close` included, until it reads or
+  disconnects; no timeout stands in for a reading host.
 - A validated cancel terminalizes every pending action as `cancelled`, and an
   owned activity only where a structured native event reports it terminal. The
   sibling emits the cancelled cycle's terminal `idle` with outcome `cancelled`
@@ -130,7 +134,7 @@ incarnation ends the stream.
   nonterminal owned activity and action as `cancelled`, emits those updates
   and any open turn's terminal `idle`, fences the stream, and returns. A
   failed commit fails the close with the stream fenced and no terminal `idle`
-  ([commit points](04-sessions-and-store.md#lifecycle-commit-points)). A
+  ([commit points](03-sessions-and-store.md#lifecycle-commit-points)). A
   failed close still releases the session: its id is detached and no longer
   counts against `active_sessions`.
 - **Incarnation loss terminalizes as `failed`, close and cancel as
@@ -161,7 +165,7 @@ the error.
 ## Startup Capability Gating
 
 - Resolve the executable as
-  [02-public-api.md](02-public-api.md#process-options) states.
+  [01-public-api.md](01-public-api.md#process-options) states.
 - Fail fast with an actionable error if required methods, events, or
   permission surfaces are missing. Never silently downgrade: if a dependent
   surface is unavailable, do not advertise the capability and fail its use

@@ -12,16 +12,16 @@ types that cross the sibling boundary. The module owns:
 
 | Package | Contents |
 |---|---|
-| `acpcore` | `SessionStore` and its types, `InMemorySessionStore`, and `SessionStoreTimeout`, the bound on one store call ([04-sessions-and-store.md](04-sessions-and-store.md#store-api)). |
+| `acpcore` | `SessionStore` and its types, `InMemorySessionStore`, and `SessionStoreTimeout`, the bound on one store call ([03-sessions-and-store.md](03-sessions-and-store.md#store-api)). |
 | `acpcore/sessionlog` | Bounded atomic native-log and session-configuration commits, strict record decoding, and native-log reconciliation. |
 | `acpcore/observer` | OpenTelemetry spans and metrics with sibling identity supplied at construction, and prompt response usage mapping. |
 | `acpcore/observer/exporters` | The `OTEL_*` exporter, propagator, and log-bridge wiring a sibling's command binary hands to its Agent; library code never imports it. |
 | `acpcore/storetest` | The store contract battery a host store runs against itself. |
-| `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the session publisher, and the embedded [fixture battery](08-testing.md#lifecycle-fixtures). |
+| `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer, the session publisher, and the embedded [fixture battery](07-testing.md#lifecycle-fixtures). |
 | `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group, dedicated stdio pipes (or a caller-owned stdout file for a short-lived native command), and a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, and the exclusive native-home file lock. |
-| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, the reserved literals with the collision check for host-supplied `_meta`, and the [account-usage](03-wire-contract.md#account-usage) request decoder, response shape, and read bound. |
+| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, the reserved literals with the collision check for host-supplied `_meta`, and the [account-usage](02-wire-contract.md#account-usage) request decoder, response shape, and read bound. |
 | `acpcore/usage` and provider subpackages | Bounded provider account readers returning `wire.AccountUsageResponse`, verification that native credentials and routes remain stable during a read, and the bounded model-list read of a forwarding gateway (`usage/gateway.Models`); callers supply credentials and an optional HTTP transport. Readers never acquire credentials or launch a harness. |
-| `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, the image input gate, and output decoding ([03-wire-contract.md](03-wire-contract.md#image-content)). |
+| `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, the image input gate, and output decoding ([02-wire-contract.md](02-wire-contract.md#image-content)). |
 
 The exported API is the module's own Go documentation. This contract fixes
 what belongs there and what the siblings do with it. A sibling MUST NOT
@@ -30,7 +30,7 @@ re-export a core type under its own name.
 ## Agent Surface
 
 Every sibling exports this agent surface, plus the
-[extension constants](03-wire-contract.md#extension-constants) its reads
+[extension constants](02-wire-contract.md#extension-constants) its reads
 require. `Agent` has unexported fields only.
 
 ```go
@@ -79,7 +79,7 @@ Rules:
 - No exported `Session` type and no session methods outside `Agent`.
 - No fork method of any kind. Stable `session/fork` returns method-not-found.
 - `HandleExtensionMethod` answers only the inbound extension methods the
-  sibling advertises under [`_meta.<vendor>`](03-wire-contract.md#capability-_metavendor)
+  sibling advertises under [`_meta.<vendor>`](02-wire-contract.md#capability-_metavendor)
   and returns method-not-found for every other method. The only outbound
   extension surface is the `RawEventMethod` notification.
 - Unsupported methods and option fields use the
@@ -156,11 +156,11 @@ Rules:
   [registry](registry.md#ephemeral-scratch) records which siblings allocate
   and what they put there.
 - `WithInputHandoffRoot` is the only host-supplied read root and opts in to
-  [handoff image input](05-behavior.md#image-input). It MUST be absolute; a
+  [handoff image input](04-behavior.md#image-input). It MUST be absolute; a
   relative path is a construction failure. The adapter never writes, moves, or
   deletes files under it and never exposes its paths to the harness.
 - `WithConfiguredModels` names the models the host lists explicitly. Each id
-  is a configured entry under [catalog membership](05-behavior.md#catalog-membership).
+  is a configured entry under [catalog membership](04-behavior.md#catalog-membership).
   An empty, whitespace, or duplicate id fails construction.
 - `WithImageLimits` counts **decoded** bytes. Omitted, every field is 6 MiB
   (6,291,456). A field set to zero disables that policy limit and never
@@ -176,9 +176,8 @@ Rules:
   indirection. Native config injection is preferred where the harness offers
   it; the [registry](registry.md#vendor-process-options) records where.
 - Construction failures use `<vendor>_invalid_options`
-  ([00-overview.md](00-overview.md#uniform-error-shapes)): `NewAgent` returns
-  no error, and `Initialize` and every session-establishing entry point deliver
-  the verdict before native launch.
+  ([00-overview.md](00-overview.md#uniform-error-shapes)), delivered before
+  native launch.
 - Adapter-owned caches hold only material rebuilt from the adapter binary,
   never credentials, session state, or transcripts. They live under scratch,
   are content-addressed and immutable, and are recorded in the registry.
@@ -228,13 +227,14 @@ Every gate and advertisement uses the same resolved limits.
 | `MaxInputBytesPerImage` | `min(policy-or-unbounded, 7,864,155, native per-image ceiling if any)` |
 | `MaxInputBytesPerPrompt` | Policy limit, or `0` when disabled |
 
-The [frame clamp](03-wire-contract.md#output-frame-clamp) fixes 7,864,155.
+The [frame clamp](02-wire-contract.md#output-frame-clamp) fixes 7,864,155.
 Per-image input is always finite; handoff declarations are checked against it
 before reading.
 
 ## Per-Session Vendor Options
 
 Every sibling has a per-session options struct named `<Vendor>Options`, the
+  `<Vendor>` is the product's own spelling, `OpenCode` included.
 only typed builder for `_meta.<vendor>.options`.
 
 ```go
@@ -268,7 +268,7 @@ and `WithVendorOutputSchema(schema map[string]any) VendorOption`. The
 ### Session Environment and PATH
 
 `Env` and `ExtraPathDirs` are per-session inputs and part of resume identity
-([06-lifecycle.md](06-lifecycle.md#session-environment-and-path-scoping)).
+([05-lifecycle.md](05-lifecycle.md#session-environment-and-path-scoping)).
 
 - `ExtraPathDirs` accepts `[]string` and `[]any` with string elements. Entries
   MUST be non-empty, absolute, and free of `os.PathListSeparator`; a rejection
@@ -327,10 +327,11 @@ func Validate<Vendor>SessionMeta(meta map[string]any) error
 Rules:
 
 - Session-establishing builders always emit an empty `mcpServers` array. There
-  is no MCP option ([03-wire-contract.md](03-wire-contract.md#uniform-rejections)).
-- `WithSessionMeta` and `WithListSessionsMeta` reject a caller key matching any
-  `acp-go.dev/*` reserved literal, through `wire.CheckReservedMeta`, rather
-  than merge it. `WithSessionMetaValue` merges a vendor namespace the sibling
-  built itself and is what the vendor option constructors use.
+  is no MCP option ([02-wire-contract.md](02-wire-contract.md#uniform-rejections)).
+- `WithSessionMeta` and `WithListSessionsMeta` panic, naming the builder, on
+  a caller key matching any `acp-go.dev/*` reserved literal, through
+  `wire.CheckReservedMeta`: a reserved key is a programming error, not a
+  request. `WithSessionMetaValue` merges a vendor namespace the sibling built
+  itself and is what the vendor option constructors use.
 - Prompt correlation for the lifecycle extension is stamped by the host, not
-  by these builders ([03-wire-contract.md](03-wire-contract.md#prompt-correlation)).
+  by these builders ([02-wire-contract.md](02-wire-contract.md#prompt-correlation)).

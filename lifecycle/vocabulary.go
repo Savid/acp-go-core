@@ -101,8 +101,8 @@ const (
 	StopReasonCancelled       = "cancelled"
 )
 
-// ValidStopReason reports whether a stop reason is one of the standard five.
-func ValidStopReason(reason string) bool {
+// validStopReason reports whether a stop reason is one of the standard five.
+func validStopReason(reason string) bool {
 	switch reason {
 	case StopReasonEndTurn, StopReasonMaxTokens, StopReasonMaxTurnRequests,
 		StopReasonRefusal, StopReasonCancelled:

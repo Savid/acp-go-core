@@ -110,7 +110,7 @@ def check_fixtures(root):
     if set(names) | {"manifest.json"} != {p.name for p in folder.glob("*.json")}:
         errors.append("lifecycle JSON inventory differs from its manifest")
     members = set(manifest["expectShape"]["stateShape"]["members"])
-    section = (root / "docs/03-wire-contract.md").read_text().split(
+    section = (root / "docs/02-wire-contract.md").read_text().split(
         "### Sequencing and Fail-Closed Rules", 1
     )[1].split("\n## ", 1)[0]
     vocabulary = set(re.findall(r"^\| `([a-z_]+)` \|", section, re.MULTILINE))

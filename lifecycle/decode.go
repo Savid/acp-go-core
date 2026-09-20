@@ -55,7 +55,7 @@ func DecodeSessionUpdate(params json.RawMessage, negotiated Negotiated) (Deliver
 		return Delivery{}, dec.err
 	}
 
-	if carrier := CarrierClassForSessionUpdate(notification[updateField]); carrier != CarrierSessionInfo {
+	if carrier := carrierClassForSessionUpdate(notification[updateField]); carrier != CarrierSessionInfo {
 		return Delivery{}, violation(ViolationIllegalCarrier, dec.streamID, dec.sequence,
 			"only the identity-only "+sessionUpdateField+" "+string(CarrierSessionInfo)+" carries an envelope")
 	}
@@ -69,10 +69,10 @@ func DecodeSessionUpdate(params json.RawMessage, negotiated Negotiated) (Deliver
 	}, nil
 }
 
-// CarrierClassForSessionUpdate classifies one ACP session update. The
+// carrierClassForSessionUpdate classifies one ACP session update. The
 // identity-only session_info_update is the only eligible carrier: it sets no title
 // and no updatedAt, so carrying an envelope mutates no state.
-func CarrierClassForSessionUpdate(update json.RawMessage) CarrierClass {
+func carrierClassForSessionUpdate(update json.RawMessage) CarrierClass {
 	fields, ok := jsonObject(update)
 	if !ok {
 		return CarrierUnknown
@@ -302,7 +302,7 @@ func (d *decoder) stateUpdate(fields map[string]json.RawMessage) Event {
 		d.fail(ViolationMalformedEnvelope, nameless)
 	case transition.State != ForegroundIdle && (transition.StopReason != "" || transition.Outcome != ""):
 		d.fail(ViolationMalformedEnvelope, "only an ending transition carries a stop reason and an outcome")
-	case transition.StopReason != "" && !ValidStopReason(transition.StopReason):
+	case transition.StopReason != "" && !validStopReason(transition.StopReason):
 		d.fail(ViolationMalformedEnvelope, "stop reason "+transition.StopReason)
 	case transition.Outcome != "" && !transition.Outcome.Valid():
 		d.fail(ViolationMalformedEnvelope, "outcome "+string(transition.Outcome))

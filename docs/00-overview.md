@@ -49,7 +49,7 @@ The package does not own:
 A sibling inherits the environment it was started in: every variable, the
 `PATH`, the home, the cwd. Its only power over the harness environment is to
 overlay variables when it launches the harness, in the merge order fixed in
-[02-public-api.md](02-public-api.md#process-environment). It MUST NOT scrub,
+[01-public-api.md](01-public-api.md#process-environment). It MUST NOT scrub,
 allowlist, or refuse inherited or caller-supplied names, and it MUST NOT make
 or verify any claim about process or filesystem containment. Isolation is the
 responsibility of whoever executes the sibling.
@@ -64,7 +64,7 @@ policies pass through as session options and are never reimplemented.
 ### One Shape, One Core
 
 Shared behavior lives once in this module
-([02-public-api.md](02-public-api.md#this-module)). A sibling contains only
+([01-public-api.md](01-public-api.md#this-module)). A sibling contains only
 vendor-specific code: its public options, its native protocol, its event
 mapping, and its store format. Common concepts keep identical names and
 signatures across siblings. Sibling public docs never reference this
@@ -108,9 +108,9 @@ Adding a literal requires a family contract amendment.
 
 | Literal | Direction | Advertised by |
 |---|---|---|
-| [`acp-go.dev/mediaEnvelope`](03-wire-contract.md#media-envelope) | agent → host at initialize | every sibling, unconditionally |
-| [`acp-go.dev/handoff`](03-wire-contract.md#handoff-envelope) | host → agent per image block | every sibling, exactly while `WithInputHandoffRoot` is set |
-| [`acp-go.dev/lifecycle`](03-wire-contract.md#lifecycle-envelope) | bilateral at initialize; agent → host per session update and permission/elicitation request; host → agent per prompt | every sibling |
+| [`acp-go.dev/mediaEnvelope`](02-wire-contract.md#media-envelope) | agent → host at initialize | every sibling, unconditionally |
+| [`acp-go.dev/handoff`](02-wire-contract.md#handoff-envelope) | host → agent per image block | every sibling, exactly while `WithInputHandoffRoot` is set |
+| [`acp-go.dev/lifecycle`](02-wire-contract.md#lifecycle-envelope) | bilateral at initialize; agent → host per session update and permission/elicitation request; host → agent per prompt | every sibling |
 
 The first two advertisements use `agentCapabilities._meta`; lifecycle uses
 `InitializeResponse._meta`. The literals are the `wire` package constants; a
@@ -203,7 +203,7 @@ real native cause and is never a placeholder or a bare `EOF`; it is valid
 UTF-8 bounded by `wire.TurnFailed`: at most 18 KiB for `process_exit`,
 including the complete retained 16 KiB stderr tail, and at most 2048 bytes
 for other causes. `statusCode` and `providerCode` appear only when the harness
-supplies them. Semantics are in [05-behavior.md](05-behavior.md#native-turn-failure).
+supplies them. Semantics are in [04-behavior.md](04-behavior.md#native-turn-failure).
 
 Every other `-32603` a sibling emits carries a closed `data.error` token and
 the constant `message`:
@@ -212,9 +212,9 @@ the constant `message`:
 |---|---|---|
 | `<vendor>_invalid_options` | The agent was constructed with options it will not serve under. `NewAgent` returns no error; the verdict is delivered at `initialize` and every session-establishing entry point. | `field` naming the refused option. |
 | `<vendor>_restore_failed` | A stored session could not be restored: on `session/load`, `session/resume`, or a lazy relaunch that re-hydrates native state before a prompt or config-option change. The entry is neither deleted nor tombstoned. | none |
-| `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([06-lifecycle.md](06-lifecycle.md#shared-runtime-loss)). | none |
-| `<vendor>_session_poisoned` | The addressed session is poisoned ([04-sessions-and-store.md](04-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
-| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a native [account-usage](03-wire-contract.md#account-usage) read that fails carries `class: "account_usage"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`; account-usage HTTP failures also carry `statusCode` and optional `retryAt` as defined in [03](03-wire-contract.md#account-usage) |
+| `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([05-lifecycle.md](05-lifecycle.md#shared-runtime-loss)). | none |
+| `<vendor>_session_poisoned` | The addressed session is poisoned ([03-sessions-and-store.md](03-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
+| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a native [account-usage](02-wire-contract.md#account-usage) read that fails carries `class: "account_usage"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`; account-usage HTTP failures also carry `statusCode` and optional `retryAt` as defined in [02](02-wire-contract.md#account-usage) |
 
 The data MUST NOT carry a bare unprefixed token, joined Go error text, native
 text, or a `message` member. [registry.md](registry.md#known-deviations)

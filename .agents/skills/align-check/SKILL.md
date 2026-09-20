@@ -40,8 +40,8 @@ Add judgment checks where the script cannot prove the requirement: README
 truthfulness against the code, environment inheritance and merge order,
 session environment scoping across recovery, native resume outside ACP, and
 lifecycle emitter validation through the reducer. Follow the
-[repository standards](../../../docs/07-repository-standards.md),
-[lifecycle rules](../../../docs/06-lifecycle.md), and
+[repository standards](../../../docs/06-repository-standards.md),
+[lifecycle rules](../../../docs/05-lifecycle.md), and
 [registry](../../../docs/registry.md). State what was sampled.
 
 ## Failure mapping
@@ -50,14 +50,14 @@ lifecycle emitter validation through the reducer. Follow the
 |---|---|
 | family table, pins, checkout not found | `README.md#the-family`, `README.md#shared-pins` |
 | module, package, binary, prefix, or store format identity | `docs/00-overview.md#identity-constants` |
-| required file, layout, or Go file structure | `docs/07-repository-standards.md#layout`, `#go-file-structure` |
-| surface presence symbol or forbidden literal | `docs/07-repository-standards.md#surface-presence` |
-| sibling docs or instructions name another repo or a host | `docs/00-overview.md#one-shape-one-core`, `docs/07-repository-standards.md#docs` |
-| shared file or workflow differs | `docs/07-repository-standards.md#dot-files`, `#continuous-integration` |
-| Makefile target, audit composition, or recipe | `docs/07-repository-standards.md#makefile-targets` |
-| command flag | `docs/07-repository-standards.md#command-binary` |
-| sibling carries a lifecycle fixture copy | `docs/08-testing.md#lifecycle-fixtures` |
-| registry row missing | `docs/07-repository-standards.md#surface-presence` |
+| required file, layout, or Go file structure | `docs/06-repository-standards.md#layout`, `#go-file-structure` |
+| surface presence symbol or forbidden literal | `docs/06-repository-standards.md#surface-presence` |
+| sibling docs or instructions name another repo or a host | `docs/00-overview.md#one-shape-one-core`, `docs/06-repository-standards.md#docs` |
+| shared file or workflow differs | `docs/06-repository-standards.md#dot-files`, `#continuous-integration` |
+| Makefile target, audit composition, or recipe | `docs/06-repository-standards.md#makefile-targets` |
+| command flag | `docs/06-repository-standards.md#command-binary` |
+| sibling carries a lifecycle fixture copy | `docs/07-testing.md#lifecycle-fixtures` |
+| registry row missing | `docs/06-repository-standards.md#surface-presence` |
 
 ## Report
 

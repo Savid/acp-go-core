@@ -183,7 +183,7 @@ trust. A poisoned session refuses every operation but `session/close` and
 - A binding change MUST fence the previous lifecycle incarnation and its native
   deliveries. An unexpected id change during normal operation MUST fail.
 - New, load, and resume responses and each session-list entry MUST publish the
-  current native id through the [session metadata](03-wire-contract.md#native-session-binding).
+  current native id through the [session metadata](02-wire-contract.md#native-session-binding).
 - Lifecycle state is keyed by ACP session id, incarnation, and entity id. An
   incarnation is never reused and never adopts a prior incarnation's entities.
 - A stream's first event is a whole-state assertion. A sibling that cannot

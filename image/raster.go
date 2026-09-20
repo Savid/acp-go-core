@@ -6,19 +6,19 @@ import (
 	"net/http"
 )
 
-// Raster is what a decode-free header walk learns about an image.
-type Raster struct {
+// raster is what a decode-free header walk learns about an image.
+type raster struct {
 	MIME     string
 	Animated bool
 }
 
-// ErrUnknownRaster reports bytes whose magic matches no allowlisted raster; a
+// errUnknownRaster reports bytes whose magic matches no allowlisted raster; a
 // recognized header with no valid dimensions returns a plain error.
-var ErrUnknownRaster = errors.New("bytes do not sniff as a known raster format")
+var errUnknownRaster = errors.New("bytes do not sniff as a known raster format")
 
-// Inspect walks the header of an allowlisted raster without decoding it and
+// inspect walks the header of an allowlisted raster without decoding it and
 // allocates nothing proportional to the declared size.
-func Inspect(data []byte) (Raster, error) {
+func inspect(data []byte) (raster, error) {
 	switch {
 	case len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n":
 		return inspectPNG(data)
@@ -29,14 +29,14 @@ func Inspect(data []byte) (Raster, error) {
 	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
 		return inspectWebP(data)
 	default:
-		return Raster{}, ErrUnknownRaster
+		return raster{}, errUnknownRaster
 	}
 }
 
 // sniffMIME reports the truthful media type of an output artifact. Output is not
 // allowlisted: any sniffable raster is emitted with its sniffed type.
 func sniffMIME(data []byte) (string, bool) {
-	if info, err := Inspect(data); err == nil {
+	if info, err := inspect(data); err == nil {
 		return info.MIME, true
 	}
 
@@ -52,16 +52,16 @@ func sniffMIME(data []byte) (string, bool) {
 	return "", false
 }
 
-func inspectPNG(data []byte) (Raster, error) {
+func inspectPNG(data []byte) (raster, error) {
 	if len(data) < 33 || string(data[12:16]) != "IHDR" || binary.BigEndian.Uint32(data[8:12]) != 13 {
-		return Raster{}, errors.New("invalid PNG dimensions")
+		return raster{}, errors.New("invalid PNG dimensions")
 	}
 
 	width := int(binary.BigEndian.Uint32(data[16:20]))
 
 	height := int(binary.BigEndian.Uint32(data[20:24]))
 	if width <= 0 || height <= 0 {
-		return Raster{}, errors.New("invalid PNG dimensions")
+		return raster{}, errors.New("invalid PNG dimensions")
 	}
 
 	animated := false
@@ -86,10 +86,10 @@ func inspectPNG(data []byte) (Raster, error) {
 		offset += 12 + length
 	}
 
-	return Raster{MIME: MIMEPNG, Animated: animated}, nil
+	return raster{MIME: MIMEPNG, Animated: animated}, nil
 }
 
-func inspectJPEG(data []byte) (Raster, error) {
+func inspectJPEG(data []byte) (raster, error) {
 	for offset := 2; offset+1 < len(data); {
 		if data[offset] != 0xff {
 			offset++
@@ -129,13 +129,13 @@ func inspectJPEG(data []byte) (Raster, error) {
 				break
 			}
 
-			return Raster{MIME: MIMEJPEG}, nil
+			return raster{MIME: MIMEJPEG}, nil
 		}
 
 		offset += length
 	}
 
-	return Raster{}, errors.New("invalid JPEG dimensions")
+	return raster{}, errors.New("invalid JPEG dimensions")
 }
 
 func jpegSOFMarker(marker byte) bool {
@@ -147,19 +147,19 @@ func jpegSOFMarker(marker byte) bool {
 	}
 }
 
-func inspectGIF(data []byte) (Raster, error) {
+func inspectGIF(data []byte) (raster, error) {
 	if len(data) < 13 {
-		return Raster{}, errors.New("invalid GIF dimensions")
+		return raster{}, errors.New("invalid GIF dimensions")
 	}
 
 	width := int(binary.LittleEndian.Uint16(data[6:8]))
 
 	height := int(binary.LittleEndian.Uint16(data[8:10]))
 	if width <= 0 || height <= 0 {
-		return Raster{}, errors.New("invalid GIF dimensions")
+		return raster{}, errors.New("invalid GIF dimensions")
 	}
 
-	still := Raster{MIME: MIMEGIF}
+	still := raster{MIME: MIMEGIF}
 
 	offset := 13
 	if data[10]&0x80 != 0 {
@@ -229,7 +229,7 @@ func skipGIFSubBlocks(data []byte, offset int) int {
 	return offset
 }
 
-func inspectWebP(data []byte) (Raster, error) {
+func inspectWebP(data []byte) (raster, error) {
 	for offset := 12; offset+8 <= len(data); {
 		chunkType := string(data[offset : offset+4])
 		size := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
@@ -242,22 +242,22 @@ func inspectWebP(data []byte) (Raster, error) {
 		switch chunkType {
 		case "VP8X":
 			if size < 10 {
-				return Raster{}, errors.New("invalid WebP dimensions")
+				return raster{}, errors.New("invalid WebP dimensions")
 			}
 
-			return Raster{MIME: MIMEWebP, Animated: data[payload]&0x02 != 0}, nil
+			return raster{MIME: MIMEWebP, Animated: data[payload]&0x02 != 0}, nil
 		case "VP8 ":
 			if size >= 10 && data[payload+3] == 0x9d && data[payload+4] == 0x01 && data[payload+5] == 0x2a {
 				width := int(binary.LittleEndian.Uint16(data[payload+6:payload+8]) & 0x3fff)
 
 				height := int(binary.LittleEndian.Uint16(data[payload+8:payload+10]) & 0x3fff)
 				if width > 0 && height > 0 {
-					return Raster{MIME: MIMEWebP}, nil
+					return raster{MIME: MIMEWebP}, nil
 				}
 			}
 		case "VP8L":
 			if size >= 5 && data[payload] == 0x2f {
-				return Raster{MIME: MIMEWebP}, nil
+				return raster{MIME: MIMEWebP}, nil
 			}
 		}
 
@@ -267,5 +267,5 @@ func inspectWebP(data []byte) (Raster, error) {
 		}
 	}
 
-	return Raster{}, errors.New("invalid WebP dimensions")
+	return raster{}, errors.New("invalid WebP dimensions")
 }

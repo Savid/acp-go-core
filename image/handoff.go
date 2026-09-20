@@ -121,7 +121,7 @@ func readHandoff(ctx context.Context, root string, media promptMedia, maxBytes i
 		return nil, &handoffVerdict{code: ErrorInvalidHandoff, message: message}, nil
 	}
 
-	if !slices.Contains(Formats, media.mimeType) {
+	if !slices.Contains(formats, media.mimeType) {
 		return nil, &handoffVerdict{code: ErrorInvalidMediaType}, nil
 	}
 
@@ -196,17 +196,28 @@ func handoffRelativeName(dir, path string) string {
 		return handoffParentName
 	}
 
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
-	if err != nil {
-		return handoffParentName
-	}
+	// The deepest existing ancestor is resolved; the missing remainder is
+	// re-appended so the root's open reports it missing, not escaping.
+	parent, remainder := filepath.Dir(path), filepath.Base(path)
 
-	relative, err := filepath.Rel(resolvedRoot, filepath.Join(resolvedParent, filepath.Base(path)))
-	if err != nil {
-		return handoffParentName
-	}
+	for {
+		resolvedParent, err := filepath.EvalSymlinks(parent)
+		if err == nil {
+			relative, relErr := filepath.Rel(resolvedRoot, filepath.Join(resolvedParent, remainder))
+			if relErr != nil {
+				return handoffParentName
+			}
 
-	return relative
+			return relative
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) || parent == filepath.Dir(parent) {
+			return handoffParentName
+		}
+
+		remainder = filepath.Join(filepath.Base(parent), remainder)
+		parent = filepath.Dir(parent)
+	}
 }
 
 func parseHandoffEnvelope(meta map[string]any) (handoffEnvelope, string) {

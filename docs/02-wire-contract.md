@@ -66,10 +66,10 @@ Position encoding: prefer `utf8`, else `utf16`, never `utf32`; default to
 
 `authMethods` is always `[]`: the harness authenticates itself in its home.
 `activityKinds` is `[]` for every sibling. `updatesOutsidePrompt` is answered
-under the [evidence gate](08-testing.md#lifecycle-fixtures); a permanent-channel
-sibling answers `true` and delivers between-prompt native work as ordinary
-updates under agent-origin turns. The routes behind every absent capability are
-listed under [Banned SDK Routes](#banned-sdk-routes).
+under the [evidence gate](07-testing.md#lifecycle-fixtures): a sibling whose
+native channel runs work outside a client turn answers `true` and delivers
+that work as ordinary updates under agent-origin turns. The routes behind
+every absent capability are listed under [Banned SDK Routes](#banned-sdk-routes).
 
 ## Extension Constants
 
@@ -204,7 +204,7 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
   sibling assembles.
 - Except for Claude setup-token probes, observations MUST NOT be cached.
   Account usage MUST NOT be replayed or delivered as a session update, and is
-  unrelated to [usage updates](05-behavior.md#usage-updates).
+  unrelated to [usage updates](04-behavior.md#usage-updates).
   A session-scoped read that launches a process publishes that incarnation's
   opening updates, as every launch does.
 - `balances` contains monetary observations. Each amount is `{amount, currency}`
@@ -284,13 +284,18 @@ The required stable routes are `initialize`, `authenticate`, `logout`,
 
 ## Uniform Rejections
 
+A `sessionId` on any session-addressed request is at most
+`wire.SessionIDMaxBytes` (4096) bytes. A longer id names no session: every
+sibling refuses it as unknown session through `wire.CheckSessionID` before any
+lookup, store call, or retention.
+
 These inbound shapes are rejected identically with `acp.NewInvalidParams`
 (`-32602`):
 
 - **Unsupported prompt content.** `{"error":"unsupported","field":"prompt"}`
   before native start. Image blocks use their [own gates](#canonical-input-shape).
   Unrepresentable text/image ordering follows the
-  [image input rule](05-behavior.md#image-input).
+  [image input rule](04-behavior.md#image-input).
 - **Relative `cwd`** on `session/new`, `session/load`, or `session/resume`:
   `{"error":"unsupported","field":"cwd"}` before any native process or store
   entry exists.
@@ -406,7 +411,7 @@ An image output verdict is never invalid params. `invalid_base64`,
 `not_a_raster`, `media_type_mismatch`, `missing_file`, `path_not_allowed`, and
 `too_large` are refused in place and reported to the model as the refused
 artifact's own result content; the turn continues
-([05-behavior.md](05-behavior.md#image-failure-fatality)).
+([04-behavior.md](04-behavior.md#image-failure-fatality)).
 
 Only `storage_failed` reaches the wire, as the turn-failure error with
 `cause:"transport"` plus:
@@ -451,7 +456,7 @@ accept only this owned namespace:
 | Reserved trace keys | Pass through only for propagation. |
 
 This governs inbound `_meta` only. Agent-emitted `_meta.<vendor>` on outbound
-updates is update metadata governed by [05-behavior.md](05-behavior.md).
+updates is update metadata governed by [04-behavior.md](04-behavior.md).
 
 ## Media Envelope
 
@@ -467,7 +472,7 @@ five fields:
 | `imageFormats` | The inbound allowlist, in order: `image/png`, `image/jpeg`, `image/gif`, `image/webp`. |
 | `documentFormats` | MIMEs mapped to a native document representation; `[]` when none. |
 
-Numeric bounds come from the same [resolution](02-public-api.md#effective-image-limits)
+Numeric bounds come from the same [resolution](01-public-api.md#effective-image-limits)
 the gates enforce. The envelope is instance-scoped and model-independent;
 `unsupported_by_model` remains a prompt-time verdict.
 
@@ -497,10 +502,6 @@ with a global sequence, and causal activity and action ownership.
 Every value in this section lives only in `_meta`, carries exact scalar
 `version: 1`, and rejects an unknown member. Every opaque identifier is a
 non-empty string of at most 4096 bytes; an empty one is `malformed_envelope`.
-
-A notification carrying an envelope MUST fit the inbound frame bound. A
-`lifecycle_snapshot` states the complete nonterminal sets and is never split; a
-sibling whose sets cannot be stated inside the bound MUST NOT open the stream.
 
 ### Lifecycle Capability
 
@@ -579,7 +580,7 @@ correlate content by hint: no `_meta.<vendor>` namespace on a notification
 carries `turnId` or `messageId`. Tool progress correlates through its own
 `toolCallId`. `lifecycle.CheckAttribution` proves the rule over a recorded
 stream, and every sibling proves it
-([08-testing.md](08-testing.md#conformance-tests)).
+([07-testing.md](07-testing.md#conformance-tests)).
 
 ### The Closed Event Set
 
@@ -627,9 +628,8 @@ It carries the current foreground and the complete nonterminal activity and
 action sets, always present as arrays. A set listing a terminal entity or a
 duplicate id is `malformed_envelope`. Every parent and owner reference resolves
 inside the snapshot or is `unknown_entity`. A `running` or `requires_action`
-snapshot projects the named turn as open with its origin. A sibling that cannot
-reconstruct a truthful snapshot MUST NOT open the stream
-([04-sessions-and-store.md](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)).
+snapshot projects the named turn as open with its origin. Snapshot
+truthfulness is [03-sessions-and-store.md](03-sessions-and-store.md#lifecycle-stream-and-incarnation-identity).
 
 **`prompt_accepted`**:
 
@@ -758,9 +758,7 @@ outcome comes only from the structural outcome union or elicitation action.
   reducing either the extension or its carrier. A rejected envelope never
   delivers its carrier's side effects. Carrier legality is checked before
   ordering.
-- `streamId` names the native lifecycle source and incarnation. It does not
-  rotate on a reconnect to the same source and does not survive the incarnation
-  ([06-lifecycle.md](06-lifecycle.md#lifecycle-stream-fencing)).
+- `streamId` follows [05-lifecycle.md](05-lifecycle.md#lifecycle-stream-fencing).
 - Sequences are positive and contiguous, reserved before delivery so drops
   leave gaps. The opening snapshot may use any positive sequence; consumers
   never assume `1`.
@@ -817,7 +815,7 @@ Fail closed has one meaning on each side. A consumer stops reducing that
 stream and terminalizes what it holds. An emitter fails the affected prompt or
 session rather than emit a stream it knows violates these rules. Neither side
 repairs a violation by resequencing, reordering, dropping, or synthesizing an
-event. The [fixture battery](08-testing.md#lifecycle-fixtures) pins every
+event. The [fixture battery](07-testing.md#lifecycle-fixtures) pins every
 token.
 
 ## Native Session Binding
@@ -831,7 +829,7 @@ each `session/list` entry carry:
 
 `nativeSessionId` is the current native conversation id for direct native
 continuation. It is output metadata; clients MUST address ACP methods with
-the ACP `sessionId`. The [identity rules](04-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
+the ACP `sessionId`. The [identity rules](03-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
 govern persistence and replacement.
 
 ## Capability `_meta.<vendor>`

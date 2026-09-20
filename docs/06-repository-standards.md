@@ -82,6 +82,10 @@ The structural gate checks these symbols and literals in every sibling:
   base environment.
 - `request_builders.go` declares the vendor option constructors, each
   returning `wire.SessionRequestOption`, and `SetModelRequest`.
+- Every session-addressed entry point refuses an over-bound id through
+  `wire.CheckSessionID` before any lookup.
+- Lifecycle envelopes are delivered as `wire.LifecycleCarrier`; scratch
+  directories come from `process.ScratchDir` or `process.ScratchPath`.
 - Native process death reports its stderr tail through
   `process.(*Process).StderrTail`.
 - A sibling that exports `AccountUsageMethod` in non-test Go spells it
@@ -202,7 +206,7 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
 - README process-option and flag coverage, tracked dot-file names, and CI
   matrix, triggers, permissions, and action pins;
 - that no sibling carries a copy of the lifecycle fixture battery;
-- the [evidence gate](08-testing.md#conformance-tests): a sibling whose
+- the [evidence gate](07-testing.md#conformance-tests): a sibling whose
   `agent.go` advertises `updatesOutsidePrompt: true` carries
   `testdata/native/agent-origin.json` with its `README.md` provenance, and a
   test replays that fixture.

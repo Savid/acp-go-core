@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// MetaPath is the request path a rejection names. Negotiation and correlation
+// metaPath is the request path a rejection names. Negotiation and correlation
 // values are rejected as invalid params rather than as stream violations, because
 // they are read before any stream exists.
-const MetaPath = `_meta["` + MetaKey + `"]`
+const metaPath = `_meta["` + MetaKey + `"]`
 
 // VerdictUnsupported names a value the host sent and the sibling refuses; a
 // present key on a surface that carries none, and a malformed member, are both
@@ -24,7 +24,7 @@ const (
 // ParamError refuses a negotiation or correlation value. It names the exact member
 // path so a host can tell which value it got wrong.
 type ParamError struct {
-	// Field is the full request path, from MetaPath down to the offending member.
+	// Field is the full request path, from metaPath down to the offending member.
 	Field string
 	// Verdict is VerdictUnsupported or VerdictMissing.
 	Verdict string
@@ -35,7 +35,7 @@ func (e *ParamError) Error() string { return e.Verdict + " " + e.Field }
 
 func paramError(members ...string) *ParamError {
 	var field strings.Builder
-	field.WriteString(MetaPath)
+	field.WriteString(metaPath)
 
 	for _, member := range members {
 		field.WriteString("." + member)
@@ -47,7 +47,7 @@ func paramError(members ...string) *ParamError {
 // missingParamError refuses the absent prompt correlation value on a
 // negotiated connection.
 func missingParamError() *ParamError {
-	return &ParamError{Field: MetaPath, Verdict: VerdictMissing}
+	return &ParamError{Field: metaPath, Verdict: VerdictMissing}
 }
 
 // RejectKey refuses the reserved literal on a surface that carries no lifecycle
