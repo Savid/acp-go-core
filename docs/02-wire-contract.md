@@ -453,6 +453,7 @@ accept only this owned namespace:
 | `_meta.<vendor>` outside `options` and `rawEvent` on a session lifecycle request | Invalid params. |
 | Foreign `_meta.*` namespaces | Ignored. The owned namespace is exactly `<vendor>`; anything else, including the module path, is foreign. |
 | `acp-go.dev/*` literals | Never foreign. Each carries its own rule, and one on a surface where this contract requires it to be read is never ignored. `acp-go.dev/lifecycle` on a session lifecycle request is invalid params naming `_meta["acp-go.dev/lifecycle"]`. |
+| `_meta["acp-go.dev/session"]` | The host's statement about the session it opens, read on `session/new` only; on `session/load` and `session/resume` it is invalid params naming the key. Its one field is `ephemeral` (boolean); any other field, a non-object, or a non-boolean is invalid params naming the offending path. `wire.DecodeSessionMeta` is the only decoder, `wire.RefuseSessionMeta` the only refusal, and `wire.SessionMeta.Apply` the only writer. [Ephemeral sessions](03-sessions-and-store.md#ephemeral-sessions) states what the flag binds. |
 | Reserved trace keys | Pass through only for propagation. |
 
 This governs inbound `_meta` only. Agent-emitted `_meta.<vendor>` on outbound

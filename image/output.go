@@ -186,7 +186,7 @@ func containingRoot(path string, roots []string) (string, string, bool) {
 		}
 
 		relative, err := filepath.Rel(resolvedRoot, path)
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		if err != nil || !filepath.IsLocal(relative) {
 			continue
 		}
 

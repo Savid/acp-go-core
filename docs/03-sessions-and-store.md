@@ -90,6 +90,14 @@ A `Replace` addresses exactly one session:
 
 `storetest.Run` proves these rules against any implementation.
 
+## Ephemeral Sessions
+
+A `session/new` whose `_meta["acp-go.dev/session"].ephemeral` is `true` opens
+a session the host deletes without ever needing it back, such as a discovery
+or usage probe. For such a session the sibling MUST NOT call `Replace` or
+`Delete` on the store and MUST NOT list it; the native runtime holds it alone
+until `session/delete`. Every other rule of a session applies unchanged.
+
 ## Store Formats
 
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format. Raw
