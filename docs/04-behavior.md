@@ -343,7 +343,9 @@ catalogs.
 `session/delete` is idempotent and silently succeeds for missing sessions.
 
 1. Write a durable tombstone first.
-2. Close and cancel any active session with the same id.
+2. Close and cancel any active session with the same id. A pending
+   [opening publication](02-wire-contract.md#sequencing-and-fail-closed-rules)
+   completes before the close fences the stream.
 3. Delete store entries. Native state is left in place
    ([Hydrate In](03-sessions-and-store.md#hydrate-in)).
 4. Hide tombstoned sessions from `session/list`, `session/load`, and
