@@ -12,10 +12,18 @@ skip() { printf 'SKIP %s\n' "$*"; }
 pass() { printf 'PASS %s\n' "$*"; }
 
 pin() { rg -o --no-line-number "^\| $1 \| \`([^\`]+)\`" -r '$1' "$repo_root/README.md" | head -1; }
-sdk_pin=$(pin 'ACP SDK'); go_pin=$(pin 'Go directive'); core_pin=$(pin 'Core module')
-[[ -n "$sdk_pin" && -n "$go_pin" && "$core_pin" == *@v* ]] || { fail "README shared pins are missing"; exit 1; }
+sdk_pin=$(pin 'ACP SDK'); go_pin=$(pin 'Go directive')
+[[ -n "$sdk_pin" && -n "$go_pin" ]] || { fail "README shared pins are missing"; exit 1; }
 sdk_module=${sdk_pin%@*}; sdk_version=${sdk_pin#*@}; go_version=${go_pin#go }
-core_module=${core_pin%@*}; core_version=${core_pin#*@}
+core_module=$(rg -o --no-line-number '^module (\S+)$' -r '$1' "$repo_root/go.mod")
+[[ -n "$core_module" ]] || { fail "acp-go-core: go.mod names no module"; exit 1; }
+
+# core_ref resolves a required core version to the commit it names: the hash
+# suffix of a pseudo-version, otherwise the version itself as a tag.
+core_ref() {
+  local version=$1
+  if [[ $version =~ -([0-9a-f]{12})$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; else printf '%s' "$version"; fi
+}
 
 siblings=()
 while IFS= read -r vendor; do
@@ -26,7 +34,6 @@ done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/RE
 forbidden_names=('acp-go')
 account_usage_rows=$(awk '/^## Account Usage$/{f=1;next} /^## /{f=0} f' "$repo_root/docs/registry.md")
 
-rg -q "^module $core_module\$" "$repo_root/go.mod" || fail "acp-go-core: module path differs from README pin"
 rg -q "^go $go_version\$" "$repo_root/go.mod" || fail "acp-go-core: go directive differs from README pin"
 rg -q '^toolchain ' "$repo_root/go.mod" && fail "acp-go-core: toolchain line present"
 rg -q "^\s*$sdk_module $sdk_version\$" "$repo_root/go.mod" || fail "acp-go-core: ACP SDK pin differs from README"
@@ -52,7 +59,13 @@ check_sibling() {
   rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from README pin"
   rg -q '^toolchain ' "$repo/go.mod" && fail "$name: toolchain line present"
   rg -q "^\s*$sdk_module $sdk_version\$" "$repo/go.mod" || fail "$name: ACP SDK pin differs from README"
-  rg -q "^\s*$core_module $core_version\$" "$repo/go.mod" || fail "$name: core module pin differs from README"
+  local core_version
+  core_version=$(rg -o --no-line-number "^\s*$core_module (v\S+)" -r '$1' "$repo/go.mod" | head -1)
+  if [[ -z "$core_version" ]]; then
+    fail "$name: core module is not required"
+  elif ! git -C "$repo_root" merge-base --is-ancestor "$(core_ref "$core_version")" HEAD 2>/dev/null; then
+    fail "$name: core module $core_version is not reachable from the acp-go-core checkout"
+  fi
   rg -q "^[[:space:]]*(replace[[:space:]]+)?$core_module([[:space:]]+[^[:space:]]+)?[[:space:]]+=>" "$repo/go.mod" && fail "$name: core module has a replace directive"
   rg -q "^package ${vendor}acp\$" "$repo/agent.go" || fail "$name: root package is not ${vendor}acp"
   rg -q "SessionStoreFormat = \"$vendor-[a-z-]+-v1\"" "$repo"/*.go || fail "$name: SessionStoreFormat is not <vendor>-<kind>-v1"

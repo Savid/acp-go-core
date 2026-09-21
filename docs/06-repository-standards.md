@@ -192,9 +192,11 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
   sibling's registry Account Usage row;
 - executable resolution through `process.ResolveExecutable` on the base
   environment;
-- the Go directive, ACP SDK pin, and this module's pin against the README, in
-  every sibling and in this module's own `go.mod`, and one version per module
-  across every family `go.mod`, indirect requirements included;
+- the Go directive and ACP SDK pin against the README, in every sibling and
+  in this module's own `go.mod`; one version per module across every family
+  `go.mod`, indirect requirements included; and that every sibling requires
+  this module without a `replace` directive at a commit reachable from this
+  checkout's `HEAD`;
 - the [surface presence](#surface-presence) symbols;
 - a test calling `lifecycle.CheckAttribution`;
 - that README, AGENTS.md, and doc.go name no other sibling;

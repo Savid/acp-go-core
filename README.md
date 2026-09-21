@@ -44,11 +44,11 @@ Every sibling moves together on these pins. Values live only in this table.
 | Pin | Value |
 |---|---|
 | ACP SDK | `github.com/coder/acp-go-sdk@v0.13.5` |
-| Core module | `github.com/savid/acp-go-core@v0.0.0-20260921062444-df96ecace79a` |
 | Go directive | `go 1.26.6` |
 
-Every sibling MUST require the core version in this table without a `replace`
-directive for that module. Local development may use an untracked Go workspace.
+Every sibling MUST require one shared version of this module, a commit on its
+`master`, without a `replace` directive for it; `make drift-check` compares
+the siblings. Local development may use an untracked Go workspace.
 
 A pin change covers every sibling and reruns each conformance suite. Shared
 direct dependencies such as OpenTelemetry and testify also move together;
