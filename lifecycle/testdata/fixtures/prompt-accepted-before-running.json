@@ -1,0 +1,83 @@
+{
+  "name": "prompt-accepted-before-running",
+  "purpose": "Acceptance is its own event, emitted before the turn reports running. A consumer that infers acceptance from running would record the turn later than the sibling accepted it.",
+  "negotiated": {
+    "version": 1,
+    "updatesOutsidePrompt": true,
+    "activityKinds": [
+      "task",
+      "subagent"
+    ]
+  },
+  "input": [
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "session_info_update"
+        },
+        "_meta": {
+          "acp-go.dev/lifecycle": {
+            "version": 1,
+            "streamId": "strm-1",
+            "sequence": 1,
+            "event": {
+              "type": "lifecycle_snapshot",
+              "foreground": {
+                "state": "idle",
+                "cycleId": "cyc-0"
+              },
+              "activities": [],
+              "actions": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "session_info_update"
+        },
+        "_meta": {
+          "acp-go.dev/lifecycle": {
+            "version": 1,
+            "streamId": "strm-1",
+            "sequence": 2,
+            "event": {
+              "type": "prompt_accepted",
+              "submissionId": "sub-1",
+              "clientNonce": "non-1",
+              "turnId": "turn-1"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "accepted",
+    "state": {
+      "streamId": "strm-1",
+      "reducedThrough": 2,
+      "suppressedRetransmissions": 0,
+      "foreground": {
+        "state": "idle",
+        "cycleId": "cyc-0"
+      },
+      "turns": [
+        {
+          "turnId": "turn-1",
+          "origin": "submission",
+          "terminal": false
+        }
+      ],
+      "activities": [],
+      "actions": [],
+      "closed": false
+    }
+  }
+}
