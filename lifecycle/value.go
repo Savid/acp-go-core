@@ -2,8 +2,14 @@ package lifecycle
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"hash"
+	"maps"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -71,6 +77,56 @@ func arrayEqual(left []any, right any) bool {
 	}
 
 	return true
+}
+
+// frameDigest reduces a decoded value to a digest that is equal exactly when
+// valueEqual holds: members are written in key order, numbers as their
+// normalized form, and every value behind a type tag so a string never
+// collides with a number or a nested value.
+func frameDigest(value any) [sha256.Size]byte {
+	digest := sha256.New()
+	writeCanonical(digest, value)
+
+	return [sha256.Size]byte(digest.Sum(nil))
+}
+
+func writeCanonical(digest hash.Hash, value any) {
+	switch typed := value.(type) {
+	case nil:
+		digest.Write([]byte{'n'})
+	case bool:
+		if typed {
+			digest.Write([]byte{'t'})
+		} else {
+			digest.Write([]byte{'f'})
+		}
+	case string:
+		writeTagged(digest, 's', typed)
+	case json.Number:
+		writeTagged(digest, 'd', normalizedNumber(string(typed)))
+	case []any:
+		digest.Write(binary.AppendUvarint([]byte{'a'}, uint64(len(typed))))
+
+		for _, element := range typed {
+			writeCanonical(digest, element)
+		}
+	case map[string]any:
+		digest.Write(binary.AppendUvarint([]byte{'o'}, uint64(len(typed))))
+
+		for _, key := range slices.Sorted(maps.Keys(typed)) {
+			writeTagged(digest, 'k', key)
+			writeCanonical(digest, typed[key])
+		}
+	default:
+		// A value the decoder never produces compares by identity, so its type
+		// and rendering stand in for it.
+		writeTagged(digest, 'x', fmt.Sprintf("%T\x00%v", typed, typed))
+	}
+}
+
+func writeTagged(digest hash.Hash, tag byte, text string) {
+	digest.Write(binary.AppendUvarint([]byte{tag}, uint64(len(text))))
+	digest.Write([]byte(text))
 }
 
 // rawEqual compares two undecoded members under the same equality. A member
