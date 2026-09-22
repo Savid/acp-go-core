@@ -50,6 +50,10 @@ type Reducer struct {
 	// incarnations rather than being reset with the projection, because a
 	// superseded incarnation is fenced for the rest of the session.
 	retired map[string]struct{}
+	// restored is the sequence a checkpoint had reduced through when this reducer
+	// was rebuilt from it. The frames at or below it were not carried, so a
+	// repeated identity there is taken as a retransmission without comparison.
+	restored uint64
 }
 
 // NewReducer builds a reducer for one session.
@@ -176,6 +180,7 @@ func (r *Reducer) reduceForeign(delivery Delivery) error {
 func (r *Reducer) reset(streamID string) {
 	r.state = State{StreamID: streamID}
 	r.base = 0
+	r.restored = 0
 	r.started = false
 	r.frames = make(map[uint64]any)
 	r.turnSeen = make(map[string]struct{})
@@ -206,6 +211,12 @@ func (r *Reducer) reduceFirst(delivery Delivery) error {
 }
 
 func (r *Reducer) reduceDuplicate(delivery Delivery) error {
+	if delivery.Sequence <= r.restored {
+		r.state.SuppressedRetransmissions++
+
+		return nil
+	}
+
 	if recorded, known := r.frames[delivery.Sequence]; known && valueEqual(recorded, delivery.Frame) {
 		r.state.SuppressedRetransmissions++
 
