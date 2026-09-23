@@ -385,6 +385,13 @@ func TestOutput(t *testing.T) {
 	_, _, verdict = ReadFile(filepath.Join(root, "missing.png"), []string{root}, FrameClamp)
 	require.Equal(t, ReasonMissingFile, verdict.Reason)
 
+	linked := filepath.Join(t.TempDir(), "linked")
+	require.NoError(t, os.Symlink(root, linked))
+	_, _, verdict = ReadFile(filepath.Join(linked, "missing.png"), []string{linked}, FrameClamp)
+	require.Equal(t, ReasonMissingFile, verdict.Reason)
+	_, _, verdict = ReadFile(filepath.Join(linked, "absent", "missing.png"), []string{linked}, FrameClamp)
+	require.Equal(t, ReasonMissingFile, verdict.Reason)
+
 	_, _, verdict = ReadFile(root, []string{root}, FrameClamp)
 	require.Equal(t, ReasonPathNotAllowed, verdict.Reason)
 

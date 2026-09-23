@@ -100,7 +100,7 @@ func ReadFile(path string, roots []string, limit int64) ([]byte, string, *Output
 
 		// A missing path is reported as missing only when its spelling falls
 		// inside a root, so existence outside every root is never disclosed.
-		if _, _, inside := containingRoot(filepath.Clean(path), roots); !inside {
+		if _, _, inside := containingRoot(resolveMissing(path), roots); !inside {
 			return nil, "", &OutputError{Reason: ReasonPathNotAllowed, Message: "image output path is outside the allowed roots"}
 		}
 
@@ -166,6 +166,34 @@ func readContents(file io.Reader, limit int64) ([]byte, string, *OutputError) {
 	}
 
 	return data, mimeType, nil
+}
+
+// resolveMissing resolves the nearest existing ancestor of a path that does
+// not exist and rejoins the unresolved tail, so the path is spelled the way
+// containingRoot spells a resolved root. It returns "" when an ancestor
+// cannot be resolved.
+func resolveMissing(path string) string {
+	dir := filepath.Clean(path)
+	tail := ""
+
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+
+		tail = filepath.Join(filepath.Base(dir), tail)
+		dir = parent
+
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return filepath.Join(resolved, tail)
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) {
+			return ""
+		}
+	}
 }
 
 // containingRoot returns the resolved root holding path and path's location
