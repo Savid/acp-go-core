@@ -181,8 +181,32 @@ Context-window and cost usage is authoritative only through ACP
 `usage_update`. Vendor token breakdowns MAY appear under `_meta.<vendor>` for
 debugging; hosts must not depend on them.
 
-`size` is the model's true context window in tokens, never fabricated. An
-adapter that cannot determine it sets `size: 0`.
+`used` is context occupancy: the tokens the conversation holds in the model's
+context window, counted as the harness counts its own context. It is never a
+sum across model calls. `size` is the model's true context window in tokens,
+never fabricated. An adapter that cannot determine it sets `size: 0`.
+
+- **Every model call reports.** When a model call's response ends with usable
+  usage, the adapter emits a `usage_update` with the context that response
+  leaves occupied, in native order and inside the running turn. A response the
+  harness reports no usable usage for, such as an aborted, failed, or empty
+  one, emits nothing. Where the native stream reports a call's input when the
+  call starts, the adapter also emits the context the call was sent with at
+  that point.
+- **Compaction resets the figure.** After the harness compacts its context,
+  the next figure is the compacted context; no update restates the context
+  from before the compaction.
+- **Settlement never sums.** A settling cycle MAY report once more: the
+  harness's own context estimate when it has one, else the cycle's last
+  figure. It reports nothing when no call has followed a compaction.
+- **Cancellation ends reporting.** A cancelled cycle emits no `usage_update`
+  after the cancel.
+- `cost`, when the harness reports one, is the session's cumulative cost.
+- `PromptResponse.usage`, when the harness reports per-call usage, is the
+  turn's consumption summed over its calls.
+
+The [registry](registry.md#usage-updates) records each sibling's native
+sources.
 
 Account allowance is a separate on-demand read,
 [`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides

@@ -122,32 +122,56 @@ prompt process and removes image payloads.
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
 | amp | Cancels the native turn through the thread API, waits for the acknowledgement and a settled thread, joins the process, commits the captured export, and fences. The remote thread stays. |
 
-## Usage `size`
+## Usage Updates
 
-- **opencode:** the selected provider catalog model’s `limit.context`; used tokens
-  come from the latest native assistant request, including cache input.
+Each sibling's native source for the [usage rules](04-behavior.md#usage-updates):
 
-- **hermes:** native `message.complete.usage.context_max` and `context_used`.
-  Session-wide token totals are not presented as per-prompt usage.
-
-- **claude:** `get_context_usage.maxTokens` when nonzero, else the
-  `result.modelUsage` context window, else `0`. `used` is the native
-  context-usage total when available, else the turn's summed message usage.
-
-- **codex:** `thread/tokenUsage/updated` `modelContextWindow`, else the
-  selected model's catalog `contextWindow`, else `0`. `used` is the latest
-  model request's total.
-- **pi:** the last `get_session_stats.contextUsage.contextWindow` read, else
-  the selected model's catalog `contextWindow`, else `0`. Each assistant
-  response reports `used` as its `totalTokens`, else its input, output, and
-  cache tokens; aborted, failed, and empty responses report nothing.
-  Settlement of a prompt or agent-origin turn reports `used` as
-  `contextUsage.tokens`, else the cycle's last response's figure. A completed
-  `compaction_end` discards that figure, so a settlement with no response
-  since a compaction sends nothing. `cost`, sent only at settlement, is
-  `get_session_stats.cost`, the session's cumulative cost in USD.
-- **amp:** the native assistant message `usage.maxInputTokens`; `used` is that
-  message's input, output, cache-read, and cache-creation tokens.
+- **claude:** each top-level model call reports at its `message_start` stream
+  event `used` as `input_tokens + cache_read_input_tokens +
+  cache_creation_input_tokens`, and at its `message_delta` that request plus
+  `output_tokens`. A provider that opens the call with zero usage reports only
+  at `message_delta`. A call no stream event announced reports its request at
+  its first assistant record, whose `output_tokens` repeats the opening
+  figure. Subagent calls report nothing. Settlement reports the last call's
+  figure with `result.total_cost_usd`, the session's cumulative cost, and the
+  structured output. A `compact_boundary` discards the figure. `size` is
+  `get_context_usage.maxTokens`, read at every process start and after a
+  model change, then the `result.modelUsage` context window of the turn's
+  model, else `0`. The prompt response is `result.usage`.
+- **codex:** `thread/tokenUsage/updated`, sent once per model request after
+  the tools that request started have finished; `used` is `last.totalTokens`.
+  A report whose cumulative `total` did not move restates the previous one and
+  sends nothing, unless it carries codex's estimate of a compacted history.
+  The selected model's catalog `contextWindow` is `size`, else the report's
+  `modelContextWindow`, else `0`. No settlement report and no cost. The prompt
+  response sums `last` over the reports whose total moved.
+- **hermes:** the gateway's `session.usage` tick and `message.complete` carry
+  cumulative counters; a reading whose `prompt` counter moved reports `used`
+  as `context_used` and `size` as `context_max`. Several responses between two
+  ticks report once, with the latest figure. After a compaction Hermes omits
+  `context_used` until a response follows. No cost. The prompt response is the
+  counters' difference across the readings the turn owned.
+- **opencode:** each model call's `step-finish` part reports `used` as its
+  `input + output + reasoning + cache.read + cache.write`; `size` is the
+  catalog `limit.context` of the model the call ran on, else `0`. Calls
+  answering a message a native client added to the run report inside the
+  turn. When the prompt answers before the stream delivered every call,
+  settlement reports the remaining calls from native history and nothing
+  more. A compaction summary call reports no context. No cost. The prompt
+  response sums the calls.
+- **pi:** each assistant `message_end` reports `used` as its `totalTokens`,
+  else its input, output, and cache tokens; aborted, failed, and empty
+  responses report nothing. A response whose first `message_update` already
+  carries input usage also reports its input and cache tokens there. `size`
+  is the last `get_session_stats.contextUsage.contextWindow` read, else the
+  selected model's catalog `contextWindow`, else `0`. Settlement of a prompt
+  or agent-origin turn reports `contextUsage.tokens`, else the cycle's last
+  response's figure, with `get_session_stats.cost`, the session's cumulative
+  cost in USD. A completed `compaction_end` discards the figure. The prompt
+  response sums the responses' usage.
+- **amp:** the native assistant message `usage.maxInputTokens` is `size`;
+  `used` is that message's input, output, cache-read, and cache-creation
+  tokens, replaced by the result frame's usage when the prompt settles.
 
 ## Account Usage
 
@@ -543,6 +567,8 @@ native transcript can contain multiple entries with one API message id.
   `info` summary message the plugin message API does not expose. Verification
   compares the conversation around such messages. A compacted thread cannot be
   recovered after native deletion.
+- **Amp usage cadence:** amp reports usage once, when the prompt settles,
+  rather than after every model call.
 - **Amp recovery cleanup:** a failed recovery deletes the private destination it
   created and never bound. This is the only native state the adapter deletes.
 

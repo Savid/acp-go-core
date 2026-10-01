@@ -74,6 +74,12 @@ Every sibling proves, against the current ACP v1 schema:
   streamed text yields chunks whose concatenation equals the final text once;
   a deltas-free fixture yields one chunk; a multi-message turn yields each
   message once.
+- [Usage updates](04-behavior.md#usage-updates): a multi-call turn yields a
+  `usage_update` per model call carrying that call's context, never the
+  running sum; settlement never reports a sum; the prompt response carries
+  the summed consumption; a cancelled turn keeps its earlier updates and
+  emits none after the cancel; after a compaction no update restates the
+  earlier context.
 - Elicitation capability gating for all six client-capability cases, with the
   both-null case exercised through JSON decoding, on a sibling with an
   elicitation surface.
