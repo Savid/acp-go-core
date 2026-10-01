@@ -266,10 +266,14 @@ Account allowance is a separate on-demand read,
   in native order, deduplicated on identity.
 - **`messageId` is the response id.** A chunk produced from a model call's
   response, live or replayed, carries the id the model gateway returned for
-  that response as `messageId`, so every content block of one response shares
-  it and joins the response's [call breakdown](#call-breakdown) `responseId`.
-  Where the harness does not expose that id, the chunk carries no
-  `messageId`; a sibling never generates one.
+  that response as `messageId` whenever the harness exposes it by the time the
+  chunk is emitted and attributes the chunk to that response with certainty.
+  Every content block of one response shares it. Otherwise the chunk carries
+  no `messageId`; a sibling never generates one and never buffers streamed
+  text to wait for it.
+- **The breakdown is the join key.** Some harnesses expose the id only when
+  the response completes, so the [call breakdown](#call-breakdown)
+  `responseId` identifies a call even where its chunks carry none.
 
 ## Delegated Provenance
 

@@ -84,8 +84,10 @@ Every sibling proves, against the current ACP v1 schema:
   breakdown, each call's response update carries its
   [call breakdown](04-behavior.md#call-breakdown) with only the reported
   members, and no other update carries one; where the harness exposes the
-  gateway's response id, that call's chunks carry it as `messageId` and its
-  breakdown as `responseId`, and where it does not, neither carries an id.
+  gateway's response id, the breakdown carries it as `responseId` and the
+  call's chunks carry it as `messageId` where the
+  [streaming rule](04-behavior.md#assistant-text-streaming) allows, and where
+  it does not, neither carries an id.
 - Elicitation capability gating for all six client-capability cases, with the
   both-null case exercised through JSON decoding, on a sibling with an
   elicitation surface.

@@ -193,6 +193,39 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   `used` is that message's input, output, cache-read, and cache-creation
   tokens, replaced by the result frame's usage when the prompt settles.
 
+### Response ids
+
+Each sibling's source for the gateway's response id that chunks carry as
+`messageId` and the [call breakdown](04-behavior.md#call-breakdown) as
+`responseId`:
+
+- **claude:** exact. The `message.id` claude records from the gateway's
+  response: the `message_start` stream event for live chunks and the
+  `message_delta` breakdown, the assistant record for a call no stream event
+  announced, and transcript rows for replay. Omitted when a response has no
+  id and for claude's own `<synthetic>` records, whose id is a harness UUID.
+- **codex:** the breakdown is exact on a thread the adapter starts, from
+  `rawResponse/completed` `responseId`; a resumed thread's
+  `thread/tokenUsage/updated` names no response, so its breakdown carries
+  none. Chunks carry no `messageId`: streamed deltas name only their item and
+  turn, the id arrives only at completion, and the rollout cannot tie a replayed row to its response with
+  certainty, since a failed or usage-less response's items precede the next
+  `token_usage_record` exactly as that record's own items do.
+- **hermes:** omitted. Hermes states the id only in its agent log text; its
+  gateway events, HTTP export, `state.db`, and hook payloads carry none, and
+  it reports no breakdown to carry one.
+- **opencode:** omitted. OpenCode drops the AI SDK step `response.id`,
+  replaces stream block ids with its own part ids, and stores no step-finish
+  metadata, so no event, route, or stored row carries the gateway's id.
+- **pi:** exact. The assistant message's `responseId`, which pi holds on
+  `message_end` and in the session file. pi's RPC `message_update` omits the
+  streaming message, so the adapter's extension relays the id from the first
+  update that holds it as a `setStatus` under `acp-go-pi:response`, ahead of
+  that update's frame; streamed, terminal, and replayed chunks and the
+  `message_end` breakdown carry it. A response pi holds no id for, such as one
+  that failed before the gateway answered, carries neither.
+- **amp:** not recorded.
+
 ## Account Usage
 
 | Sibling | Scope | Native source and mapping | Native `plan` | Native `usageAllowed` |
@@ -519,6 +552,13 @@ AskUserQuestion elicitation, raw events, PATH changes on resume,
 running-command cancellation, and race-enabled ACP → native `claude --resume`
 → ACP load with both earlier turns retained under one conversation id. The
 native transcript can contain multiple entries with one API message id.
+
+Response ids, verified 2026-10-01 with tokens through each adapter against
+OpenRouter `qwen/qwen3.8-flash` behind a proxy logging response ids: Claude
+Code `2.1.284`, Codex `0.159.3`, and Pi `0.87.1` carried the logged `gen-…` id
+where [the registry](#response-ids) says, matching the native transcript,
+rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
+`9fc7f17` surfaced it nowhere structured.
 
 ## Known Deviations
 
