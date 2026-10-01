@@ -221,28 +221,34 @@ breakdown on its own `_meta` under `acp-go.dev/callUsage`, whenever the harness
 reports one. Hosts MAY rely on it.
 
 ```json
-{"sessionUpdate": "usage_update", "used": 21832, "size": 200000, "_meta": {"acp-go.dev/callUsage": {"inputTokens": 12, "cachedReadTokens": 21000, "cachedWriteTokens": 420, "outputTokens": 400}}}
+{"sessionUpdate": "usage_update", "used": 21832, "size": 200000, "_meta": {"acp-go.dev/callUsage": {"responseId": "msg_01XFDUDYJgAACzvnptvVoYEL", "inputTokens": 12, "cachedReadTokens": 21000, "cachedWriteTokens": 420, "outputTokens": 400}}}
 ```
 
 | Member | Meaning |
 |---|---|
+| `responseId` | The id the model gateway returned for the call's response, such as `msg_…`, `chatcmpl-…`, `resp_…`, or `gen-…`. |
 | `inputTokens` | Input the call sent that was neither read from nor written to a prompt cache. |
 | `cachedReadTokens` | Input the call read from a prompt cache. |
 | `cachedWriteTokens` | Input the call wrote to a prompt cache. |
 | `outputTokens` | Tokens the call generated, reasoning included. |
 
 - **Reported, never fabricated.** A member is present only when the harness
-  reported that figure for the call, a reported zero as `0`. The only
+  reported that figure or id for the call, a reported zero as `0`. The only
   derivation allowed is arithmetic over figures reported for the same call,
   such as uncached input as total input minus its cache tokens. An absent
   member is unknown, not zero.
 - **Once per call.** Exactly one update per call carries it: the one
   reporting the call's response. Start-of-call, settlement, and restore
   updates never carry it, so summing the member across a session's updates
-  counts each call once. An [empty report](#usage-updates) carries none.
+  counts each call once. An [empty report](#usage-updates) carries none,
+  whatever its `responseId`.
 - **Describes the call, not the context.** `used` stays the occupancy figure.
-- The member carries only these four integers. `wire.CallUsage` is its shape
-  and `CallUsage.Apply` its only writer.
+- **The id is the gateway's.** `responseId` is the response's id as the
+  gateway returned it, the same value the response's
+  [chunks](#assistant-text-streaming) carry as `messageId`. A sibling never
+  substitutes an id it or the harness generated; absent means unknown.
+- `acp-go.dev/callUsage` carries only these members. `wire.CallUsage` is its
+  shape and `CallUsage.Apply` its only writer.
 
 Account allowance is a separate on-demand read,
 [`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides
@@ -258,6 +264,12 @@ Account allowance is a separate on-demand read,
 - A harness that delivers only a terminal frame produces exactly one chunk.
 - Several native assistant messages in one turn each produce their text once,
   in native order, deduplicated on identity.
+- **`messageId` is the response id.** A chunk produced from a model call's
+  response, live or replayed, carries the id the model gateway returned for
+  that response as `messageId`, so every content block of one response shares
+  it and joins the response's [call breakdown](#call-breakdown) `responseId`.
+  Where the harness does not expose that id, the chunk carries no
+  `messageId`; a sibling never generates one.
 
 ## Delegated Provenance
 

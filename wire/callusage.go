@@ -3,6 +3,9 @@ package wire
 // CallUsage is one model call's token breakdown as the harness reported it. A
 // nil member is a figure the harness did not report for the call.
 type CallUsage struct {
+	// ResponseID is the id the model gateway returned for the call's response,
+	// empty when the harness does not expose it.
+	ResponseID string `json:"responseId,omitempty"`
 	// InputTokens is the input the call sent that was neither read from nor
 	// written to a prompt cache.
 	InputTokens *int `json:"inputTokens,omitempty"`
@@ -14,9 +17,10 @@ type CallUsage struct {
 	OutputTokens *int `json:"outputTokens,omitempty"`
 }
 
-// Known reports whether the call reported any token. A report whose every
-// member is absent or zero states nothing: a model call never has an empty
-// context, and a gateway replaying a cached response reports one that way.
+// Known reports whether the call reported any token; the response id alone
+// states no usage. A report whose every token member is absent or zero states
+// nothing: a model call never has an empty context, and a gateway replaying a
+// cached response reports one that way.
 func (u CallUsage) Known() bool {
 	for _, member := range []*int{u.InputTokens, u.CachedReadTokens, u.CachedWriteTokens, u.OutputTokens} {
 		if member != nil && *member != 0 {
