@@ -84,7 +84,7 @@ prompt process and removes image payloads.
 |---|---|
 | claude | Assistant, user, or stream work outside a prompt opens an agent-origin cycle. Native `result` or an agent-origin `task_notification` settles it. Delegated records retain their parent tool-use provenance. |
 | codex | The channel is permanent, but no supported path starts thread work outside a client turn: nothing follows `turn/completed`, a native `codex exec resume` on the app-server's thread is refused by the thread-store writer lock, and `thread/resume` emits only status, token-usage, goal, and MCP records, which are session-scoped and open nothing (verified on `0.155.1` on 2026-09-20). A record that arrives with no prompt in flight is session-scoped and opens nothing. |
-| pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage → mirror → idle. |
+| pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage from `get_session_stats` → mirror → idle, unless the turn was cancelled, which reports no usage. Native records that arrive while the statistics are read are held and delivered after the idle. |
 | hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
 | amp | None. `updatesOutsidePrompt` is `false`; each prompt process opens its own incarnation with a snapshot and ends it after the terminal idle. |
@@ -137,8 +137,15 @@ prompt process and removes image payloads.
 - **codex:** `thread/tokenUsage/updated` `modelContextWindow`, else the
   selected model's catalog `contextWindow`, else `0`. `used` is the latest
   model request's total.
-- **pi:** `get_session_stats.contextUsage.contextWindow`, else the selected
-  model's catalog `contextWindow`, else `0`.
+- **pi:** the last `get_session_stats.contextUsage.contextWindow` read, else
+  the selected model's catalog `contextWindow`, else `0`. Each assistant
+  response reports `used` as its `totalTokens`, else its input, output, and
+  cache tokens; aborted, failed, and empty responses report nothing.
+  Settlement of a prompt or agent-origin turn reports `used` as
+  `contextUsage.tokens`, else the cycle's last response's figure. A completed
+  `compaction_end` discards that figure, so a settlement with no response
+  since a compaction sends nothing. `cost`, sent only at settlement, is
+  `get_session_stats.cost`, the session's cumulative cost in USD.
 - **amp:** the native assistant message `usage.maxInputTokens`; `used` is that
   message's input, output, cache-read, and cache-creation tokens.
 
