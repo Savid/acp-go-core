@@ -44,7 +44,7 @@ Every sibling moves together on these pins. Values live only in this table.
 | Pin | Value |
 |---|---|
 | ACP SDK | `github.com/coder/acp-go-sdk@v0.13.5` |
-| Go directive | `go 1.26.6` |
+| Go directive | `go 1.27.1` |
 
 Every sibling MUST require one shared version of this module, a commit on its
 `master`, without a `replace` directive for it; `make drift-check` compares

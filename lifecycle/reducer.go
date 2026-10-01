@@ -84,8 +84,7 @@ func (r *Reducer) ReduceSessionUpdate(params json.RawMessage) error {
 
 	delivery, err := DecodeSessionUpdate(params, r.negotiated)
 	if err != nil {
-		var refusal *ViolationError
-		if errors.As(err, &refusal) {
+		if refusal, ok := errors.AsType[*ViolationError](err); ok {
 			r.failed = refusal
 			r.nameStream(refusal.StreamID)
 		}
