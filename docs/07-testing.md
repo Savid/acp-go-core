@@ -79,7 +79,11 @@ Every sibling proves, against the current ACP v1 schema:
   running sum; settlement never reports a sum; the prompt response carries
   the summed consumption; a cancelled turn keeps its earlier updates and
   emits none after the cancel; after a compaction no update restates the
-  earlier context.
+  earlier context; an all-zero native report, at a call's start and at its
+  end, emits nothing and leaves the last figure; where the harness reports a
+  breakdown, each call's response update carries its
+  [call breakdown](04-behavior.md#call-breakdown) with only the reported
+  members, and no other update carries one.
 - Elicitation capability gating for all six client-capability cases, with the
   both-null case exercised through JSON decoding, on a sibling with an
   elicitation surface.

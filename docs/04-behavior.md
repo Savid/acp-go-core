@@ -178,8 +178,9 @@ never a second copy of the base64.
 ## Usage Updates
 
 Context-window and cost usage is authoritative only through ACP
-`usage_update`. Vendor token breakdowns MAY appear under `_meta.<vendor>` for
-debugging; hosts must not depend on them.
+`usage_update`, and a model call's token breakdown only through its
+[call breakdown](#call-breakdown). Anything else under `_meta.<vendor>` is
+debugging data; hosts must not depend on it.
 
 `used` is context occupancy: the tokens the conversation holds in the model's
 context window, counted as the harness counts its own context. It is never a
@@ -193,6 +194,11 @@ never fabricated. An adapter that cannot determine it sets `size: 0`.
   one, emits nothing. Where the native stream reports a call's input when the
   call starts, the adapter also emits the context the call was sent with at
   that point.
+- **An empty report is unknown.** A native usage report whose input, cache,
+  and output tokens are all absent or zero states nothing: no model call has
+  an empty context, and a gateway answering from its response cache reports a
+  call that way. It emits no `usage_update`, never `used: 0`, and leaves the
+  last figure in place. `wire.CallUsage.Known` decides it.
 - **Compaction resets the figure.** After the harness compacts its context,
   the next figure is the compacted context; no update restates the context
   from before the compaction.
@@ -207,6 +213,36 @@ never fabricated. An adapter that cannot determine it sets `size: 0`.
 
 The [registry](registry.md#usage-updates) records each sibling's native
 sources.
+
+### Call Breakdown
+
+The update that reports a model call's response carries the call's token
+breakdown on its own `_meta` under `acp-go.dev/callUsage`, whenever the harness
+reports one. Hosts MAY rely on it.
+
+```json
+{"sessionUpdate": "usage_update", "used": 21832, "size": 200000, "_meta": {"acp-go.dev/callUsage": {"inputTokens": 12, "cachedReadTokens": 21000, "cachedWriteTokens": 420, "outputTokens": 400}}}
+```
+
+| Member | Meaning |
+|---|---|
+| `inputTokens` | Input the call sent that was neither read from nor written to a prompt cache. |
+| `cachedReadTokens` | Input the call read from a prompt cache. |
+| `cachedWriteTokens` | Input the call wrote to a prompt cache. |
+| `outputTokens` | Tokens the call generated, reasoning included. |
+
+- **Reported, never fabricated.** A member is present only when the harness
+  reported that figure for the call, a reported zero as `0`. The only
+  derivation allowed is arithmetic over figures reported for the same call,
+  such as uncached input as total input minus its cache tokens. An absent
+  member is unknown, not zero.
+- **Once per call.** Exactly one update per call carries it: the one
+  reporting the call's response. Start-of-call, settlement, and restore
+  updates never carry it, so summing the member across a session's updates
+  counts each call once. An [empty report](#usage-updates) carries none.
+- **Describes the call, not the context.** `used` stays the occupancy figure.
+- The member carries only these four integers. `wire.CallUsage` is its shape
+  and `CallUsage.Apply` its only writer.
 
 Account allowance is a separate on-demand read,
 [`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides
