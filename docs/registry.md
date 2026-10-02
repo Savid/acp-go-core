@@ -27,7 +27,7 @@ defines storage and wire publication.
 | claude | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume` once a transcript exists; an empty conversation retains its UUID with `--session-id`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
 | codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
 | pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
-| hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
+| hermes | `hermes serve --host 127.0.0.1 --port <port>` plus the adapter's `acp-go-hermes` plugin | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. Each launch writes the plugin under the home's `plugins/`. While `config.yaml` lists it neither in `plugins.enabled` nor in `plugins.disabled`, the gateway's `plugins.manage` toggle enables and loads it before any session exists. |
 | opencode | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 | amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
@@ -157,16 +157,26 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   replaces the figure without a breakdown. `size` is the gateway model list's
   `contextWindow`, else the window codex last reported, else `0`. No
   settlement report and no cost. The prompt response sums the requests.
-- **hermes:** the gateway's `session.usage` tick and `message.complete` carry
-  cumulative counters; a reading whose `prompt` counter moved reports `used`
-  as `context_used` and `size` as `context_max`. Ticks stop before
-  `message.complete`, so the closing frame reports a turn's last response,
-  inside the turn. Several responses between two readings report once, with
-  the latest figure. A response with empty usage moves no counter and Hermes
-  drops `context_used`, as it does after a compaction until a response
-  follows. No breakdown: the counters are cumulative and Hermes states no
-  per-call cache read or write. No cost. The prompt response is the
-  counters' difference across the readings the turn owned.
+- **hermes:** the plugin's `llm_execution` middleware reports each Chat
+  Completions response of the session's own conversation: the gateway's
+  usage members and response id, broadcast as `plugin.acp-go-hermes.call`
+  after the response streams and before Hermes records it. Each report
+  yields one update. `used` is its `prompt_tokens`, which Hermes counts as the
+  context. `size` is the `context_max` a reading last stated; a report before
+  any reading waits for the next one. The breakdown is `prompt_tokens` minus
+  `prompt_tokens_details.cached_tokens` and, where sent,
+  `cache_write_tokens`; `cached_tokens`; `cache_write_tokens`; and
+  `completion_tokens`. Retry attempts report separately. Calls on other wires,
+  auxiliary calls, review forks, and delegated children report nothing. The
+  gateway's `session.usage` tick and `message.complete` carry cumulative
+  counters. A reading whose `prompt` counter moved by more than the reported
+  calls' prompt tokens reports `used` as `context_used` and `size` as
+  `context_max`, without a breakdown. Ticks stop before `message.complete`,
+  so the closing frame reports a turn's last unreported response inside the
+  turn. A response with empty usage moves no counter, and Hermes drops
+  `context_used`, as it does after a compaction until a response follows. No
+  cost. The prompt response is the counters' difference across the readings
+  the turn owned.
 - **opencode:** each model call's `step-finish` part reports `used` as its
   `input + output + reasoning + cache.read + cache.write`, with the breakdown
   `input` (opencode subtracts cache reads and writes), `cache.read`,
@@ -211,11 +221,13 @@ Each sibling's source for the gateway's response id that chunks carry as
   turn, the id arrives only at completion, and the rollout cannot tie a replayed row to its response with
   certainty, since a failed or usage-less response's items precede the next
   `token_usage_record` exactly as that record's own items do.
-- **hermes:** omitted by the adapter. The gateway events and persisted
-  messages it consumes carry no response id. Native `llm_execution`
-  middleware exposes the completed response's id and raw usage, while
-  `post_api_request` exposes a usage summary without the id. The adapter
-  does not consume these plugin surfaces.
+- **hermes:** exact for the breakdown. The plugin reads the completed
+  response's `id` from the OpenAI SDK's parse of the gateway's body. It
+  drops Hermes's `stream-<uuid4>` fallback and its partial-stream stub id, so
+  a response whose gateway sent no id carries none. Chunks carry no
+  `messageId`: the middleware returns only after the response streamed, and
+  neither the stream callbacks nor the persisted messages carry the id.
+  Replayed chunks carry none.
 - **opencode:** omitted by the adapter. Its message events and persisted
   step-finish parts omit the gateway id. Native OpenTelemetry spans expose
   response ids and usage, and a plugin can wrap the provider's `options.fetch`
@@ -230,17 +242,16 @@ Each sibling's source for the gateway's response id that chunks carry as
   that failed before the gateway answered, carries neither.
 - **amp:** not recorded.
 
-The alternate Hermes and OpenCode sources were verified on 2026-10-02 with
-Hermes commit `e05b16348b1d06a3311237423b0a4fc30d9c5aa1` and OpenCode 1.18.34
-against OpenRouter. Hermes middleware was exercised through its CLI, not
-`hermes serve`. OpenCode telemetry was exercised through both the compatible
-and OpenRouter provider SDKs; the fetch plugin observed the gateway id before
-the first native text delta. Integration still needs to prove publication
-ordering, attribution, and gateway origin: both harness stacks can synthesize
-fallback ids. See the native
-[Hermes middleware call](https://github.com/NousResearch/hermes-agent/blob/9fc7f17906eab1dd81ddfdf8a1edeecac1e79940/agent/turn_api_call.py#L133)
-and [OpenCode provider fetch](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/provider.ts#L96)
-implementations.
+The Hermes plugin was verified on 2026-10-02 with Hermes commit
+`e05b16348b1d06a3311237423b0a4fc30d9c5aa1` through `hermes serve` against
+OpenRouter. The alternate OpenCode sources were verified on 2026-10-02 with
+OpenCode 1.18.34 against OpenRouter. OpenCode telemetry was exercised through
+both the compatible and OpenRouter provider SDKs; the fetch plugin observed the
+gateway id before the first native text delta. Integration still needs to prove
+publication ordering, attribution, and gateway origin, since the AI SDK can
+synthesize fallback ids. See the native
+[OpenCode provider fetch](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/provider.ts#L96)
+implementation.
 
 ## Account Usage
 
