@@ -11,7 +11,7 @@ changes its public surface.
 | claude | session runtime | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume` once a transcript exists; an empty conversation retains its UUID with `--session-id`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
 | codex | multiplexed runtime | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
 | pi | session runtime | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
-| hermes | session runtime | `hermes serve --isolated --host 127.0.0.1 --port <port>` plus the adapter's `acp-go-hermes` plugin | One authenticated gateway per session, isolated from any host backend. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. Each launch writes the plugin under the home's `plugins/`. While `config.yaml` lists it neither in `plugins.enabled` nor in `plugins.disabled`, the gateway's `plugins.manage` toggle enables and loads it before any session exists. |
+| hermes | session runtime | `hermes serve --isolated --host 127.0.0.1 --port <port>` plus the adapter's `acp-go-hermes` plugin | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. Each launch resolves the home with `hermes config path`, which follows the active profile, and writes the plugin under that home's `plugins/`. While its `config.yaml` lists the plugin neither in `plugins.enabled` nor in `plugins.disabled`, the gateway's `plugins.manage` toggle enables and loads it before any session exists. The plugin registers only under `ACP_GO_HERMES_CALL_REPORTS=1`, which the adapter sets for the `hermes serve` it starts. A launch that cannot resolve the home or write the plugin runs without call reports. |
 | opencode | multiplexed runtime | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 | amp | prompt runtime | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
@@ -150,22 +150,36 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   Completions response of the session's own conversation: the gateway's
   usage members and response id, broadcast as `plugin.acp-go-hermes.call`
   after the response streams and before Hermes records it. Each report
-  yields one update. `used` is its `prompt_tokens`, which Hermes counts as the
-  context. `size` is the `context_max` a reading last stated; a report before
-  any reading waits for the next one. The breakdown is `prompt_tokens` minus
-  `prompt_tokens_details.cached_tokens` and, where sent,
-  `cache_write_tokens`; `cached_tokens`; `cache_write_tokens`; and
-  `completion_tokens`. Retry attempts report separately. Calls on other wires,
-  auxiliary calls, review forks, and delegated children report nothing. The
-  gateway's `session.usage` tick and `message.complete` carry cumulative
-  counters. A reading whose `prompt` counter moved by more than the reported
-  calls' prompt tokens reports `used` as `context_used` and `size` as
-  `context_max`, without a breakdown. Ticks stop before `message.complete`,
-  so the closing frame reports a turn's last unreported response inside the
-  turn. A response with empty usage moves no counter, and Hermes drops
-  `context_used`, as it does after a compaction until a response follows. No
-  cost. The prompt response is the counters' difference across the readings
-  the turn owned.
+  yields one update. Each token figure is the first non-zero of the members
+  Hermes's usage normalization reads, else a reported 0, else absent:
+  - prompt: `prompt_tokens`, then `input_tokens`;
+  - cache reads: `prompt_tokens_details.cached_tokens`, then
+    `cache_read_input_tokens`, `prompt_cache_hit_tokens`, `cached_tokens`;
+  - cache writes: `prompt_tokens_details.cache_write_tokens`, then
+    `prompt_tokens_details.cache_creation_input_tokens`,
+    `cache_creation_input_tokens`, `cache_write_tokens`;
+  - output: `completion_tokens`, then `output_tokens`.
+
+  `used` is the prompt Hermes records, the larger of the prompt and the cache
+  reads plus writes. The breakdown is `inputTokens`, the prompt minus the
+  cache reads and, where sent, the cache writes, present only when the prompt
+  and cache reads were sent and the difference is not negative; then
+  `cachedReadTokens`, `cachedWriteTokens`, and `outputTokens`, the matching
+  figures. `size` is the `context_max` of the latest reading that stated one,
+  when that reading names the call's model. A report without one waits for
+  the first reading that states its model's window; one whose window no
+  reading of its cycle states reports nothing. Retry attempts report
+  separately. Calls on other wires, auxiliary calls, review forks, and
+  delegated children report nothing. The gateway's `session.usage` tick and
+  `message.complete` carry cumulative counters. A reading whose `prompt`
+  counter moved by exactly the prompts of a run of consecutive reported calls
+  reports nothing more. Any other reading that moved the counter reports
+  `used` as `context_used` and `size` as `context_max`, without a breakdown.
+  Ticks stop before `message.complete`, so the closing frame reports a turn's
+  last unreported response inside the turn. A response with empty usage moves
+  no counter, and Hermes drops `context_used`, as it does after a compaction
+  until a response follows. No cost. The prompt response is the counters'
+  difference across the readings the turn owned.
 - **opencode:** each model call's `step-finish` part reports `used` as its
   `input + output + reasoning + cache.read + cache.write`, with the breakdown
   `input` (opencode subtracts cache reads and writes), `cache.read`,
