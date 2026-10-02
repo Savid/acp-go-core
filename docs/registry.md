@@ -122,32 +122,125 @@ prompt process and removes image payloads.
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
 | amp | Cancels the native turn through the thread API, waits for the acknowledgement and a settled thread, joins the process, commits the captured export, and fences. The remote thread stays. |
 
-## Usage `size`
+## Usage Updates
 
-- **opencode:** the selected provider catalog model’s `limit.context`; used tokens
-  come from the latest native assistant request, including cache input.
+Each sibling's native source for the [usage rules](04-behavior.md#usage-updates)
+and the [call breakdown](04-behavior.md#call-breakdown):
 
-- **hermes:** native `message.complete.usage.context_max` and `context_used`.
-  Session-wide token totals are not presented as per-prompt usage.
+- **claude:** each top-level model call reports at its `message_start` stream
+  event `used` as `input_tokens + cache_read_input_tokens +
+  cache_creation_input_tokens`, and at its `message_delta` that request plus
+  `output_tokens`. A provider that opens the call with an empty report
+  reports only at `message_delta`. The `message_delta` update carries the
+  breakdown: `input_tokens` (which excludes cache), `cache_read_input_tokens`,
+  `cache_creation_input_tokens`, and `output_tokens`; request members come
+  from `message_delta` where it restates the request, else from
+  `message_start`, and a null figure is absent. A call no stream event
+  announced reports its request at its first assistant record, whose
+  `output_tokens` repeats the opening figure, with a breakdown without
+  output. Subagent calls report nothing. Settlement reports the last call's
+  figure with `result.total_cost_usd`, the session's cumulative cost, and the
+  structured output. A `compact_boundary` discards the figure. `size` is
+  `get_context_usage.maxTokens`, read at every process start and after a
+  model change, then the `result.modelUsage` context window of the turn's
+  model, else `0`. The prompt response is `result.usage`.
+- **codex:** a thread the adapter starts opts into `rawResponse/completed`
+  (`thread/start` `experimentalRawEvents`, with `rawResponseItem/completed`
+  opted out at initialize), which reports each model request as its response
+  completes, before its tools run. A resumed thread cannot opt in and reports
+  from `thread/tokenUsage/updated`, sent after the request's tools finished,
+  when its cumulative `total` moved; on an opted-in thread that report only
+  moves the baseline. `used` is the request's `totalTokens`; the breakdown is
+  `inputTokens` minus `cachedInputTokens` and `cacheWriteInputTokens`,
+  `cachedInputTokens`, `cacheWriteInputTokens`, and `outputTokens`. After a
+  compaction codex's estimate, an unchanged `total` with a new `last`,
+  replaces the figure without a breakdown. `size` is the gateway model list's
+  `contextWindow`, else the window codex last reported, else `0`. No
+  settlement report and no cost. The prompt response sums the requests.
+- **hermes:** the gateway's `session.usage` tick and `message.complete` carry
+  cumulative counters; a reading whose `prompt` counter moved reports `used`
+  as `context_used` and `size` as `context_max`. Ticks stop before
+  `message.complete`, so the closing frame reports a turn's last response,
+  inside the turn. Several responses between two readings report once, with
+  the latest figure. A response with empty usage moves no counter and Hermes
+  drops `context_used`, as it does after a compaction until a response
+  follows. No breakdown: the counters are cumulative and Hermes states no
+  per-call cache read or write. No cost. The prompt response is the
+  counters' difference across the readings the turn owned.
+- **opencode:** each model call's `step-finish` part reports `used` as its
+  `input + output + reasoning + cache.read + cache.write`, with the breakdown
+  `input` (opencode subtracts cache reads and writes), `cache.read`,
+  `cache.write`, and `output + reasoning`. `size` is the catalog
+  `limit.context` of the model the call ran on, else `0`. Calls answering a
+  message a native client added to the run report inside the turn. When the
+  prompt answers before the stream delivered every call, settlement reports
+  the remaining calls from native history and nothing more. A compaction
+  summary call reports no context and no breakdown. No cost. The prompt
+  response sums the calls.
+- **pi:** each assistant `message_end` reports `used` as its `totalTokens`,
+  else its input, output, and cache tokens, with the breakdown `input` (pi
+  stores it without cache tokens), `cacheRead`, `cacheWrite`, and `output`
+  (reasoning included); aborted and failed responses report nothing. A
+  response whose first `message_update` already carries input usage also
+  reports its input and cache tokens there. `size` is the last
+  `get_session_stats.contextUsage.contextWindow` read, else the selected
+  model's catalog `contextWindow`, else `0`. Settlement of a prompt or
+  agent-origin turn reports a non-zero `contextUsage.tokens`, else the
+  cycle's last response's figure, with `get_session_stats.cost`, the
+  session's cumulative cost in USD. A completed `compaction_end` discards the
+  figure. The prompt response sums the responses' usage.
+- **amp:** the native assistant message `usage.maxInputTokens` is `size`;
+  `used` is that message's input, output, cache-read, and cache-creation
+  tokens, replaced by the result frame's usage when the prompt settles.
 
-- **claude:** `get_context_usage.maxTokens` when nonzero, else the
-  `result.modelUsage` context window, else `0`. `used` is the native
-  context-usage total when available, else the turn's summed message usage.
+### Response ids
 
-- **codex:** `thread/tokenUsage/updated` `modelContextWindow`, else the
-  selected model's catalog `contextWindow`, else `0`. `used` is the latest
-  model request's total.
-- **pi:** the last `get_session_stats.contextUsage.contextWindow` read, else
-  the selected model's catalog `contextWindow`, else `0`. Each assistant
-  response reports `used` as its `totalTokens`, else its input, output, and
-  cache tokens; aborted, failed, and empty responses report nothing.
-  Settlement of a prompt or agent-origin turn reports `used` as
-  `contextUsage.tokens`, else the cycle's last response's figure. A completed
-  `compaction_end` discards that figure, so a settlement with no response
-  since a compaction sends nothing. `cost`, sent only at settlement, is
-  `get_session_stats.cost`, the session's cumulative cost in USD.
-- **amp:** the native assistant message `usage.maxInputTokens`; `used` is that
-  message's input, output, cache-read, and cache-creation tokens.
+Each sibling's source for the gateway's response id that chunks carry as
+`messageId` and the [call breakdown](04-behavior.md#call-breakdown) as
+`responseId`:
+
+- **claude:** exact. The `message.id` claude records from the gateway's
+  response: the `message_start` stream event for live chunks and the
+  `message_delta` breakdown, the assistant record for a call no stream event
+  announced, and transcript rows for replay. Omitted when a response has no
+  id and for claude's own `<synthetic>` records, whose id is a harness UUID.
+- **codex:** the breakdown is exact on a thread the adapter starts, from
+  `rawResponse/completed` `responseId`; a resumed thread's
+  `thread/tokenUsage/updated` names no response, so its breakdown carries
+  none. Chunks carry no `messageId`: streamed deltas name only their item and
+  turn, the id arrives only at completion, and the rollout cannot tie a replayed row to its response with
+  certainty, since a failed or usage-less response's items precede the next
+  `token_usage_record` exactly as that record's own items do.
+- **hermes:** omitted by the adapter. The gateway events and persisted
+  messages it consumes carry no response id. Native `llm_execution`
+  middleware exposes the completed response's id and raw usage, while
+  `post_api_request` exposes a usage summary without the id. The adapter
+  does not consume these plugin surfaces.
+- **opencode:** omitted by the adapter. Its message events and persisted
+  step-finish parts omit the gateway id. Native OpenTelemetry spans expose
+  response ids and usage, and a plugin can wrap the provider's `options.fetch`
+  to observe gateway ids before native text deltas. The adapter does not
+  consume these alternate sources.
+- **pi:** exact. The assistant message's `responseId`, which pi holds on
+  `message_end` and in the session file. pi's RPC `message_update` omits the
+  streaming message, so the adapter's extension relays the id from the first
+  update that holds it as a `setStatus` under `acp-go-pi:response`, ahead of
+  that update's frame; streamed, terminal, and replayed chunks and the
+  `message_end` breakdown carry it. A response pi holds no id for, such as one
+  that failed before the gateway answered, carries neither.
+- **amp:** not recorded.
+
+The alternate Hermes and OpenCode sources were verified on 2026-10-02 with
+Hermes commit `e05b16348b1d06a3311237423b0a4fc30d9c5aa1` and OpenCode 1.18.34
+against OpenRouter. Hermes middleware was exercised through its CLI, not
+`hermes serve`. OpenCode telemetry was exercised through both the compatible
+and OpenRouter provider SDKs; the fetch plugin observed the gateway id before
+the first native text delta. Integration still needs to prove publication
+ordering, attribution, and gateway origin: both harness stacks can synthesize
+fallback ids. See the native
+[Hermes middleware call](https://github.com/NousResearch/hermes-agent/blob/9fc7f17906eab1dd81ddfdf8a1edeecac1e79940/agent/turn_api_call.py#L133)
+and [OpenCode provider fetch](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/provider.ts#L96)
+implementations.
 
 ## Account Usage
 
@@ -476,6 +569,13 @@ running-command cancellation, and race-enabled ACP → native `claude --resume`
 → ACP load with both earlier turns retained under one conversation id. The
 native transcript can contain multiple entries with one API message id.
 
+Response ids, verified 2026-10-01 with tokens through each adapter against
+OpenRouter `qwen/qwen3.8-flash` behind a proxy logging response ids: Claude
+Code `2.1.284`, Codex `0.159.3`, and Pi `0.87.1` carried the logged `gen-…` id
+where [the registry](#response-ids) says, matching the native transcript,
+rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
+`9fc7f17` surfaced it nowhere structured.
+
 ## Known Deviations
 
 - **Hermes native compression:** a changed durable key at mirror time poisons
@@ -543,6 +643,9 @@ native transcript can contain multiple entries with one API message id.
   `info` summary message the plugin message API does not expose. Verification
   compares the conversation around such messages. A compacted thread cannot be
   recovered after native deletion.
+- **Amp usage cadence:** amp reports usage once, when the prompt settles,
+  rather than after every model call. An empty report still replaces the
+  figure, and no update carries a call breakdown.
 - **Amp recovery cleanup:** a failed recovery deletes the private destination it
   created and never bound. This is the only native state the adapter deletes.
 

@@ -109,8 +109,7 @@ func ParamRefusal(err *lifecycle.ParamError) *acp.RequestError {
 // SeedFileRefusal maps an invalid seed file to the uniform refusal naming
 // seedFiles. Any other error yields nil so the caller classifies it.
 func SeedFileRefusal(err error) *acp.RequestError {
-	var seedErr *process.SeedFileError
-	if errors.As(err, &seedErr) {
+	if _, ok := errors.AsType[*process.SeedFileError](err); ok {
 		return Unsupported(fieldSeedFiles)
 	}
 

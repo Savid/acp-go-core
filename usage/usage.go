@@ -40,8 +40,7 @@ func (e *HTTPError) Error() string {
 func RequestError(vendor string, err error) *acp.RequestError {
 	failure := wire.InternalFailure(vendor, "account_usage")
 
-	var provider *HTTPError
-	if errors.As(err, &provider) {
+	if provider, ok := errors.AsType[*HTTPError](err); ok {
 		data, ok := failure.Data.(map[string]any)
 		if !ok {
 			return failure

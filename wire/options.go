@@ -115,8 +115,7 @@ func MergeMap(base map[string]any, overlay map[string]any) map[string]any {
 // ValidateSessionEnvironment maps environment and PATH validation to owned fields.
 func ValidateSessionEnvironment(env map[string]string, dirs []string, path string) *acp.RequestError {
 	if err := process.ValidateNames(env); err != nil {
-		var nameErr *process.NameError
-		if errors.As(err, &nameErr) {
+		if nameErr, ok := errors.AsType[*process.NameError](err); ok {
 			return Unsupported(path + ".env." + nameErr.Key)
 		}
 
@@ -124,8 +123,7 @@ func ValidateSessionEnvironment(env map[string]string, dirs []string, path strin
 	}
 
 	if err := process.ValidateExtraPathDirs(dirs); err != nil {
-		var dirErr *process.PathDirError
-		if errors.As(err, &dirErr) {
+		if dirErr, ok := errors.AsType[*process.PathDirError](err); ok {
 			return Unsupported(fmt.Sprintf("%s.extraPathDirs[%d]", path, dirErr.Index))
 		}
 

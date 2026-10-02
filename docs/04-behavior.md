@@ -178,11 +178,77 @@ never a second copy of the base64.
 ## Usage Updates
 
 Context-window and cost usage is authoritative only through ACP
-`usage_update`. Vendor token breakdowns MAY appear under `_meta.<vendor>` for
-debugging; hosts must not depend on them.
+`usage_update`, and a model call's token breakdown only through its
+[call breakdown](#call-breakdown). Anything else under `_meta.<vendor>` is
+debugging data; hosts must not depend on it.
 
-`size` is the model's true context window in tokens, never fabricated. An
-adapter that cannot determine it sets `size: 0`.
+`used` is context occupancy: the tokens the conversation holds in the model's
+context window, counted as the harness counts its own context. It is never a
+sum across model calls. `size` is the model's true context window in tokens,
+never fabricated. An adapter that cannot determine it sets `size: 0`.
+
+- **Every model call reports.** When a model call's response ends with usable
+  usage, the adapter emits a `usage_update` with the context that response
+  leaves occupied, in native order and inside the running turn. A response the
+  harness reports no usable usage for, such as an aborted, failed, or empty
+  one, emits nothing. Where the native stream reports a call's input when the
+  call starts, the adapter also emits the context the call was sent with at
+  that point.
+- **An empty report is unknown.** A native usage report whose input, cache,
+  and output tokens are all absent or zero states nothing: no model call has
+  an empty context, and a gateway answering from its response cache reports a
+  call that way. It emits no `usage_update`, never `used: 0`, and leaves the
+  last figure in place. `wire.CallUsage.Known` decides it.
+- **Compaction resets the figure.** After the harness compacts its context,
+  the next figure is the compacted context; no update restates the context
+  from before the compaction.
+- **Settlement never sums.** A settling cycle MAY report once more: the
+  harness's own context estimate when it has one, else the cycle's last
+  figure. It reports nothing when no call has followed a compaction.
+- **Cancellation ends reporting.** A cancelled cycle emits no `usage_update`
+  after the cancel.
+- `cost`, when the harness reports one, is the session's cumulative cost.
+- `PromptResponse.usage`, when the harness reports per-call usage, is the
+  turn's consumption summed over its calls.
+
+The [registry](registry.md#usage-updates) records each sibling's native
+sources.
+
+### Call Breakdown
+
+The update that reports a model call's response carries the call's token
+breakdown on its own `_meta` under `acp-go.dev/callUsage`, whenever the harness
+reports one. Hosts MAY rely on it.
+
+```json
+{"sessionUpdate": "usage_update", "used": 21832, "size": 200000, "_meta": {"acp-go.dev/callUsage": {"responseId": "msg_01XFDUDYJgAACzvnptvVoYEL", "inputTokens": 12, "cachedReadTokens": 21000, "cachedWriteTokens": 420, "outputTokens": 400}}}
+```
+
+| Member | Meaning |
+|---|---|
+| `responseId` | The id the model gateway returned for the call's response, such as `msg_…`, `chatcmpl-…`, `resp_…`, or `gen-…`. |
+| `inputTokens` | Input the call sent that was neither read from nor written to a prompt cache. |
+| `cachedReadTokens` | Input the call read from a prompt cache. |
+| `cachedWriteTokens` | Input the call wrote to a prompt cache. |
+| `outputTokens` | Tokens the call generated, reasoning included. |
+
+- **Reported, never fabricated.** A member is present only when the harness
+  reported that figure or id for the call, a reported zero as `0`. The only
+  derivation allowed is arithmetic over figures reported for the same call,
+  such as uncached input as total input minus its cache tokens. An absent
+  member is unknown, not zero.
+- **Once per call.** Exactly one update per call carries it: the one
+  reporting the call's response. Start-of-call, settlement, and restore
+  updates never carry it, so summing the member across a session's updates
+  counts each call once. An [empty report](#usage-updates) carries none,
+  whatever its `responseId`.
+- **Describes the call, not the context.** `used` stays the occupancy figure.
+- **The id is the gateway's.** `responseId` is the response's id as the
+  gateway returned it, the same value the response's
+  [chunks](#assistant-text-streaming) carry as `messageId`. A sibling never
+  substitutes an id it or the harness generated; absent means unknown.
+- `acp-go.dev/callUsage` carries only these members. `wire.CallUsage` is its
+  shape and `CallUsage.Apply` its only writer.
 
 Account allowance is a separate on-demand read,
 [`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides
@@ -198,6 +264,16 @@ Account allowance is a separate on-demand read,
 - A harness that delivers only a terminal frame produces exactly one chunk.
 - Several native assistant messages in one turn each produce their text once,
   in native order, deduplicated on identity.
+- **`messageId` is the response id.** A chunk produced from a model call's
+  response, live or replayed, carries the id the model gateway returned for
+  that response as `messageId` whenever the harness exposes it by the time the
+  chunk is emitted and attributes the chunk to that response with certainty.
+  Every content block of one response shares it. Otherwise the chunk carries
+  no `messageId`; a sibling never generates one and never buffers streamed
+  text to wait for it.
+- **The breakdown is the join key.** Some harnesses expose the id only when
+  the response completes, so the [call breakdown](#call-breakdown)
+  `responseId` identifies a call even where its chunks carry none.
 
 ## Delegated Provenance
 

@@ -102,7 +102,7 @@ to a logical session.
 
 ### Family-Global Reserved Literals
 
-Exactly three `acp-go.dev/*` literals are reserved. They live only in `_meta`,
+Exactly four `acp-go.dev/*` literals are reserved. They live only in `_meta`,
 carry only their defined fields, and are never placed under `_meta.<vendor>`.
 Adding a literal requires a family contract amendment.
 
@@ -111,9 +111,11 @@ Adding a literal requires a family contract amendment.
 | [`acp-go.dev/mediaEnvelope`](02-wire-contract.md#media-envelope) | agent → host at initialize | every sibling, unconditionally |
 | [`acp-go.dev/handoff`](02-wire-contract.md#handoff-envelope) | host → agent per image block | every sibling, exactly while `WithInputHandoffRoot` is set |
 | [`acp-go.dev/lifecycle`](02-wire-contract.md#lifecycle-envelope) | bilateral at initialize; agent → host per session update and permission/elicitation request; host → agent per prompt | every sibling |
+| [`acp-go.dev/callUsage`](04-behavior.md#call-breakdown) | agent → host on the `usage_update` reporting a model call's response | a sibling whose harness reports the call's token breakdown |
 
 The first two advertisements use `agentCapabilities._meta`; lifecycle uses
-`InitializeResponse._meta`. The literals are the `wire` package constants; a
+`InitializeResponse._meta`; the call breakdown rides the update's own
+`_meta`. The literals are the `wire` package constants; a
 sibling never spells them.
 
 ### Identity Constants
