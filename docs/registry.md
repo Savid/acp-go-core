@@ -211,12 +211,16 @@ Each sibling's source for the gateway's response id that chunks carry as
   turn, the id arrives only at completion, and the rollout cannot tie a replayed row to its response with
   certainty, since a failed or usage-less response's items precede the next
   `token_usage_record` exactly as that record's own items do.
-- **hermes:** omitted. Hermes states the id only in its agent log text; its
-  gateway events, HTTP export, `state.db`, and hook payloads carry none, and
-  it reports no breakdown to carry one.
-- **opencode:** omitted. OpenCode drops the AI SDK step `response.id`,
-  replaces stream block ids with its own part ids, and stores no step-finish
-  metadata, so no event, route, or stored row carries the gateway's id.
+- **hermes:** omitted by the adapter. The gateway events and persisted
+  messages it consumes carry no response id. Native `llm_execution`
+  middleware exposes the completed response's id and raw usage, while
+  `post_api_request` exposes a usage summary without the id. The adapter
+  does not consume these plugin surfaces.
+- **opencode:** omitted by the adapter. Its message events and persisted
+  step-finish parts omit the gateway id. Native OpenTelemetry spans expose
+  response ids and usage, and a plugin can wrap the provider's `options.fetch`
+  to observe gateway ids before native text deltas. The adapter does not
+  consume these alternate sources.
 - **pi:** exact. The assistant message's `responseId`, which pi holds on
   `message_end` and in the session file. pi's RPC `message_update` omits the
   streaming message, so the adapter's extension relays the id from the first
@@ -225,6 +229,18 @@ Each sibling's source for the gateway's response id that chunks carry as
   `message_end` breakdown carry it. A response pi holds no id for, such as one
   that failed before the gateway answered, carries neither.
 - **amp:** not recorded.
+
+The alternate Hermes and OpenCode sources were verified on 2026-10-02 with
+Hermes commit `e05b16348b1d06a3311237423b0a4fc30d9c5aa1` and OpenCode 1.18.34
+against OpenRouter. Hermes middleware was exercised through its CLI, not
+`hermes serve`. OpenCode telemetry was exercised through both the compatible
+and OpenRouter provider SDKs; the fetch plugin observed the gateway id before
+the first native text delta. Integration still needs to prove publication
+ordering, attribution, and gateway origin: both harness stacks can synthesize
+fallback ids. See the native
+[Hermes middleware call](https://github.com/NousResearch/hermes-agent/blob/9fc7f17906eab1dd81ddfdf8a1edeecac1e79940/agent/turn_api_call.py#L133)
+and [OpenCode provider fetch](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/provider.ts#L96)
+implementations.
 
 ## Account Usage
 

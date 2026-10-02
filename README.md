@@ -61,7 +61,7 @@ their versions live in `go.mod` files and are compared by
   cutover across the family and its hosts.
 - Protocol claims come from the published spec and schema. The pinned Go SDK is
   evidence for its own generated types and transport bounds only.
-- The three reserved family literals are defined in
+- The reserved family literals are defined in
   [docs/00](docs/00-overview.md#family-global-reserved-literals).
 - Current upstream status and adoption triggers live in the
   [watchlist](tracking/upstream-acp.md).
