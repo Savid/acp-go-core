@@ -283,8 +283,10 @@ Gateway `metadata.planType` and `metadata.allowed` supply `plan` and account-wid
 columns above. A gateway also publishes the models it routes to at `/v1/models`,
 which `gateway.Models` reads for a harness that cannot discover them itself.
 
+Verified on 2026-10-02 with Pi 1.0.0: real reads returned OpenRouter dollar
+balances and request limits.
 Verified on 2026-09-18 with Pi 0.85.1: real reads returned ChatGPT and
-Claude windows, OpenCode Go percentages, and OpenRouter dollar balances.
+Claude windows and OpenCode Go percentages.
 Verified on 2026-09-19 with Pi 0.85.1 through omp 18.2.6: gateway reads returned
 Claude, ChatGPT, and OpenCode Go windows for an extension-registered provider.
 Hermes 0.21.3 has no native surface exposing effective provider credentials
@@ -537,7 +539,7 @@ an authenticated home. Verified 2026-09-18 without tokens: an empty session
 resumes after adapter restart in the same or a fresh native home, retaining
 its ACP id while committing a replacement native binding.
 
-Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
+Pi `1.0.0`, verified 2026-10-02: native creation/close/delete; live prompt,
 load/resume, strict native PATH prefix, PATH rotation, and ACP → native
 `pi --print --session` → ACP continuation preserving both earlier turns.
 
