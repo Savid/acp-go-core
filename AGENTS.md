@@ -78,8 +78,10 @@ make drift-check     # family structural contract across sibling checkouts
   sibling's registry entry.
 - Protocol truth comes from the published spec and schema. The pinned Go SDK
   establishes its own types and transport behavior, not the protocol.
-- Distinguish contract, observed behavior, and inference. Record a source,
-  version, and date for evidence that can age.
+- Distinguish contract, observed behavior, and inference. Evidence that can
+  age carries a source, version, and date in the
+  [watchlist](tracking/upstream-acp.md) or the change's commit, never in the
+  contract or the registry.
 - Keep only actionable upstream watch items; replace stale status when
   rechecking.
 
@@ -89,8 +91,8 @@ make drift-check     # family structural contract across sibling checkouts
 - Give each rule one location and link to it elsewhere. Cut rationale and
   commentary that adds no requirement.
 - A rule enters the contract when a sibling proves it. The registry records
-  only facts that differ between siblings; uniform rules are not restated
-  there.
+  only current facts that differ between siblings; uniform rules, native
+  versions, and verification runs are not recorded there.
 - Keep the README family table, shared pins, and registry consistent. Pin
   values live only in the README.
 - Preserve useful heading anchors and repair callers when a heading changes.
