@@ -121,9 +121,9 @@ trust. A poisoned session refuses every operation but `session/close` and
   successfully established empty conversation commits its native empty-state
   representation with its configuration.
 - A sibling MUST NOT commit while foreground native input, a foreground-blocking
-  permission or elicitation, or message generation is pending. Deferred native
-  input that does not start execution MUST be preserved in the same atomic
-  generation.
+  permission or elicitation, or foreground message generation is pending.
+  Deferred native input that does not start execution MUST be preserved in the
+  same atomic generation.
 - Preserve raw native bytes.
 
 ### Commit Ordering
