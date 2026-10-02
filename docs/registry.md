@@ -13,6 +13,7 @@ changes its public surface.
 | pi | session runtime | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
 | hermes | session runtime | `hermes serve --isolated --host 127.0.0.1 --port <port>` plus the adapter's `acp-go-hermes` plugin | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. Each launch resolves the home with `hermes config path`, which follows the active profile, and writes the plugin under that home's `plugins/`. While its `config.yaml` lists the plugin neither in `plugins.enabled` nor in `plugins.disabled`, the gateway's `plugins.manage` toggle enables and loads it before any session exists. The plugin registers only under `ACP_GO_HERMES_CALL_REPORTS=1`, which the adapter sets for the `hermes serve` it starts. A launch that cannot resolve the home or write the plugin runs without call reports. |
 | opencode | multiplexed runtime | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
+| opencodev2 | multiplexed runtime | OpenCode v2 `opencode serve`, authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Native session export/import supplies persistence. Close releases a logical binding; the next operation replaces a dead server and rebinds the addressed session. |
 | amp | prompt runtime | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
 Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
@@ -29,6 +30,7 @@ defines storage and wire publication.
 | pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file, the accepted session environment, and the ordered paths. Empty conversations commit configuration with an empty main record; restore then resumes the recorded session file without a native header. |
 | hermes | Native per-conversation JSON export plus a `config` subpath | The configuration holds cwd, additional directories, environment, ordered paths, model, and effort. An empty conversation receives a native row before establishment succeeds. Missing state imports before binding a native session. Existing shorter or divergent history fails restore. |
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
+| opencodev2 | Native session exports plus a `config` subpath | The main record contains one raw export per conversation in a parent-first graph, including the root even when empty. Configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
 
 ### Mirror-Commit Ordering
@@ -40,6 +42,7 @@ defines storage and wire publication.
 | pi | Settlement reads pi's session file after `agent_settled` and commits the new rows before the terminal idle and the response. Close aborts any turn, stops the process, commits, then fences. |
 | hermes | `message.complete` settles the turn; callbacks finish before HTTP export, atomic mirror, idle, and response. Close interrupts pending work, exports while the gateway is available, then stops it. |
 | opencode | Native prompt HTTP completion refetches every owned assistant step; callbacks join before the stable sync snapshot, atomic mirror, idle, and response. Close snapshots while HTTP remains available, then releases the binding. |
+| opencodev2 | `session.execution.succeeded`, `failed`, or `interrupted` settles execution; HTTP prompt acceptance does not. Callbacks join, native wait confirms idle, and matching exports and inbox snapshots commit before idle and response. Deferred synthetic inbox entries persist with configuration; active execution and pending forms or permissions block the commit. Close snapshots while HTTP remains available, then releases the binding. |
 | amp | The plugin's `agent.end` receipt and a quiet thread view settle the turn; the process is reaped, then the export must match the observed conversation, retried with backoff under a 30-second deadline, before the atomic mirror, idle, and response. Close joins the prompt process, commits, then fences; the remote thread stays. |
 
 ## Turn Failure
@@ -53,6 +56,7 @@ Only pi adds a vendor cause: `extension`.
 | pi | Command rejection preserves native text. Wrapper extension failure is `extension` carrying the extension's own error text. |
 | hermes | Native result status or RPC rejection supplies provider detail. |
 | opencode | Native HTTP errors or assistant error records supply provider detail. |
+| opencodev2 | Native execution errors preserve `message`, `status` as `statusCode`, and `type` as `providerCode`. Prompt HTTP rejection supplies provider detail. |
 | amp | A native receipt status `error` or an error stream record supplies provider detail. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
 
 ## Raw Events
@@ -76,6 +80,7 @@ prompt process and removes image payloads.
 | pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage from `get_session_stats` → mirror → idle, unless the turn was cancelled, which reports no usage. Native records that arrive while the statistics are read are held and delivered after the idle. |
 | hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
+| opencodev2 | `session.execution.started` outside a prompt opens an agent-origin cycle. Text, reasoning, tools, permissions, and forms belong to that execution; its terminal event drives mirror → idle. Todo updates are session-scoped plans. |
 | amp | None. `updatesOutsidePrompt` is `false`; each prompt process opens its own incarnation with a snapshot and ends it after the terminal idle. |
 
 ### What each channel tolerates
@@ -87,6 +92,7 @@ prompt process and removes image payloads.
 | pi | Queue reports, compaction and retry pairs, custom messages, and unmodelled types are session-scoped and open nothing. A wrapper extension error fails the cycle with cause `extension`; an operator extension error is pi's own. |
 | hermes | `streaming` owns the current turn; `queued` waits for the next native start after its response. `redirected` and `steered` keep work with the running native turn and return a non-retry failure. Unknown dispositions fail the generation. Events use one bounded 256-record queue; unbound live ids are dropped. |
 | opencode | Only held native session IDs reach a binding. Message parent IDs correlate prompt ownership; completed submissions reject late frames. Unknown event kinds are inert. Each binding has a bounded 256-event queue; overflow ends that binding. |
+| opencodev2 | Only held native session IDs reach a binding. Prompt inbox acceptance and execution start admit the turn; execution terminal events settle it. Unknown event kinds are inert. Each binding has a bounded 256-event queue; overflow ends that binding. |
 | amp | A frame naming another thread poisons the session; a frame without identity fails the turn. Unmodelled stream records open nothing. Compaction summaries are info messages the plugin view does not expose; verification compares the conversation around them. |
 
 ### Opening publication
@@ -98,6 +104,7 @@ prompt process and removes image payloads.
 | pi | catalog, then snapshot |
 | hermes | snapshot only |
 | opencode | catalog, then snapshot |
+| opencodev2 | catalog, then snapshot |
 | amp | none; the snapshot is the first notification inside each prompt |
 
 ### Close boundaries
@@ -109,6 +116,7 @@ prompt process and removes image payloads.
 | pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
 | hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. |
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
+| opencodev2 | Cancels callbacks and turns, interrupts native execution, snapshots the native graph, releases the binding, and fences. The shared server continues for peers. |
 | amp | Cancels the native turn through the thread API, waits for the acknowledgement and a settled thread, joins the process, commits the captured export, and fences. The remote thread stays. |
 
 ## Usage Updates
@@ -190,6 +198,13 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   the remaining calls from native history and nothing more. A compaction
   summary call reports no context and no breakdown. No cost. The prompt
   response sums the calls.
+- **opencodev2:** each `session.step.ended` or usage-bearing `step.failed`
+  reports `used` as `input + output + reasoning + cache.read + cache.write`.
+  The breakdown is `input`, `cache.read`, `cache.write`, and `output + reasoning`.
+  `size` is the call model’s catalog `limit.context`, else `0`; `cost` comes
+  from the native session’s cumulative USD cost at publication. Compaction
+  consumes tokens but reports no context or breakdown. The prompt response
+  sums the execution’s calls and compaction usage.
 - **pi:** each assistant `message_end` reports `used` as its `totalTokens`,
   else its input, output, and cache tokens, with the breakdown `input` (pi
   stores it without cache tokens), `cacheRead`, `cacheWrite`, and `output`
@@ -231,8 +246,8 @@ Each sibling's source for the gateway's response id that chunks carry as
   `messageId`: the middleware returns only after the response streamed, and
   neither the stream callbacks nor the persisted messages carry the id.
   Replayed chunks carry none.
-- **opencode:** omitted. Its message events and persisted step-finish parts
-  carry no gateway id.
+- **opencode, opencodev2:** omitted. Native messages, call events, and persisted
+  history carry no gateway response id.
 - **pi:** exact. The assistant message's `responseId`, which pi holds on
   `message_end` and in the session file. pi's RPC `message_update` omits the
   streaming message, so the adapter's extension relays the id from the first
@@ -251,6 +266,7 @@ Each sibling's source for the gateway's response id that chunks carry as
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. A provider pi holds no native account for is read through the routes of extension-registered providers in registration order; the first gateway reporting the provider answers. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
 | hermes | `agent` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`, each only through the routes `config.yaml` `providers` declares with an `api` base, keyed by `key_env`, in name order; hermes exposes no provider credentials natively. | absent | absent account-wide; gateway windows carry their status |
 | opencode | `session` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider, whose effective credentials the native catalog does not expose, and unverified overrides are refused. `anthropic` and `openai-codex` are read only through the gateways the catalog routes to: providers with their own `baseURL`, keyed by the catalog's key or an `{env:NAME}` reference resolved from the session environment; `opencode-go` and `openrouter` fall back to those gateways when no native account holds them. | absent | absent account-wide; Go reports each window’s status |
+| opencodev2 | `session` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`. Location-scoped `/api/provider`, `/api/model`, and `/api/integration` identify routes and active connections; `/api/credential` supplies native API keys, and environment connections use the shared runtime’s environment. Model settings override provider settings. OAuth, OpenCode Console organization-scoped inference routes, and unverified authentication overrides are refused. Gateway fallback considers endpoints explicitly configured in native `/api/config` documents and revalidates the effective catalog route and credential after the read. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
 Every sibling's provider and gateway reads follow the
@@ -261,7 +277,7 @@ Every sibling's provider and gateway reads follow the
 - **Tagged (claude, amp).** The native parent tool-use id is retained as
   `_meta.<vendor>.parentToolUseId` on derived updates.
 
-- **Not applicable (codex, hermes, opencode, pi).** No subscribed provenance channel; nothing is
+- **Not applicable (codex, hermes, opencode, opencodev2, pi).** No subscribed provenance channel; nothing is
   synthesized.
 
 ## Vendor Session Options
@@ -273,6 +289,7 @@ Every sibling's provider and gateway reads follow the
 | pi | `thinkingLevel`, `permission` (`ask`\|`allow`), `autoRetry` (an explicit `false` travels so a resume can override a stored `true`) | Not advertised; `outputSchema` fails at session start. |
 | hermes | `effort` | Not advertised; `outputSchema` is refused. |
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`; startup requires the native `OutputFormatJsonSchema` schema. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
+| opencodev2 | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Not advertised: OpenCode v2 has no schema-enforced prompt API. `outputSchema` is refused; no `WithSessionOutputSchema` helper is exported. |
 | amp | `mode` | Not advertised; `outputSchema` and `model` are refused. |
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
@@ -281,7 +298,9 @@ thread's `config.shell_environment_policy.set` on `thread/start` and
 falling back to the app-server's `PATH` when omitted (codex);
 the session's native process environment (amp, claude, hermes, pi); or a native
 `shell.env` plugin reading the addressed session’s metadata, following parent
-IDs for child sessions (opencode).
+IDs for child sessions (opencode); or an `execute.before` plugin that resolves
+that carrier through native parent IDs and sets the addressed session’s
+`/environment` before each tool execution (opencodev2).
 
 Codex's local execution tools prepend the installed package's `codex-path`
 directory after applying the session environment policy. The live test
@@ -298,6 +317,7 @@ entries fail.
 | pi | `model`, `thought_level` | Model checks `<provider>/<id>`; `get_state` reports the adopted thought level. Menu `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. |
 | hermes | `model`, `effort` | Session-scoped `config.set`, followed by `model.options` and `config.get` read-back. Effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. |
 | opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
+| opencodev2 | `model`, `mode`, `effort` | Native session model and agent endpoints apply selections. Model IDs must be provider-qualified. The model variant carries effort; `effort` appears only while set. Unspecified selections resolve from native model and agent defaults. |
 | amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
 
 ### How each model catalog is built
@@ -309,6 +329,7 @@ entries fail.
 | pi | `get_available_models`, pi's own registry filtered by its configured providers, snapshotted once at native start | `modelId`, plus `contextWindow` and `maxOutputTokens` when the row carries them |
 | hermes | `model.options` provider catalogs | Provider-qualified `modelId`. Configured and selected ids append after native entries. |
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
+| opencodev2 | Location-scoped `GET /api/model` per binding | Provider-qualified IDs, `limit.context`, `limit.output`, and native variant names; configured and selected IDs append after catalog entries. |
 | amp | none | No catalog: Amp selects models through modes. `WithDefaultModel` and `WithConfiguredModels` refuse nonempty values. |
 
 Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at construction.
@@ -322,6 +343,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | none | `PI_CODING_AGENT_DIR` |
 | hermes | none | `HERMES_HOME` |
 | opencode | none | `WithHome` maps `data`, `config`, `cache`, and `state` under its root to the corresponding XDG home variables. |
+| opencodev2 | none | `WithHome` maps `data`, `config`, `cache`, and `state` under its root to the corresponding XDG home variables. |
 | amp | none | `WithHome` refuses nonempty values; native home selection uses the inherited environment. |
 
 ### Ephemeral scratch
@@ -333,6 +355,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | the content-addressed extension directory for the wrapper bridge |
 | hermes | nothing; accepted for family uniformity |
 | opencode | the native environment-plugin root |
+| opencodev2 | the native environment-plugin root |
 | amp | the lifecycle bridge directory of each native process |
 
 ## Slash Commands
@@ -344,6 +367,7 @@ Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at cons
 | pi | `get_commands` at session setup, re-fetched on relaunch | Native list minus names the shared sanitizer rejects | none |
 | hermes | none | Nothing; slash text reaches `prompt.submit`. | n/a |
 | opencode | `GET /command` at binding setup; re-fetched on relaunch | Native names, descriptions, and hints; exact matches dispatch through the native command endpoint | none |
+| opencodev2 | Location-scoped `GET /api/command` at binding setup and relaunch | Native names and descriptions; exact matches dispatch through the native command endpoint | none |
 | amp | none | Nothing; slash text reaches the prompt as text. | n/a |
 
 ## Image Input and Output
@@ -357,7 +381,7 @@ declare neither.
 | Sibling | `maxBytes` | `maxDimension` | `documentFormats` |
 |---|---:|---:|---|
 | claude | default | 0 | `["application/pdf"]` |
-| codex, pi, hermes, opencode | default | 0 | `[]` |
+| codex, pi, hermes, opencode, opencodev2 | default | 0 | `[]` |
 | amp | 5,138,022 | 8,000 | `[]` |
 
 ### Handoff native form
@@ -369,6 +393,7 @@ declare neither.
 | pi | inline base64 |
 | hermes | inline base64 through `image.attach_bytes` before `prompt.submit` |
 | opencode | A `data:` URL file part on native message and command requests |
+| opencodev2 | A `data:` URI in the native prompt or command’s `files` array |
 | amp | Inline base64 image blocks in the stream-json user message |
 
 ### Native input ordering
@@ -376,7 +401,7 @@ declare neither.
 | Sibling | Input shape |
 |---|---|
 | amp, claude, codex, opencode | Ordered content arrays preserve text/image interleaving. |
-| pi, hermes | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](04-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
+| pi, hermes, opencodev2 | Separate text and image fields accept text before the image group or images alone. Forwarded text, resource links, or text resources after the first image are refused under the [image input rule](04-behavior.md#image-input). Image blobs remain images; their URI is provenance. |
 
 ### Non-raster blobs
 
@@ -386,6 +411,7 @@ declare neither.
 | amp, codex, pi | refuses every non-`image/` MIME before decode | nothing decoded |
 | hermes | Gates every MIME | Non-image bytes are dropped; the resource URI remains text |
 | opencode | Gates every MIME | Bytes are dropped; the resource URI is retained as text |
+| opencodev2 | Gates every MIME | Bytes are dropped; the resource URI is retained as text |
 
 ### Selected-model gate authority
 
@@ -396,11 +422,12 @@ declare neither.
 | pi | `get_available_models` per-model `input` list | yes |
 | hermes | No authoritative native modality field | never; unknown forwards |
 | opencode | Provider catalog `capabilities.input.image` | yes; missing metadata remains unknown |
+| opencodev2 | Model catalog `capabilities.input` | yes; missing metadata remains unknown |
 | amp | No authoritative native modality field | never; unknown forwards |
 
 A failed
 catalog call fails the app-server generation start (codex) or session
-establishment (claude, hermes, opencode, pi).
+establishment (claude, hermes, opencode, opencodev2, pi).
 
 ### Output surfaces
 
@@ -411,6 +438,7 @@ establishment (claude, hermes, opencode, pi).
 | pi | tool-call result content images from `tool_execution_update` and `tool_execution_end`; assistant image blocks one per chunk; inline base64 only |
 | hermes | None; image output is not advertised. |
 | opencode | Native assistant file parts and completed tool attachments: inline data URLs or bounded local reads become images; remote URLs become resource links without fetching. |
+| opencodev2 | Native file content and completed tool content: inline data URLs or bounded local reads become images; remote URLs become resource links without fetching. |
 | amp | Native inline tool-result images are validated; remote image URLs become resource links without fetching. |
 
 ### Output refusal placement
@@ -421,6 +449,7 @@ establishment (claude, hermes, opencode, pi).
 | codex | the image tool call reports `failed` with the guidance as content |
 | pi | the tool call reports `failed` with the guidance as content; an assistant image is replaced by the guidance as agent text |
 | opencode | Tool attachments report failed tool status with guidance in the refused slot; assistant image refusal becomes agent text. |
+| opencodev2 | Tool files report failed tool status with guidance in the refused slot; assistant image refusal becomes agent text. |
 | amp | the tool call carries the guidance as text content in the refused slot |
 
 ### Local read roots
@@ -432,6 +461,7 @@ establishment (claude, hermes, opencode, pi).
 | pi | none |
 | hermes | none |
 | opencode | cwd, session additional directories, configured scratch parent, and `os.TempDir()` |
+| opencodev2 | cwd, session additional directories, configured scratch parent, and `os.TempDir()` |
 | amp | none |
 
 ### Replay source
@@ -443,9 +473,19 @@ establishment (claude, hermes, opencode, pi).
 | pi | replay decodes image blocks from the mirrored native rows through the output gate |
 | hermes | The native export supplies user/assistant text parts, reasoning, tool calls, and tool results. Image output is not projected. |
 | opencode | Final native messages and parts are reduced from sync events. Local images are captured in the same generation under `config`; missing or invalid stored artifacts fail load. |
+| opencodev2 | Native exports provide projected messages with text, reasoning, tool content, and user files. Local image bytes or refusals commit with configuration; missing or invalid stored artifacts fail load. |
 | amp | User and assistant messages of the mirrored export are projected with their tool calls and inline images through the output gate; compaction summaries are not projected. Historic usage comes from the configuration record. |
 
 ## Known Deviations
+
+- **OpenCode v2 native API:** persistence uses experimental session
+  export/import endpoints. Import
+  cannot replace an existing session. Structured output is unavailable in the
+  native prompt schema. External, hidden, or conditional native forms are
+  cancelled because the negotiated ACP form cannot represent them. Permission
+  and form requests from unbound descendants are refused; their history is
+  mirrored with the root. Directory changes return backpressure while native
+  inbox entries remain pending.
 
 - **Hermes native compression:** a changed durable key at mirror time poisons
   the session with `native_session_identity_drift`. Native approval and clarify
@@ -521,6 +561,7 @@ Off-prompt `-32603` reachability where it differs:
 | pi | never | `native_session_identity_drift` |
 | hermes | never | `native_session_identity_drift` |
 | opencode | when a replacement server cannot start | `native_session_identity_drift` on native deletion |
+| opencodev2 | when a replacement server cannot start | `native_session_identity_drift` on native deletion |
 | amp | never | `native_session_identity_drift` |
 
 Hermes and OpenCode re-hydrate on a lazy relaunch, so `_restore_failed` is

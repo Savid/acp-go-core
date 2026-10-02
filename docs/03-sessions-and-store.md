@@ -118,8 +118,10 @@ trust. A poisoned session refuses every operation but `session/close` and
 - Read native rows after turns and publish them with the current session
   configuration through `sessionlog.Commit`, using one atomic store generation.
   Configuration changes commit even when no native rows were added. A successfully established empty conversation commits an empty main record with its configuration.
-- Never commit while native input, a foreground-blocking permission or
-  elicitation, or message generation is pending.
+- A sibling MUST NOT commit while foreground native input, a foreground-blocking
+  permission or elicitation, or message generation is pending. Deferred native
+  input that does not start execution MUST be preserved in the same atomic
+  generation.
 - Preserve raw native bytes.
 
 ### Commit Ordering

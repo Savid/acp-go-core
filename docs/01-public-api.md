@@ -1,8 +1,8 @@
 # Public Go API
 
 Use package name `<vendor>acp`, import path
-`github.com/savid/acp-go-<vendor>`, vendor key `<vendor>`, and extension prefix
-`_<vendor>/`.
+`github.com/savid/acp-go-<sibling>`, vendor key `<vendor>`, and extension prefix
+`_<vendor>/`, using the [identity constants](00-overview.md#identity-constants).
 
 ## This Module
 
@@ -197,7 +197,7 @@ wins:
 4. the keys the sibling owns because of how it launches the harness: the home
    variable when `WithHome` is set, and any process marker it needs.
 
-The only names removed are the sibling's own `ACP_GO_<VENDOR>_INTERNAL_*`
+The only names removed are the sibling's own `ACP_GO_<SIBLING>_INTERNAL_*`
 markers, dropped from the inherited, agent, and session layers before the
 owned keys apply.
 Nothing else is scrubbed, allowlisted, or refused by name. A name MUST be

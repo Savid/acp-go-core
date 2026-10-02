@@ -125,7 +125,7 @@ Every sibling proves, against the current ACP v1 schema:
   distinct values both succeed and never cross.
 - **Environment inheritance.** A variable set in the adapter's own process
   environment reaches the harness unchanged, `WithEnv` overrides it, session
-  `env` overrides that, and only the sibling's `ACP_GO_<VENDOR>_INTERNAL_*`
+  `env` overrides that, and only the sibling's `ACP_GO_<SIBLING>_INTERNAL_*`
   markers are absent.
 - Two concurrent logical sessions remain independently addressable without
   crossing cwd, callbacks, permissions, turn results, or cancel. On a
@@ -244,13 +244,13 @@ directory from the installed harness; it MUST NOT accept arbitrary earlier
 
 ## Integration Practices
 
-Integration env vars use `ACP_GO_<VENDOR>_` plus:
+Integration env vars use `ACP_GO_<SIBLING>_` plus:
 
 | Suffix | Meaning |
 |---|---|
 | `RUN_INTEGRATION` | Enables the integration tiers. |
 | `RUN_LIVE_TOKENS` | Opts in to token-spending live tests. |
-| `AGENT_BINARY` | Path to a prebuilt `acp-go-<vendor>` binary. |
+| `AGENT_BINARY` | Path to a prebuilt `acp-go-<sibling>` binary. |
 | `HOME` | Source native home copied into the isolated temp home. |
 | `MODEL` | Model override for live tests. |
 | `HARNESS_PATH` | Native harness binary override. |

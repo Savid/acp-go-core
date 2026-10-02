@@ -14,6 +14,7 @@ the checks that keep the siblings aligned.
 | [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v1` |
 | [acp-go-hermes](https://github.com/savid/acp-go-hermes) | `hermesacp` | `hermes` | `hermes serve` WebSocket JSON-RPC and HTTP persistence | `hermes-session-json-v1` |
 | [acp-go-opencode](https://github.com/savid/acp-go-opencode) | `opencodeacp` | `opencode` | `opencode serve` HTTP and SSE | `opencode-sync-events-v1` |
+| [acp-go-opencodev2](https://github.com/savid/acp-go-opencodev2) | `opencodeacp` | `opencode` | OpenCode v2 `opencode serve` HTTP and SSE | `opencode-session-export-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
 | [acp-go-amp](https://github.com/savid/acp-go-amp) | `ampacp` | `amp` | `amp threads continue` stream-json with a native lifecycle plugin | `amp-thread-json-v1` |
 

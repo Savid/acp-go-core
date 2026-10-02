@@ -120,14 +120,18 @@ sibling never spells them.
 
 ### Identity Constants
 
-Every sibling claims exactly one of each:
+The [README family table](../README.md#the-family) records each sibling’s
+repository, package, vendor key, and store format. `<sibling>` names the
+repository suffix; `<vendor>` names the native harness. Different harness
+generations MAY share a vendor key and package name, but MUST use distinct
+repository names and store formats. Every sibling claims exactly one of each:
 
 | Constant | Pattern | Example |
 |---|---|---|
 | Vendor key | `<vendor>` | `pi` |
 | Package name | `<vendor>acp` | `piacp` |
-| Import path | `github.com/savid/acp-go-<vendor>` | `github.com/savid/acp-go-pi` |
-| Binary name | `acp-go-<vendor>` | `acp-go-pi` |
+| Import path | `github.com/savid/acp-go-<sibling>` | `github.com/savid/acp-go-pi` |
+| Binary name | `acp-go-<sibling>` | `acp-go-pi` |
 | Extension prefix | `_<vendor>/` | `_pi/` |
 | Store format | `<vendor>-<native-state-kind>-v1` | `pi-session-jsonl-v1` |
 

@@ -26,9 +26,11 @@ core_ref() {
 }
 
 siblings=()
-while IFS= read -r vendor; do
-  siblings+=("$vendor")
-done < <(rg -o --no-line-number '^\| \[acp-go-([a-z]+)\]' -r '$1' "$repo_root/README.md")
+identities=()
+while IFS='|' read -r sibling package vendor format; do
+  siblings+=("$sibling")
+  identities+=("$vendor|$package|$format")
+done < <(sed -nE 's/^\| \[acp-go-([a-z0-9]+)\]\([^)]*\) \| `([^`]+)` \| `([^`]+)` \| .* \| `([^`]+)` \|$/\1|\2|\3|\4/p' "$repo_root/README.md")
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
 forbidden_names=('acp-go')
@@ -40,13 +42,15 @@ rg -q "^\s*$sdk_module $sdk_version\$" "$repo_root/go.mod" || fail "acp-go-core:
 [[ -f "$repo_root/lifecycle/testdata/fixtures/manifest.json" ]] || fail "acp-go-core: lifecycle fixture battery missing"
 
 check_sibling() {
-  local vendor=$1 repo=$2 name="acp-go-$1" f
+  local sibling=$1 repo=$2 name="acp-go-$1" f
+  local vendor=$3 package=$4 format=$5
   for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/signals_unix.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
     [[ -e "$repo/$f" ]] || fail "$name: missing $f"
   done
   if rg -q --type go -g '!*_test.go' '\.scratchDir\(' "$repo"; then
     [[ -f "$repo/scratch.go" ]] || fail "$name: scratch allocator has no scratch.go owner"
   fi
+  [[ -d "$repo/internal/$vendor" ]] || fail "$name: internal/$vendor missing"
   [[ -f "$repo/fake${vendor}_test.go" ]] || fail "$name: fake${vendor}_test.go missing"
   for f in "$repo"/*.go; do
     case $(basename "$f") in
@@ -67,8 +71,8 @@ check_sibling() {
     fail "$name: core module $core_version is not reachable from the acp-go-core checkout"
   fi
   rg -q "^[[:space:]]*(replace[[:space:]]+)?$core_module([[:space:]]+[^[:space:]]+)?[[:space:]]+=>" "$repo/go.mod" && fail "$name: core module has a replace directive"
-  rg -q "^package ${vendor}acp\$" "$repo/agent.go" || fail "$name: root package is not ${vendor}acp"
-  rg -q "SessionStoreFormat = \"$vendor-[a-z-]+-v1\"" "$repo"/*.go || fail "$name: SessionStoreFormat is not <vendor>-<kind>-v1"
+  rg -q "^package $package\$" "$repo/agent.go" || fail "$name: root package is not $package"
+  rg -q -F "SessionStoreFormat = \"$format\"" "$repo"/*.go || fail "$name: SessionStoreFormat differs from README"
   rg -q "RawEventMethod = \"_$vendor/rawEvent\"" "$repo"/*.go || fail "$name: RawEventMethod is not canonical"
   if rg -q --type go -g '!*_test.go' 'AccountUsageMethod += ' "$repo"; then
     rg -q --type go -g '!*_test.go' "AccountUsageMethod += \"_$vendor/accountUsage\"" "$repo" || fail "$name: AccountUsageMethod is not canonical"
@@ -79,10 +83,10 @@ check_sibling() {
     while IFS= read -r f; do
       [[ -z "$f" ]] || rg -q '\.Validate\(\)|usage\.ReadVerified\(|gateway\.ReadRoutes\(' "$f" || fail "$name: $(basename "$f") handles an account-usage response without Validate"
     done <<< "$assembling"
-    printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`(session|agent)\` \|" || fail "$name: registry Account Usage row does not record a scope"
+    printf '%s\n' "$account_usage_rows" | rg -q "^\| $sibling \| \`(session|agent)\` \|" || fail "$name: registry Account Usage row does not record a scope"
   else
     rg -q --type go -g '!*_test.go' -e 'accountUsage' -e 'AccountUsage' "$repo" && fail "$name: account usage code without AccountUsageMethod"
-    printf '%s\n' "$account_usage_rows" | rg -q "^\| $vendor \| \`none\` \|" || fail "$name: registry Account Usage row is not none"
+    printf '%s\n' "$account_usage_rows" | rg -q "^\| $sibling \| \`none\` \|" || fail "$name: registry Account Usage row is not none"
   fi
   rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
   resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\(cmp\.Or\(a\.options\.ExecutablePath, vendor\), base\)' "$repo" || true)
@@ -107,8 +111,8 @@ check_sibling() {
       rg -q -F "$n" "$repo/$f" && rg -F "$n" "$repo/$f" | rg -qv "$name|acp-go-core" && fail "$name: $f names $n"
     done
     for other in "${siblings[@]}"; do
-      [[ $other == "$vendor" ]] && continue
-      rg -q -F "acp-go-$other" "$repo/$f" && fail "$name: $f names acp-go-$other"
+      [[ $other == "$sibling" ]] && continue
+      rg -q "acp-go-$other([^a-zA-Z0-9_-]|$)" "$repo/$f" && fail "$name: $f names acp-go-$other"
     done
   done
   for f in -path -home -scratch-dir -model -seed-file -debug -version; do
@@ -130,10 +134,12 @@ check_sibling() {
 }
 
 present=()
-for vendor in "${siblings[@]}"; do
-  repo="$family_root/acp-go-$vendor"
-  if [[ ! -d $repo ]]; then skip "acp-go-$vendor: checkout not found"; continue; fi
-  present+=("$vendor"); check_sibling "$vendor" "$repo"
+for index in "${!siblings[@]}"; do
+  sibling=${siblings[$index]}
+  IFS='|' read -r vendor package format <<< "${identities[$index]}"
+  repo="$family_root/acp-go-$sibling"
+  if [[ ! -d $repo ]]; then skip "acp-go-$sibling: checkout not found"; continue; fi
+  present+=("$sibling"); check_sibling "$sibling" "$repo" "$vendor" "$package" "$format"
 done
 
 if (( ${#present[@]} > 1 )); then
@@ -156,8 +162,10 @@ import subprocess
 import sys
 
 core, family = map(pathlib.Path, sys.argv[1:])
-vendors = re.findall(r"^\| \[acp-go-([a-z]+)\]", (core / "README.md").read_text(), re.M)
-repos = [core] + [family / f"acp-go-{vendor}" for vendor in vendors if (family / f"acp-go-{vendor}").is_dir()]
+identities = {sibling: (package, vendor, store) for sibling, package, vendor, store in re.findall(
+    r"^\| \[acp-go-([a-z0-9]+)\]\([^)]*\) \| `([^`]+)` \| `([^`]+)` \| .* \| `([^`]+)` \|$",
+    (core / "README.md").read_text(), re.M)}
+repos = [core] + [family / f"acp-go-{vendor}" for vendor in identities if (family / f"acp-go-{vendor}").is_dir()]
 failed = False
 
 def fail(message):
@@ -165,8 +173,17 @@ def fail(message):
     print(f"FAIL {message}")
     failed = True
 
+formats = set()
+for sibling, (package, vendor, store_format) in identities.items():
+    if package != vendor + "acp" or not re.fullmatch(re.escape(vendor) + r"-[a-z-]+-v1", store_format):
+        fail(f"acp-go-{sibling}: README identity does not follow the identity contract")
+    if store_format in formats:
+        fail(f"acp-go-{sibling}: store format is not unique in the family")
+    formats.add(store_format)
+
 for repo in repos[1:]:
-    vendor = repo.name.removeprefix("acp-go-")
+    sibling = repo.name.removeprefix("acp-go-")
+    package, vendor, store_format = identities[sibling]
     readme = (repo / "README.md").read_text()
     if (repo / "CLAUDE.md").read_text().strip() != "# CLAUDE.md\n\n@AGENTS.md":
         fail(f"{repo.name}: CLAUDE.md must contain only its heading and AGENTS.md import")
@@ -245,7 +262,7 @@ for repo in repos[1:]:
     for tier, tokens in (("smoke", "0"), ("live", "1")):
         match = re.search(rf"^test-integration-{tier}:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.M)
         recipe = match[1] if match else ""
-        for token in ("-tags=integration", f"ACP_GO_{vendor.upper()}_RUN_INTEGRATION=1", f"ACP_GO_{vendor.upper()}_RUN_LIVE_TOKENS={tokens}"):
+        for token in ("-tags=integration", f"ACP_GO_{sibling.upper()}_RUN_INTEGRATION=1", f"ACP_GO_{sibling.upper()}_RUN_LIVE_TOKENS={tokens}"):
             if token not in recipe:
                 fail(f"{repo.name}: integration {tier} recipe omits {token}")
 
