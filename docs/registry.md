@@ -4,32 +4,21 @@ Per-sibling facts that differ between siblings. Uniform rules live in the
 contract and are not restated here. Update this page whenever a sibling
 changes its public surface.
 
-## Identity Summary
+## Native Surfaces and Process Models
 
-| Repo | Package | Vendor key | Extension prefix | Store format | Strategy |
-|---|---|---|---|---|---|
-| `acp-go-claude` | `claudeacp` | `claude` | `_claude/` | `claude-transcript-jsonl-v1` | session runtime |
-| `acp-go-codex` | `codexacp` | `codex` | `_codex/` | `codex-rollout-jsonl-v1` | multiplexed runtime |
-| `acp-go-pi` | `piacp` | `pi` | `_pi/` | `pi-session-jsonl-v1` | session runtime |
-| `acp-go-hermes` | `hermesacp` | `hermes` | `_hermes/` | `hermes-session-json-v1` | session runtime |
-| `acp-go-opencode` | `opencodeacp` | `opencode` | `_opencode/` | `opencode-sync-events-v1` | multiplexed runtime |
-| `acp-go-amp` | `ampacp` | `amp` | `_amp/` | `amp-thread-json-v1` | prompt runtime |
+| Sibling | Strategy | Native surface | Process lifetime |
+|---|---|---|---|
+| claude | session runtime | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume` once a transcript exists; an empty conversation retains its UUID with `--session-id`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
+| codex | multiplexed runtime | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
+| pi | session runtime | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
+| hermes | session runtime | `hermes serve --host 127.0.0.1 --port <port>` plus the adapter's `acp-go-hermes` plugin | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. Each launch writes the plugin under the home's `plugins/`. While `config.yaml` lists it neither in `plugins.enabled` nor in `plugins.disabled`, the gateway's `plugins.manage` toggle enables and loads it before any session exists. |
+| opencode | multiplexed runtime | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
+| amp | prompt runtime | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
 Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
 session key, OpenCode session ID, Pi session UUID, or Amp thread id. The
 [identity contract](03-sessions-and-store.md#lifecycle-stream-and-incarnation-identity)
 defines storage and wire publication.
-
-## Native Surfaces and Process Models
-
-| Sibling | Native surface | Process lifetime |
-|---|---|---|
-| claude | Claude Code stream-json plus control protocol | One process per session. The adapter passes a UUID with `--session-id`, and relaunches with `--resume` once a transcript exists; an empty conversation retains its UUID with `--session-id`. Transcripts live under `CLAUDE_CONFIG_DIR/projects/<ProjectDirName(cwd)>/<uuid>.jsonl`; cwd is canonicalized before deriving the project directory. |
-| codex | `codex app-server --listen stdio:// --disable plugins` | One app-server per Agent serves every thread and holds `.acp-go-codex.lock` in its home until the process is waited on. It starts on the first session-establishing request; after it exits the next explicit operation starts one replacement and rebinds the addressed thread through `thread/resume`. Rollouts live in `$CODEX_HOME/sessions/`. |
-| pi | `pi --mode rpc` JSONL | One live process per session. A dead process is relaunched against the same native session file on the next prompt. |
-| hermes | `hermes serve --host 127.0.0.1 --port <port>` | One authenticated gateway per session. The native binding uses the durable conversation key; the transient gateway id is internal. Persistence uses native per-session HTTP export/import. |
-| opencode | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
-| amp | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
 
 ## Session Stores
 
@@ -83,7 +72,7 @@ prompt process and removes image payloads.
 | Sibling | Open / delivery / settle |
 |---|---|
 | claude | Assistant, user, or stream work outside a prompt opens an agent-origin cycle. Native `result` or an agent-origin `task_notification` settles it. Delegated records retain their parent tool-use provenance. |
-| codex | The channel is permanent, but no supported path starts thread work outside a client turn: nothing follows `turn/completed`, a native `codex exec resume` on the app-server's thread is refused by the thread-store writer lock, and `thread/resume` emits only status, token-usage, goal, and MCP records, which are session-scoped and open nothing (verified on `0.155.1` on 2026-09-20). A record that arrives with no prompt in flight is session-scoped and opens nothing. |
+| codex | The channel is permanent, but no supported path starts thread work outside a client turn: nothing follows `turn/completed`, a native `codex exec resume` on the app-server's thread is refused by the thread-store writer lock, and `thread/resume` emits only status, token-usage, goal, and MCP records, which are session-scoped and open nothing. A record that arrives with no prompt in flight is session-scoped and opens nothing. |
 | pi | An `agent_start` with no prompt in flight opens an agent-origin turn on the event pump; `agent_settled` drives usage from `get_session_stats` → mirror → idle, unless the turn was cancelled, which reports no usage. Native records that arrive while the statistics are read are held and delivered after the idle. |
 | hermes | Native message, thought, tool, dialog, or error events outside a prompt open an agent-origin cycle. `message.complete` drives mirror → idle. |
 | opencode | Native user or assistant message work outside a prompt opens an agent-origin cycle. Native idle drives mirror → idle. Todo updates are session-scoped plans. |
@@ -157,16 +146,26 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   replaces the figure without a breakdown. `size` is the gateway model list's
   `contextWindow`, else the window codex last reported, else `0`. No
   settlement report and no cost. The prompt response sums the requests.
-- **hermes:** the gateway's `session.usage` tick and `message.complete` carry
-  cumulative counters; a reading whose `prompt` counter moved reports `used`
-  as `context_used` and `size` as `context_max`. Ticks stop before
-  `message.complete`, so the closing frame reports a turn's last response,
-  inside the turn. Several responses between two readings report once, with
-  the latest figure. A response with empty usage moves no counter and Hermes
-  drops `context_used`, as it does after a compaction until a response
-  follows. No breakdown: the counters are cumulative and Hermes states no
-  per-call cache read or write. No cost. The prompt response is the
-  counters' difference across the readings the turn owned.
+- **hermes:** the plugin's `llm_execution` middleware reports each Chat
+  Completions response of the session's own conversation: the gateway's
+  usage members and response id, broadcast as `plugin.acp-go-hermes.call`
+  after the response streams and before Hermes records it. Each report
+  yields one update. `used` is its `prompt_tokens`, which Hermes counts as the
+  context. `size` is the `context_max` a reading last stated; a report before
+  any reading waits for the next one. The breakdown is `prompt_tokens` minus
+  `prompt_tokens_details.cached_tokens` and, where sent,
+  `cache_write_tokens`; `cached_tokens`; `cache_write_tokens`; and
+  `completion_tokens`. Retry attempts report separately. Calls on other wires,
+  auxiliary calls, review forks, and delegated children report nothing. The
+  gateway's `session.usage` tick and `message.complete` carry cumulative
+  counters. A reading whose `prompt` counter moved by more than the reported
+  calls' prompt tokens reports `used` as `context_used` and `size` as
+  `context_max`, without a breakdown. Ticks stop before `message.complete`,
+  so the closing frame reports a turn's last unreported response inside the
+  turn. A response with empty usage moves no counter, and Hermes drops
+  `context_used`, as it does after a compaction until a response follows. No
+  cost. The prompt response is the counters' difference across the readings
+  the turn owned.
 - **opencode:** each model call's `step-finish` part reports `used` as its
   `input + output + reasoning + cache.read + cache.write`, with the breakdown
   `input` (opencode subtracts cache reads and writes), `cache.read`,
@@ -211,16 +210,15 @@ Each sibling's source for the gateway's response id that chunks carry as
   turn, the id arrives only at completion, and the rollout cannot tie a replayed row to its response with
   certainty, since a failed or usage-less response's items precede the next
   `token_usage_record` exactly as that record's own items do.
-- **hermes:** omitted by the adapter. The gateway events and persisted
-  messages it consumes carry no response id. Native `llm_execution`
-  middleware exposes the completed response's id and raw usage, while
-  `post_api_request` exposes a usage summary without the id. The adapter
-  does not consume these plugin surfaces.
-- **opencode:** omitted by the adapter. Its message events and persisted
-  step-finish parts omit the gateway id. Native OpenTelemetry spans expose
-  response ids and usage, and a plugin can wrap the provider's `options.fetch`
-  to observe gateway ids before native text deltas. The adapter does not
-  consume these alternate sources.
+- **hermes:** exact for the breakdown. The plugin reads the completed
+  response's `id` from the OpenAI SDK's parse of the gateway's body. It
+  drops Hermes's `stream-<uuid4>` fallback and its partial-stream stub id, so
+  a response whose gateway sent no id carries none. Chunks carry no
+  `messageId`: the middleware returns only after the response streamed, and
+  neither the stream callbacks nor the persisted messages carry the id.
+  Replayed chunks carry none.
+- **opencode:** omitted. Its message events and persisted step-finish parts
+  carry no gateway id.
 - **pi:** exact. The assistant message's `responseId`, which pi holds on
   `message_end` and in the session file. pi's RPC `message_update` omits the
   streaming message, so the adapter's extension relays the id from the first
@@ -230,18 +228,6 @@ Each sibling's source for the gateway's response id that chunks carry as
   that failed before the gateway answered, carries neither.
 - **amp:** not recorded.
 
-The alternate Hermes and OpenCode sources were verified on 2026-10-02 with
-Hermes commit `e05b16348b1d06a3311237423b0a4fc30d9c5aa1` and OpenCode 1.18.34
-against OpenRouter. Hermes middleware was exercised through its CLI, not
-`hermes serve`. OpenCode telemetry was exercised through both the compatible
-and OpenRouter provider SDKs; the fetch plugin observed the gateway id before
-the first native text delta. Integration still needs to prove publication
-ordering, attribution, and gateway origin: both harness stacks can synthesize
-fallback ids. See the native
-[Hermes middleware call](https://github.com/NousResearch/hermes-agent/blob/9fc7f17906eab1dd81ddfdf8a1edeecac1e79940/agent/turn_api_call.py#L133)
-and [OpenCode provider fetch](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/provider.ts#L96)
-implementations.
-
 ## Account Usage
 
 | Sibling | Scope | Native source and mapping | Native `plan` | Native `usageAllowed` |
@@ -250,49 +236,11 @@ implementations.
 | codex | `agent` | `account/read`, then `account/rateLimits/read` with `excludeResetCreditDetails: true`, on the shared app-server. A null account is `not_authenticated`; an account whose `type` is not `chatgpt` is `not_reported` without the second read. Each `rateLimitsByLimitId` key yields `<key>/primary` and `<key>/secondary` for each window present, with `limitName` as `label`, `windowDurationMins × 60` as `windowSeconds`, and Unix `resetsAt`; the bare `rateLimits` snapshot is not read. No window at all is `not_reported`. A read on an idle agent starts the app-server and takes the native-home lock as session establishment would. `providers`: `openai-codex` natively, and every provider through the routes `config.toml` `model_providers` declares with a `base_url`, keyed by `env_key`, in name order. | `account.planType`, always present; an unrecognized tier is the literal `unknown` | `ordinaryUsageAllowed`; absent when the app-server nulls it, which includes an identity that does not match the active account |
 | pi | `session` | `providers`: `opencode-go`, `openrouter`, `openai-codex`, `anthropic`. An authenticated loopback extension reads the addressed process’s native model registry, resolving API keys, OAuth tokens, account IDs, endpoints, and authentication headers. Custom provider implementations and unverified routes are refused. Shared readers supply subscription windows, monetary balances and spending, and request counts. A provider pi holds no native account for is read through the routes of extension-registered providers in registration order; the first gateway reporting the provider answers. | ChatGPT `plan_type`; absent for other providers | absent account-wide; Go and ChatGPT report each window’s status |
 | hermes | `agent` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`, each only through the routes `config.yaml` `providers` declares with an `api` base, keyed by `key_env`, in name order; hermes exposes no provider credentials natively. | absent | absent account-wide; gateway windows carry their status |
-| opencode | `session` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider and unverified overrides are refused. `anthropic` and `openai-codex` are read only through the gateways the catalog routes to: providers with their own `baseURL`, keyed by the catalog's key or an `{env:NAME}` reference resolved from the session environment; `opencode-go` and `openrouter` fall back to those gateways when no native account holds them. | absent | absent account-wide; Go reports each window’s status |
+| opencode | `session` | `providers`: `anthropic`, `openai-codex`, `opencode-go`, `openrouter`. Directory-scoped `GET /provider/auth` and `GET /config/providers` supply effective API keys and routes. Authentication plugins for the requested provider, whose effective credentials the native catalog does not expose, and unverified overrides are refused. `anthropic` and `openai-codex` are read only through the gateways the catalog routes to: providers with their own `baseURL`, keyed by the catalog's key or an `{env:NAME}` reference resolved from the session environment; `opencode-go` and `openrouter` fall back to those gateways when no native account holds them. | absent | absent account-wide; Go reports each window’s status |
 | amp | `none` | | | |
 
-Provider response mappings were checked on 2026-09-18 against the
-[OpenCode Go endpoint source](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts),
-[OpenRouter key API](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key),
-and [credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits).
-OpenCode Go reports no money. OpenRouter documents the credits endpoint as
-requiring a management key; denial omits the balance while retaining key data.
-ChatGPT reads `/backend-api/wham/usage` with the native account ID and refuses a
-response bound to another account. Native primary, secondary, code-review, and
-additional allowances retain their percentages, durations, resets, and window
-status. Its credit balance has no verified currency unit and is not money.
-Anthropic reads `/api/oauth/usage`; its `limits[]` and enabled `spend` retain
-native percentage and explicit currency/exponent units.
-A gateway a harness routes a provider through publishes an aggregate report
-at `/v1/usage` beneath its API root, one section per upstream account with
-the gateway's own fetch time; `usage/gateway` reads the requested provider's
-section with the bearer the harness sends that gateway. Percent limits become
-windows named as the provider's own reader names them, from the gateway's
-window and tier: Anthropic `session`, `weekly_all`, `weekly_scoped/<Model>`;
-ChatGPT `<feature>/primary` and `/secondary` labelled by the scoped model;
-OpenCode Go `rolling`, `weekly`, `monthly`; a window without a mapping keeps
-the gateway's id. Only ChatGPT windows carry `windowSeconds`, as natively. USD amounts
-become balances and request counts request limits; OpenRouter purchased credits
-are a wallet balance without a spending cap. Other units are left out. A base without the report is a plain proxy and answers
-`not_reported`. A covered provider without measurements retains that answer;
-an explicit upstream error fails the read even when partial windows are present.
-Gateway `metadata.planType` and `metadata.allowed` supply `plan` and account-wide
-`usageAllowed` for every gateway-backed sibling, independently of the native
-columns above. A gateway also publishes the models it routes to at `/v1/models`,
-which `gateway.Models` reads for a harness that cannot discover them itself.
-
-Verified on 2026-09-18 with Pi 0.85.1: real reads returned ChatGPT and
-Claude windows, OpenCode Go percentages, and OpenRouter dollar balances.
-Verified on 2026-09-19 with Pi 0.85.1 through omp 18.2.6: gateway reads returned
-Claude, ChatGPT, and OpenCode Go windows for an extension-registered provider.
-Hermes 0.21.3 has no native surface exposing effective provider credentials
-for these reads.
-OpenCode 1.18.31, checked on 2026-09-19: subscription auth is not
-established by an API-key catalog entry. Its [Anthropic provider documentation](https://opencode.ai/docs/providers/#anthropic)
-describes subscription authentication through plugins, whose effective credentials
-are not exposed by the native catalog.
+Every sibling's provider and gateway reads follow the
+[shared provider readers](02-wire-contract.md#shared-provider-readers).
 
 ## Delegated Agents
 
@@ -325,8 +273,7 @@ Codex's local execution tools prepend the installed package's `codex-path`
 directory after applying the session environment policy. The live test
 verifies that directory against the installed package manifest before
 checking that session directories immediately follow it. Other leading
-entries fail. Verified with CLI `0.154.0` on 2026-09-15 against the
-[native runtime prepend](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core/src/tools/runtimes/mod.rs#L119).
+entries fail.
 
 ## Session Config Options
 
@@ -484,98 +431,6 @@ establishment (claude, hermes, opencode, pi).
 | opencode | Final native messages and parts are reduced from sync events. Local images are captured in the same generation under `config`; missing or invalid stored artifacts fail load. |
 | amp | User and assistant messages of the mirrored export are projected with their tool calls and inline images through the output gate; compaction summaries are not projected. Historic usage comes from the configuration record. |
 
-## Native Verification
-
-The no-token smoke suites passed on 2026-09-20 with Amp
-`0.0.1789736830-g151f8f`, Claude Code `2.1.278`, Codex `0.155.1`, Hermes
-`0.21.3` (`f5a457ad`), OpenCode `1.18.31`, and Pi `0.85.1`. These runs cover
-native session setup and the non-inference controls each smoke suite exercises;
-they do not establish live prompt, callback, or cancellation behavior.
-
-OpenCode `1.18.30`, tag commit `3104c1428ec91f809e5ab86631300de41eb6952e`,
-verified 2026-09-14: native creation and sync import; race-enabled ACP → native
-`opencode run --session` → ACP continuation; fresh-home import followed by a
-further prompt; permissions, form questions, raw events, PATH rotation,
-running-command cancellation, and deletion. The native CLI fixture passes
-`--dir` because the CLI also consults inherited `PWD`. Message IDs follow the
-[native timestamp layout](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/id/id.ts).
-Snapshot reads use scoped queries through the
-[native database command](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/cli/cmd/db.ts);
-imports use the
-[native sync replay route](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts).
-OpenCode `1.18.31`, verified 2026-09-18: conversation-scoped reads and their
-stability fence complete against a populated native database without exporting
-unrelated history. Query stdout is captured in a private regular file: the
-[CLI's explicit exit](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/index.ts)
-truncates larger piped output at 64 KiB in the observed macOS run. Native
-creation, fresh-home import, and deletion pass with a carrier larger than
-64 KiB and no model calls.
-
-OpenCode server readiness has a two-minute bound, shortened by the caller's
-deadline. Health requests have a two-second timeout and retry within that bound.
-Startup diagnostics distinguish health readiness from schema loading and report
-their durations. On macOS with `1.18.31`, an early health request can remain
-unanswered while a second connection receives a healthy response from the same
-process. The two-second retry recovers this observed startup stall. Verified
-2026-09-18 without model calls, including native creation, import, and deletion.
-
-Hermes `0.21.3`, native source `f5a457ad`, verified 2026-09-15:
-no-token creation/close/delete; race-enabled ACP → native
-`hermes chat --cli --resume` → ACP continuation; fresh-home import followed by
-a further prompt; native permissions, form clarification, raw events, PATH
-rotation through an `execute_code` subprocess, running-command cancellation,
-and deletion. Explicit model selection precedes the native agent build.
-Approvals and clarification use the
-[native server-request protocol](https://github.com/NousResearch/hermes-agent/blob/f5a457ad5bebd9d78bbf35ffaaf1c33866a03ca6/tui_gateway/contracts/server_requests.py).
-
-Codex `0.154.0`, verified 2026-09-15: native creation/close/delete;
-race-enabled ACP → native `codex exec resume` → ACP continuation; live prompt,
-load/resume, and PATH rotation. The installed package's verified prefix is
-recorded under [session options](#vendor-session-options). Verified
-2026-09-17 without tokens: the account-usage read through the built binary on
-an authenticated home. Verified 2026-09-18 without tokens: an empty session
-resumes after adapter restart in the same or a fresh native home, retaining
-its ACP id while committing a replacement native binding.
-
-Pi `0.85.1`, verified 2026-09-15: native creation/close/delete; live prompt,
-load/resume, strict native PATH prefix, PATH rotation, and ACP → native
-`pi --print --session` → ACP continuation preserving both earlier turns.
-
-Amp `0.0.1789432613-gd97f0d`, verified 2026-09-16 in `low` mode: no-token
-creation, export, close, and delete; a prompt that read a file through a native
-tool, native deletion of the thread, load into a private replacement under the
-original ACP id with retained usage, native `amp threads continue --execute`
-recalling the file, and a fresh resume; ACP → native continuation → ACP load;
-session PATH prefix and rotation through a native tool; remote cancellation of a
-running command; deletion. Two successive native compactions on one thread
-settled their turns and kept the mirror consistent; recovery of a compacted
-thread after native deletion is refused because the importer rejects summary
-blocks. A failed recovery deleted the destination it created.
-
-Claude Code `2.1.278`, source-verified 2026-09-20 against the integrity-checked
-[published native package](https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/2.1.278):
-`get_usage` exposes fixed rate-limit members and `model_scoped` windows. Its
-availability flag can be true while the fetched report is null. Adapter tests
-cover both forms. The no-token native smoke also passed against this package,
-including the logged-out usage response; no authenticated read was executed.
-
-Claude Code `2.1.273`, verified 2026-09-17 without tokens: native
-initialization and settings controls, account usage on the default home and
-its `not_reported` answer under `WithHome`, close, resume, and deletion.
-
-Claude Code `2.1.270`, verified 2026-09-14 with tokens: permission callbacks,
-AskUserQuestion elicitation, raw events, PATH changes on resume,
-running-command cancellation, and race-enabled ACP → native `claude --resume`
-→ ACP load with both earlier turns retained under one conversation id. The
-native transcript can contain multiple entries with one API message id.
-
-Response ids, verified 2026-10-01 with tokens through each adapter against
-OpenRouter `qwen/qwen3.8-flash` behind a proxy logging response ids: Claude
-Code `2.1.284`, Codex `0.159.3`, and Pi `0.87.1` carried the logged `gen-…` id
-where [the registry](#response-ids) says, matching the native transcript,
-rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
-`9fc7f17` surfaced it nowhere structured.
-
 ## Known Deviations
 
 - **Hermes native compression:** a changed durable key at mirror time poisons
@@ -586,8 +441,6 @@ rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
 - **Hermes terminal environment:** the native terminal bootstraps a login
   shell; operator and system startup files can reorder `PATH`. The live
   inheritance check uses a direct subprocess through `execute_code`.
-  Verified on macOS with `0.21.3` on 2026-09-15 against the
-  [native login bootstrap](https://github.com/NousResearch/hermes-agent/blob/f5a457ad5bebd9d78bbf35ffaaf1c33866a03ca6/tools/environments/base.py#L276).
 - **Hermes input bridges:** sudo, secret, and terminal-buffer requests receive
   an empty value. Other desktop, vault, and setup request methods are unsupported.
 - **Hermes restore:** its native HTTP import creates missing conversations and
@@ -596,9 +449,9 @@ rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
   import and validation finish.
 - **Hermes gateway authentication and port:** the loopback WebSocket at
   `/api/ws` authenticates only through the `?token=` query parameter; a
-  request carrying the session token as a header alone is refused `403`
-  (verified on `0.21.3` on 2026-09-20). The HTTP persistence endpoints take
-  the token as the `X-Hermes-Session-Token` header. `hermes serve` binds a
+  request carrying the session token as a header alone is refused `403`.
+  The HTTP persistence endpoints take the token as the
+  `X-Hermes-Session-Token` header. `hermes serve` binds a
   concrete `--port`, with no pre-bound-socket or port-0 handshake a caller can
   read back, so the adapter selects the port by bind-then-close before launch.
 
@@ -608,9 +461,6 @@ rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
   naming `cwd`. A `session/list` filter that cannot be resolved matches no
   session.
 
-- **Codex publishes the CLI build's presets**, or the gateway's list when
-  the active provider publishes one, snapshotted once per app-server
-  generation.
 - **Codex stored restore:** restore materializes
   `$CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<threadId>.jsonl`
   from the `session_meta` row's timestamp, then resumes by the recorded native
@@ -640,9 +490,8 @@ rollout `token_usage_record`, or session row; OpenCode `1.18.33` and Hermes
   permissions stay native, so amp makes no client calls and
   `MaxConcurrentClientCalls` is validated and never consumed.
 - **Amp compaction:** the remote thread actor compacts on its own and inserts an
-  `info` summary message the plugin message API does not expose. Verification
-  compares the conversation around such messages. A compacted thread cannot be
-  recovered after native deletion.
+  `info` summary message the plugin message API does not expose. A compacted
+  thread cannot be recovered after native deletion.
 - **Amp usage cadence:** amp reports usage once, when the prompt settles,
   rather than after every model call. An empty report still replaces the
   figure, and no update carries a call breakdown.

@@ -198,8 +198,7 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
   repeat that provider read before `retryAt`. HTTP bodies and credentials MUST
   NOT appear in error data. Independently observed cached windows MUST
   retain their individual `observedAt`. A native version without
-  the read answers the same class; the registry's verification record names
-  the version each read was verified on.
+  the read answers the same class.
   `wire.AccountUsageResponse.Validate` gates every available response a
   sibling assembles.
 - Except for Claude setup-token probes, observations MUST NOT be cached.
@@ -225,6 +224,45 @@ unloaded, or tombstoned id answers the uniform unknown-session refusal.
 - A percentage window MAY carry its own `usageAllowed` when the source reports
   that window's status. Money MUST NOT be inferred from quota percentages or
   subscription prices.
+
+### Shared Provider Readers
+
+The `usage/` readers map each provider identically for every sibling:
+
+- **Anthropic** reads `/api/oauth/usage`; its `limits[]` and enabled `spend`
+  retain the native percentage and explicit currency and exponent units.
+- **ChatGPT** reads `/backend-api/wham/usage` with the native account ID and
+  refuses a response bound to another account. Primary, secondary,
+  code-review, and additional allowances retain their percentages, durations,
+  resets, and window status. Its credit balance has no known currency unit
+  and is not money.
+- **OpenCode Go** reports percentage windows and no money.
+- **OpenRouter**'s credits endpoint requires a management key; a denied
+  credits read omits the balance and retains the key observation.
+
+A gateway a harness routes a provider through publishes an aggregate report
+at `/v1/usage` beneath its API root, one section per upstream account with
+the gateway's own fetch time. `usage/gateway` reads the requested provider's
+section with the bearer the harness sends that gateway:
+
+- Percent limits become windows named as that provider's own reader names
+  them, from the gateway's window and tier: Anthropic `session`,
+  `weekly_all`, and `weekly_scoped/<Model>`; ChatGPT `<feature>/primary` and
+  `<feature>/secondary` labelled by the scoped model; OpenCode Go `rolling`,
+  `weekly`, and `monthly`. A window without a mapping keeps the gateway's id.
+  Only ChatGPT windows carry `windowSeconds`, as the native reader does.
+- USD amounts become balances and request counts become request limits;
+  OpenRouter purchased credits are a wallet balance without a spending cap.
+  Other units are left out.
+- A base without the report is a plain proxy and answers `not_reported`, as
+  does a covered provider without measurements. An explicit upstream error
+  fails the read even when partial windows are present.
+- Gateway `metadata.planType` and `metadata.allowed` supply `plan` and
+  account-wide `usageAllowed` for every gateway-backed sibling, independently
+  of the sibling's native source.
+- A gateway publishes the models it routes to at `/v1/models`;
+  `usage/gateway.Models` reads that list for a harness that cannot discover
+  its models itself.
 
 ### Claude Setup-Token Probes
 
