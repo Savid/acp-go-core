@@ -33,7 +33,6 @@ while IFS='|' read -r sibling package vendor format; do
 done < <(sed -nE 's/^\| \[acp-go-([a-z0-9]+)\]\([^)]*\) \| `([^`]+)` \| `([^`]+)` \| .* \| `([^`]+)` \|$/\1|\2|\3|\4/p' "$repo_root/README.md")
 (( ${#siblings[@]} > 0 )) || { fail "README family table lists no sibling"; exit 1; }
 
-forbidden_names=('acp-go')
 account_usage_rows=$(awk '/^## Account Usage$/{f=1;next} /^## /{f=0} f' "$repo_root/docs/registry.md")
 
 rg -q "^go $go_version\$" "$repo_root/go.mod" || fail "acp-go-core: go directive differs from README pin"
@@ -89,8 +88,8 @@ check_sibling() {
     printf '%s\n' "$account_usage_rows" | rg -q "^\| $sibling \| \`none\` \|" || fail "$name: registry Account Usage row is not none"
   fi
   rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
-  resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\(cmp\.Or\(a\.options\.ExecutablePath, vendor\), base\)' "$repo" || true)
-  [[ -n "$resolving" ]] || fail "$name: executable resolution is not core's on the vendor default"
+  resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\([^;]*, base\)' "$repo" || true)
+  [[ -n "$resolving" ]] || fail "$name: executable resolution does not use core with the base environment"
   while IFS= read -r f; do
     [[ -z "$f" ]] || rg -q '\.Base\(\)' "$f" || fail "$name: $(basename "$f") resolves the executable off the base environment"
   done <<< "$resolving"
@@ -105,15 +104,6 @@ check_sibling() {
   rg -q 'ConfiguredModels +\[\]string' "$repo/options.go" && rg -q 'func WithConfiguredModels\(ids \[\]string\) Option' "$repo/options.go" || fail "$name: WithConfiguredModels surface missing"
   for f in 'wire.MediaEnvelopeKey|acp-go.dev/mediaEnvelope' 'wire.HandoffKey|acp-go.dev/handoff' 'wire.LifecycleKey|acp-go.dev/lifecycle'; do
     rg -q --type go -g '!*_test.go' -e "$f" "$repo" || fail "$name: reserved literal ${f#*|} unused in production Go"
-  done
-  for f in README.md AGENTS.md doc.go; do
-    for n in "${forbidden_names[@]}"; do
-      rg -q -F "$n" "$repo/$f" && rg -F "$n" "$repo/$f" | rg -qv "$name|acp-go-core" && fail "$name: $f names $n"
-    done
-    for other in "${siblings[@]}"; do
-      [[ $other == "$sibling" ]] && continue
-      rg -q "acp-go-$other([^a-zA-Z0-9_-]|$)" "$repo/$f" && fail "$name: $f names acp-go-$other"
-    done
   done
   for f in -path -home -scratch-dir -model -seed-file -debug -version; do
     rg -q -- "\"${f#-}\"" "$repo/cmd/$name/main.go" || fail "$name: flag $f missing"
@@ -185,6 +175,14 @@ for repo in repos[1:]:
     sibling = repo.name.removeprefix("acp-go-")
     package, vendor, store_format = identities[sibling]
     readme = (repo / "README.md").read_text()
+    allowed_names = re.compile(
+        rf"(?<![\w-])(?:{re.escape(repo.name)}(?:-native)?|acp-go-core)(?![\w-])"
+        r"|(?<![\w-])acp-go\.dev/[^\s`\"'<>()]*"
+    )
+    for name in ("README.md", "AGENTS.md", "doc.go"):
+        remaining = allowed_names.sub("", (repo / name).read_text())
+        if re.search(r"(?<![\w-])acp-go(?![\w])", remaining):
+            fail(f"{repo.name}: {name} names another sibling or host")
     if (repo / "CLAUDE.md").read_text().strip() != "# CLAUDE.md\n\n@AGENTS.md":
         fail(f"{repo.name}: CLAUDE.md must contain only its heading and AGENTS.md import")
     headings = re.findall(r"^## (.+)$", (repo / "AGENTS.md").read_text(), re.M)
@@ -224,10 +222,17 @@ for repo in repos[1:]:
             fail(f"{repo.name}: {source.relative_to(repo)} allocates system scratch outside scratch.go")
         if re.search(r'os\.MkdirTemp\(', text):
             fail(f"{repo.name}: {source.relative_to(repo)} allocates a scratch directory outside scratch.go")
-    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo, text=True).split("\0")
-    for path in tracked:
-        if path.startswith(".") and path.split("/")[0] not in {".github", ".gitignore", ".golangci.yml"}:
-            fail(f"{repo.name}: unsupported tracked dot file {path}")
+    files = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=repo, text=True,
+    ).split("\0")
+    for path in sorted(set(files) - {""}):
+        for index, component in enumerate(path.split("/")):
+            if component.startswith(".") and not (
+                index == 0 and component in {".github", ".gitignore", ".golangci.yml"}
+            ):
+                fail(f"{repo.name}: unsupported dot file {path}")
+                break
 
     workflows = sorted((repo / ".github/workflows").glob("*"))
     if [path.name for path in workflows] != ["check.yml"]:
@@ -265,6 +270,56 @@ for repo in repos[1:]:
         for token in ("-tags=integration", f"ACP_GO_{sibling.upper()}_RUN_INTEGRATION=1", f"ACP_GO_{sibling.upper()}_RUN_LIVE_TOKENS={tokens}"):
             if token not in recipe:
                 fail(f"{repo.name}: integration {tier} recipe omits {token}")
+
+    if (repo / "native").is_dir():
+        native = repo / "native"
+        for filename in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml"):
+            if not (native / filename).is_file():
+                fail(f"{repo.name}: bundled helper is missing native/{filename}")
+        manifest = (native / "Cargo.toml").read_text() if (native / "Cargo.toml").is_file() else ""
+        toolchain = (native / "rust-toolchain.toml").read_text() if (native / "rust-toolchain.toml").is_file() else ""
+        helper = repo.name + "-native"
+        if not re.search(rf'^name\s*=\s*"{re.escape(helper)}"$', manifest, re.M):
+            fail(f"{repo.name}: bundled helper name is not {helper}")
+        if not re.search(r'^channel\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+"$', toolchain, re.M):
+            fail(f"{repo.name}: native toolchain is not pinned to an exact release")
+        if helper not in readme or "native/rust-toolchain.toml" not in readme:
+            fail(f"{repo.name}: README omits the helper or native toolchain")
+        go_sources = "\n".join(
+            p.read_text() for p in [*repo.glob("*.go"), *(repo / "internal" / vendor).rglob("*.go")]
+            if not p.name.endswith("_test.go")
+        )
+        for field in ("ProtocolVersion", "HelperVersion"):
+            if not re.search(rf"\.{field}\s*!=", go_sources):
+                fail(f"{repo.name}: bundled helper {field} mismatch is not checked")
+        native_version = re.search(r'^version\s*=\s*"([^"]+)"$', manifest, re.M)
+        adapter_version = re.search(r'\bconst HelperVersion = "([^"]+)"', go_sources)
+        if native_version is None or adapter_version is None or native_version[1] != adapter_version[1]:
+            fail(f"{repo.name}: required helper release does not match Cargo.toml")
+        for target, prerequisite in (
+            ("build", "native-build"), ("test", "native-test"),
+            ("coverage-check", "native-test"), ("lint", "native-lint"),
+            ("fmt", "native-fmt"), ("fmt-check", "native-fmt-check"),
+            ("vuln", "native-vuln"),
+        ):
+            if not re.search(rf"^{target}:[^\n]*\b{prerequisite}\b", makefile, re.M):
+                fail(f"{repo.name}: {target} omits its {prerequisite} prerequisite")
+            if not re.search(rf"^{prerequisite}:", makefile, re.M):
+                fail(f"{repo.name}: missing {prerequisite} target")
+        for pattern, description in (
+            (r"cargo build --locked", "locked build"),
+            (r"cargo test --locked", "locked tests"),
+            (r"cargo clippy .*-- -D warnings", "Clippy gate"),
+            (r"cargo fmt --all -- --check", "format check"),
+            (r"audit --file Cargo.lock", "native lockfile vulnerability scan"),
+            (rf"\bcp [^\n]*bin/{re.escape(helper)}\b", "helper staging"),
+        ):
+            if not re.search(pattern, makefile):
+                fail(f"{repo.name}: bundled helper omits {description}")
+        if not (
+            "native/rust-toolchain.toml" in workflow and "rustup toolchain install" in workflow
+        ):
+            fail(f"{repo.name}: CI does not install the pinned native toolchain")
 
 versions = {}
 for repo in repos:

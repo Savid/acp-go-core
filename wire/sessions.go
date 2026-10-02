@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 )
@@ -81,17 +82,18 @@ func (r *SessionRequests) Acquire(id acp.SessionId) (func(), error) {
 // page selected by a raw URL-base64 offset cursor.
 func PaginateSessions(sessions []acp.SessionInfo, cursor *string) ([]acp.SessionInfo, *string, error) {
 	sessions = slices.Clone(sessions)
+	timestamp := func(stamp *string) time.Time {
+		if stamp == nil {
+			return time.Time{}
+		}
+
+		instant, _ := time.Parse(time.RFC3339Nano, *stamp)
+
+		return instant
+	}
+
 	slices.SortFunc(sessions, func(left, right acp.SessionInfo) int {
-		var leftStamp, rightStamp string
-		if left.UpdatedAt != nil {
-			leftStamp = *left.UpdatedAt
-		}
-
-		if right.UpdatedAt != nil {
-			rightStamp = *right.UpdatedAt
-		}
-
-		if order := strings.Compare(rightStamp, leftStamp); order != 0 {
+		if order := timestamp(right.UpdatedAt).Compare(timestamp(left.UpdatedAt)); order != 0 {
 			return order
 		}
 

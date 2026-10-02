@@ -17,6 +17,7 @@ the checks that keep the siblings aligned.
 | [acp-go-opencodev2](https://github.com/savid/acp-go-opencodev2) | `opencodeacp` | `opencode` | OpenCode v2 `opencode serve` HTTP and SSE | `opencode-session-export-v1` |
 | [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
 | [acp-go-amp](https://github.com/savid/acp-go-amp) | `ampacp` | `amp` | `amp threads continue` stream-json with a native lifecycle plugin | `amp-thread-json-v1` |
+| [acp-go-nanocodex](https://github.com/savid/acp-go-nanocodex) | `nanocodexacp` | `nanocodex` | Bundled Rust helper embedding the Nanocodex library over JSONL | `nanocodex-rollout-jsonl-v1` |
 
 [The registry](docs/registry.md) records each sibling's capabilities, options,
 and deviations.

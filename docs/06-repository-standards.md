@@ -42,6 +42,21 @@ requires a sibling to hold a copy of shared behavior.
 `doc.go` explains embedding through `Serve`; `example_test.go` proves
 initialize behavior.
 
+### Bundled Native Helper
+
+A sibling that embeds a Rust harness library MAY keep its helper under
+`native/`; the Go protocol client remains under `internal/<harness>`. The
+helper is named `acp-go-<sibling>-native` and selected only through
+`WithExecutablePath`, using the same base-environment resolution as an
+installed harness. The README MUST document building and installing both
+executables.
+
+`native/Cargo.toml`, `native/Cargo.lock`, and `native/rust-toolchain.toml`
+MUST pin the native dependencies and toolchain. The helper MUST report its
+protocol version and release version at initialization; the Go adapter MUST
+reject either mismatch before binding a session. The adapter and helper MUST
+be built and distributed together. Neither side supports an older wire shape.
+
 ## Go File Structure
 
 The root files above are the shared core. Additional root files are
@@ -105,7 +120,9 @@ The structural gate checks these symbols and literals in every sibling:
 
 ## Dot Files
 
-The tracked dot files are `.github/`, `.gitignore`, and `.golangci.yml`.
+The only permitted dot paths are root `.github/`, `.gitignore`, and
+`.golangci.yml`; other dot files and directories are forbidden at every
+depth. The structural gate checks tracked and untracked, non-ignored files.
 Agent scratch directories are never committed.
 
 ## Command Binary
@@ -143,15 +160,25 @@ mode and agent selection are session config options, never flags.
 | `audit` | Exactly `fmt-check lint build coverage-check tidy vuln modernize-check`, in that order even under parallel make, then `go mod verify`. |
 | `clean`, `help` | Remove artifacts; list targets. |
 
-`GO_TEST_TIMEOUT ?= 40m` is declared once. Identical-class recipes are
+`GO_TEST_TIMEOUT ?= 40m` is declared once. Identical-class recipe bodies are
 byte-identical across siblings and this module; integration recipes may vary
 in timeouts, package lists, and selectors. Integration recipes build with
 `-tags=integration` and set `ACP_GO_<SIBLING>_RUN_INTEGRATION=1`; only
 `test-integration-live` sets `ACP_GO_<SIBLING>_RUN_LIVE_TOKENS=1`, and every
 recipe clears the gate it does not select. `@latest` is forbidden in build
-tooling; pinned tool versions live in the Makefile and are byte-identical
-across siblings and this module. Every sibling uses the family Go directive
-and never commits a `toolchain` line.
+tooling; shared Go-tool versions live in the Makefile and are byte-identical
+across siblings and this module. Native-only build tools are pinned in the
+owning sibling's Makefile; native compiler pins live in its toolchain file.
+Every sibling uses the family Go directive and never commits a `toolchain` line.
+
+A bundled Rust helper adds native prerequisites without changing the shared
+recipe bodies or `audit` ordering: `native-build` on `build`, `native-test`
+on `test` and `coverage-check`, `native-lint` on `lint`, `native-fmt` on
+`fmt`, `native-fmt-check` on `fmt-check`, and `native-vuln` on `vuln`.
+Those targets MUST build with the lockfile, run deterministic native tests,
+check Clippy and formatting, and scan the native lockfile for vulnerabilities.
+`build` MUST stage both executables under `bin/`; CI MUST install the pinned
+native toolchain before `make audit`.
 
 ## Continuous Integration
 
@@ -208,10 +235,12 @@ or under `ACP_GO_FAMILY_ROOT`. It verifies:
 - byte-identical `LICENSE`, `.gitignore`, and `.golangci.yml`
   across siblings;
 - the Makefile audit composition, identical-class recipes, and integration gates;
+- bundled native helper manifests, toolchain and release/protocol checks,
+  native gate prerequisites, staging, and CI toolchain installation;
 - CLAUDE.md import shape, AGENTS.md section order, permitted root file
   stems, matching test stems, and scratch allocation ownership;
-- README process-option and flag coverage, tracked dot-file names, and CI
-  matrix, triggers, permissions, and action pins;
+- README process-option and flag coverage, tracked and untracked dot-file paths,
+  and CI matrix, triggers, permissions, and action pins;
 - that no sibling carries a copy of the lifecycle fixture battery;
 - the [evidence gate](07-testing.md#conformance-tests): a sibling whose
   `agent.go` advertises `updatesOutsidePrompt: true` carries

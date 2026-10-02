@@ -90,7 +90,7 @@ Every sibling selects exactly one strategy and records it in the
   logical ACP sessions, is started by the first operation that needs it, and
   is replaced by the next explicit operation after it exits.
 - **prompt runtime** — one native process serves one prompt: it attaches to
-  the remote conversation, submits the prompt, and is reaped before terminal
+  the native conversation, submits the prompt, and is reaped before terminal
   publication. Restore and observation attach without input. Nothing runs
   between prompts, so `updatesOutsidePrompt` is `false`.
 
@@ -212,16 +212,24 @@ including the complete retained 16 KiB stderr tail, and at most 2048 bytes
 for other causes. `statusCode` and `providerCode` appear only when the harness
 supplies them. Semantics are in [04-behavior.md](04-behavior.md#native-turn-failure).
 
+A native turn failure MUST take precedence over a simultaneous mirror commit
+failure. When a mirror commit failure supplies the `session/prompt` error,
+the sibling MUST use `wire.TurnFailed` with `cause: "transport"` and
+`message: "session mirror commit failed"`, except where the
+[image-output storage rule](04-behavior.md#image-failure-fatality) supplies the
+image failure details. A failed mirror commit on another surface MUST use
+the bare internal-failure token.
+
 Every other `-32603` a sibling emits carries a closed `data.error` token and
 the constant `message`:
 
 | Token | Condition | Additional members |
 |---|---|---|
 | `<vendor>_invalid_options` | The agent was constructed with options it will not serve under. `NewAgent` returns no error; the verdict is delivered at `initialize` and every session-establishing entry point. | `field` naming the refused option. |
-| `<vendor>_restore_failed` | A stored session could not be restored: on `session/load`, `session/resume`, or a lazy relaunch that re-hydrates native state before a prompt or config-option change. The entry is neither deleted nor tombstoned. | none |
+| `<vendor>_restore_failed` | Stored session data could not be decoded, verified, or hydrated: on `session/load`, `session/resume`, or a lazy relaunch before a prompt or config-option change. A native process that fails to start instead uses `class: "native_start"` on the internal-failure token. The entry is neither deleted nor tombstoned. | none |
 | `<vendor>_runtime_unavailable` | A shared native runtime the operation needs is gone and the sibling could not start a replacement. A runtime that merely exited is not this token; the next explicit operation starts one replacement ([05-lifecycle.md](05-lifecycle.md#shared-runtime-loss)). | none |
 | `<vendor>_session_poisoned` | The addressed session is poisoned ([03-sessions-and-store.md](03-sessions-and-store.md#store-formats)) and refuses every operation but `session/close` and `session/delete`. | `cause`, a closed token the sibling documents |
-| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a native [account-usage](02-wire-contract.md#account-usage) read that fails carries `class: "account_usage"`; a failed commit on session establishment, close, delete, list, or a config-option change carries the bare token. | Optional `class`; account-usage HTTP failures also carry `statusCode` and optional `retryAt` as defined in [02](02-wire-contract.md#account-usage) |
+| `<vendor>_internal_failure` | Every failure the sibling cannot classify above: a native process that fails to start carries `class: "native_start"`; a native [account-usage](02-wire-contract.md#account-usage) read that fails carries `class: "account_usage"`. | Optional `class`, from the sibling's documented closed set; account-usage HTTP failures also carry `statusCode` and optional `retryAt` as defined in [02](02-wire-contract.md#account-usage) |
 
 The data MUST NOT carry a bare unprefixed token, joined Go error text, native
 text, or a `message` member. [registry.md](registry.md#known-deviations)

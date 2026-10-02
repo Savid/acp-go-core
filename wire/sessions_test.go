@@ -29,6 +29,25 @@ func TestSessionPagesHaveStableOrder(t *testing.T) {
 	require.Equal(t, acp.SessionId("s50"), sessions[0].SessionId)
 }
 
+func TestSessionPagesOrderTimestampsChronologically(t *testing.T) {
+	t.Parallel()
+	sessions := []acp.SessionInfo{
+		{SessionId: "whole-second", UpdatedAt: new("2026-09-14T00:00:00Z")},
+		{SessionId: "fraction", UpdatedAt: new("2026-09-14T00:00:00.001Z")},
+		{SessionId: "same-fraction", UpdatedAt: new("2026-09-14T00:00:00.001000000Z")},
+		{SessionId: "offset", UpdatedAt: new("2026-09-14T01:00:00.002+01:00")},
+		{SessionId: "unknown"},
+	}
+	page, cursor, err := PaginateSessions(sessions, nil)
+	require.NoError(t, err)
+	require.Nil(t, cursor)
+	ids := make([]acp.SessionId, len(page))
+	for index, session := range page {
+		ids[index] = session.SessionId
+	}
+	require.Equal(t, []acp.SessionId{"offset", "fraction", "same-fraction", "whole-second", "unknown"}, ids)
+}
+
 func TestSessionRequestsReserveUntilReleased(t *testing.T) {
 	t.Parallel()
 	var requests SessionRequests

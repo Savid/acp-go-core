@@ -6,9 +6,10 @@ Before reading ACP input, a sibling MUST install its connection, logger, and
 metadata transport. Requests available at startup use the same strict decoding
 as later requests.
 
-All siblings return this shape; only vendor `_meta` details, the media bounds,
-the handoff key, and the lifecycle answer vary. The top-level `_meta` block is
-absent when the host omitted the lifecycle capability. `auth`,
+All siblings return this shape; vendor `_meta` details, optional session
+capabilities, the media bounds, the handoff key, and the lifecycle answer vary.
+The top-level `_meta` block is absent when the host omitted the lifecycle
+capability. `auth`,
 `mcpCapabilities`, `promptCapabilities`, and `sessionCapabilities` are
 struct-typed in the pinned SDK and are always present, empty where nothing is
 advertised.
@@ -31,7 +32,6 @@ advertised.
       "image": true
     },
     "sessionCapabilities": {
-      "additionalDirectories": {},
       "close": {},
       "delete": {},
       "list": {},
@@ -60,6 +60,9 @@ advertised.
 ```
 
 Advertise only features you implement and test. Omitted means unsupported.
+`sessionCapabilities.additionalDirectories` is `{}` only when implemented;
+otherwise it is absent and non-empty `additionalDirectories` is refused as
+`unsupported` naming that field.
 
 Position encoding: prefer `utf8`, else `utf16`, never `utf32`; default to
 `utf16` when the client offers neither.

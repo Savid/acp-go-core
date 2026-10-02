@@ -110,8 +110,10 @@ shape and output surfaces.
 
 ### Typed Image Output
 
-The consumer receives standard ACP image content with embedded base64 and a
-trustworthy MIME whatever the native artifact shape:
+For each implemented native output surface recorded in the
+[registry](registry.md#output-surfaces), the consumer receives standard ACP
+image content with embedded base64 and a trustworthy MIME whatever the native
+artifact shape:
 
 | Native result | Mapping |
 |---|---|

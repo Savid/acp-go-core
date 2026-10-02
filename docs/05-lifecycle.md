@@ -101,6 +101,12 @@ when a second `session/prompt` arrives for the same session
 ([watchlist](../tracking/upstream-acp.md)); a refused second prompt MUST NOT
 end the first.
 
+An admitted prompt retains its waiter and foreground gate until its native
+turn settles and completes the required mirror commit and lifecycle
+publication. Handler-context cancellation MUST NOT produce an early terminal
+response. If the request answers `-32800`, it does so after that cleanup;
+the [commit ordering](03-sessions-and-store.md#commit-ordering) still applies.
+
 ## Cancel Determinism
 
 1. `session/cancel` cancels local turn state immediately. It is

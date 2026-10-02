@@ -230,8 +230,8 @@ windows, is asserted to be the `not_reported` answer.
 ## Integration Live
 
 Env-gated; may spend tokens; runs the harness in an isolated temporary home
-with auth injected explicitly. Proves a full prompt turn, permissions,
-elicitation where supported, raw-event opt-in, store-backed load and resume,
+with auth injected explicitly. Proves a full prompt turn, permissions and
+elicitation where implemented, raw-event opt-in, store-backed load and resume,
 delete, and cancellation of a real long-running native process. Proves the
 [native resume outside ACP](#conformance-tests) scenario against the real
 harness. Plants a marker executable in a session-scoped directory passed

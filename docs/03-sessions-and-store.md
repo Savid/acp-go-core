@@ -117,7 +117,9 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 - Read native rows after turns and publish them with the current session
   configuration through `sessionlog.Commit`, using one atomic store generation.
-  Configuration changes commit even when no native rows were added. A successfully established empty conversation commits an empty main record with its configuration.
+  Configuration changes commit even when no native rows were added. A
+  successfully established empty conversation commits its native empty-state
+  representation with its configuration.
 - A sibling MUST NOT commit while foreground native input, a foreground-blocking
   permission or elicitation, or message generation is pending. Deferred native
   input that does not start execution MUST be preserved in the same atomic
@@ -190,6 +192,13 @@ trust. A poisoned session refuses every operation but `session/close` and
   A failed commit MUST preserve the previous generation. Recovery MUST NOT
   submit a user prompt, replace conflicting history, or treat an authentication,
   authorization, or transport failure as proof that native state is missing.
+- Before the first accepted input, a sibling MAY replace an untouched native
+  binding only when the harness explicitly refuses to resume that empty state
+  and the sibling verifies its exact native empty-conversation shape. The
+  sibling MUST preserve the prior native files and atomically commit the new
+  binding under the stable ACP id before submitting input or completing the
+  operation. Nonempty or malformed state and authentication, authorization,
+  or transport failures MUST NOT take this path.
 - A binding change MUST fence the previous lifecycle incarnation and its native
   deliveries. An unexpected id change during normal operation MUST fail.
 - New, load, and resume responses and each session-list entry MUST publish the
