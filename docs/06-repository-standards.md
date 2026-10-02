@@ -20,7 +20,7 @@
 |-- session.go
 |-- session_meta.go
 |-- session_prompt.go
-|-- cmd/acp-go-<vendor>/
+|-- cmd/acp-go-<sibling>/
 |   |-- main.go
 |   |-- otel.go
 |   |-- signals_unix.go
@@ -67,6 +67,11 @@ never records history, a plan, or an external reference.
 
 ## Surface Presence
 
+The structural gate MUST read repository identity, root package, vendor key,
+and store format from the [README family table](../README.md#the-family).
+Integration gate names use the uppercase repository suffix. Native package and
+fake-binary names use the vendor key.
+
 The structural gate checks these symbols and literals in every sibling:
 
 - `Options.InputHandoffRoot` and `func WithInputHandoffRoot(dir string) Option`
@@ -76,7 +81,7 @@ The structural gate checks these symbols and literals in every sibling:
 - The reserved literals `acp-go.dev/mediaEnvelope`, `acp-go.dev/handoff`,
   and `acp-go.dev/lifecycle` used in non-test Go, through the `wire`
   constants.
-- `cmd/acp-go-<vendor>/otel.go` obtains its providers from
+- `cmd/acp-go-<sibling>/otel.go` obtains its providers from
   `observer/exporters.Configure`.
 - The executable is resolved through `process.ResolveExecutable` against the
   base environment.
@@ -105,7 +110,7 @@ Agent scratch directories are never committed.
 
 ## Command Binary
 
-Binary name `acp-go-<vendor>`. Go `flag` single-dash syntax. Common flags:
+Binary name `acp-go-<sibling>`. Go `flag` single-dash syntax. Common flags:
 
 | Flag | Meaning |
 |---|---|
@@ -141,8 +146,8 @@ mode and agent selection are session config options, never flags.
 `GO_TEST_TIMEOUT ?= 40m` is declared once. Identical-class recipes are
 byte-identical across siblings and this module; integration recipes may vary
 in timeouts, package lists, and selectors. Integration recipes build with
-`-tags=integration` and set `ACP_GO_<VENDOR>_RUN_INTEGRATION=1`; only
-`test-integration-live` sets `ACP_GO_<VENDOR>_RUN_LIVE_TOKENS=1`, and every
+`-tags=integration` and set `ACP_GO_<SIBLING>_RUN_INTEGRATION=1`; only
+`test-integration-live` sets `ACP_GO_<SIBLING>_RUN_LIVE_TOKENS=1`, and every
 recipe clears the gate it does not select. `@latest` is forbidden in build
 tooling; pinned tool versions live in the Makefile and are byte-identical
 across siblings and this module. Every sibling uses the family Go directive

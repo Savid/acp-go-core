@@ -17,8 +17,8 @@ advertised.
 {
   "protocolVersion": "<acp.ProtocolVersionNumber>",
   "agentInfo": {
-    "name": "acp-go-<vendor>",
-    "title": "acp-go-<vendor>",
+    "name": "acp-go-<sibling>",
+    "title": "acp-go-<sibling>",
     "version": "<configured version>"
   },
   "authMethods": [],
