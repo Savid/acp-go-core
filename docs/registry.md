@@ -61,7 +61,7 @@ Only pi adds a vendor cause: `extension`.
 | opencode | Prompt HTTP rejection or assistant error records supply provider detail. Failed native history reads are transport errors, preserving native HTTP status as `statusCode`. |
 | opencodev2 | Native execution errors preserve `message`, `status` as `statusCode`, and `type` as `providerCode`. Prompt HTTP rejection supplies provider detail. Failed native usage reads are transport errors, preserving native HTTP status as `statusCode`. |
 | amp | A native receipt status `error` or an error stream record supplies provider detail. A refused frame, a missing receipt, or a failed mirror commit is `transport` with the adapter's cause. |
-| nanocodex | Typed provider and transport errors use fixed summaries without response bodies or credentials; native HTTP and WebSocket handshake rejection codes become `statusCode`, while bounded structured provider error codes become `providerCode`. Process exits retain the exit status and stderr tail. Malformed helper frames fail as transport errors. |
+| nanocodex | Typed provider and transport errors use fixed summaries without response bodies or credentials; native HTTP and WebSocket handshake rejection codes become `statusCode`. `providerCode` carries the provider's classification even when unrecognized: the first terminal candidate, else the first, among the canonical `error_type`, the error `code` (a string or an integer), the error object's `type`, and `incomplete_details.reason`, each limited to 128 ASCII letters, digits, dots, underscores, or hyphens. Process exits retain the exit status and stderr tail. Malformed helper frames fail as transport errors. |
 
 ## Raw Events
 
@@ -524,19 +524,28 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   custom provider endpoints.
   Gateway requests omit `prompt_cache_key`.
   Freeform patch tools are excluded on gateway routes; shell tools remain available.
-  Automatic compaction uses the native model threshold and a terminal
-  `compaction_trigger` on `/responses`, requiring provider support for encrypted
-  compaction items. Compacted context persists in the native rollout.
-  Transient gateway failures retry up to five total attempts with exponential
-  backoff and jitter, stopping after assistant or reasoning output is delivered.
-  Valid `Retry-After` and `retry-after-ms` delays up to 60 seconds are honored
-  with normal backoff as a minimum; longer delays fail without retrying early.
-  Cancellation interrupts requests and retry delays.
+  Automatic compaction uses the native model threshold. The helper requests a
+  plain-text summary through an ordinary `/responses` call that repeats the
+  generation request with `tool_choice:"none"`, stores it as a marked native
+  `compaction` item, and sends it to the provider as a prefixed user message, so
+  no provider compaction support is required. A session holding such an item
+  must stay on a gateway route. Compacted context persists in the native rollout.
+  Gateway generation and compaction retry connection failures, HTTP 408, 409,
+  429, and 5xx responses without `x-should-retry: false`, and `response.failed`
+  and error events, plus `response.incomplete` during generation, up to five
+  total attempts with exponential backoff and random jitter, stopping after
+  assistant or reasoning output is delivered. A failure retries unless its
+  `providerCode` is terminal: a three-digit code follows the same status rule,
+  and quota, authorization, model, invalid-request, context-window, image-input,
+  and content-policy codes and the `max_output_tokens` and `content_filter`
+  incomplete reasons are terminal. Valid `Retry-After` and `retry-after-ms`
+  delays up to 60 seconds are honored with normal backoff as a minimum; longer
+  delays fail without retrying early. Cancellation interrupts requests and retry
+  delays.
   The native model parser bounds supported models; gateway namespaces only
   change provider wire identifiers. Additional directories, approvals,
   and elicitation are not exposed. The forced-compaction flag after provider
-  context overflow is not retained across helper restarts. Providers must support
-  the compaction trigger; no local summary fallback is used.
+  context overflow is not retained across helper restarts.
 
 - **Nanocodex tools and limits:** Code Mode is disabled on every route. Prompt
   parameters are limited to 12 MiB of encoded JSON before admission. Gateway
