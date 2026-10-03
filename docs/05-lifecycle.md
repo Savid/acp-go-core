@@ -163,6 +163,11 @@ incarnation ends the stream.
 | Concurrent server-to-client calls per agent | 16 (default) | `acp.NewInvalidRequest({"error":"backpressure","limit":"client_calls"})` |
 
 A conflicting load or resume uses the `session_restore` limit token.
+An establishing request (`session/new`, `session/load`, or `session/resume`)
+reserves its active-session slot before launching, hydrating, or binding native
+state, and holds it until the session is installed or the request fails.
+In-flight establishments count toward the limit, so a refused request starts no
+native work.
 Prompt turns are serialized per session. Multiplexed runtimes admit concurrent
 turns on independent sessions. `WithConcurrencyLimits` may change the two configurable values;
 zero means default; negative fails construction. `wire.Backpressure` builds

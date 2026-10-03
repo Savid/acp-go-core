@@ -131,6 +131,11 @@ Every sibling proves, against the current ACP v1 schema:
   crossing cwd, callbacks, permissions, turn results, or cancel. On a
   multiplexed sibling, a native crash fails both in-flight turns exactly once
   and the next operation rebinds both through one replacement.
+- **Active-session backpressure.** With the active-session limit reached,
+  including by an establishing request still in flight, a further
+  `session/new`, `session/load`, or `session/resume` returns `active_sessions`
+  backpressure and starts no native process; a failed establishment frees its
+  slot.
 - **Native resume outside ACP.** A session created over ACP leaves native
   state the harness can resume natively after the adapter closes; a later
   `session/load` of that session through the adapter adopts rows the harness
