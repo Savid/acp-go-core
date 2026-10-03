@@ -66,8 +66,8 @@ check_sibling() {
   core_version=$(rg -o --no-line-number "^\s*$core_module (v\S+)" -r '$1' "$repo/go.mod" | head -1)
   if [[ -z "$core_version" ]]; then
     fail "$name: core module is not required"
-  elif ! git -C "$repo_root" merge-base --is-ancestor "$(core_ref "$core_version")" HEAD 2>/dev/null; then
-    fail "$name: core module $core_version is not reachable from the acp-go-core checkout"
+  elif ! git -C "$repo_root" merge-base --is-ancestor "$(core_ref "$core_version")" refs/heads/master 2>/dev/null; then
+    fail "$name: core module $core_version is not reachable from acp-go-core master"
   fi
   rg -q "^[[:space:]]*(replace[[:space:]]+)?$core_module([[:space:]]+[^[:space:]]+)?[[:space:]]+=>" "$repo/go.mod" && fail "$name: core module has a replace directive"
   rg -q "^package $package\$" "$repo/agent.go" || fail "$name: root package is not $package"

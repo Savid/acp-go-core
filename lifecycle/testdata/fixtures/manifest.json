@@ -81,6 +81,10 @@
       "invariant": "A blocking action projects requires_action only through its own accompanying state_update, and the cycle returns to running when the last blocker resolves."
     },
     {
+      "file": "cancelled-turn-settles-idle.json",
+      "invariant": "A cancelled turn settles at idle and retains its cancelled outcome."
+    },
+    {
       "file": "carrier-precedes-ordering.json",
       "invariant": "Carrier legality is structural, so an illegal carrier is reported ahead of the ordering failure the same frame carries."
     },

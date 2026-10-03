@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -91,6 +92,12 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 	}
 	defer root.Close()
 
+	lock, err := lockSeedRoot(root)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
 	names := slices.Sorted(maps.Keys(files))
 
 	manifest, err := loadSeedManifest(root)
@@ -165,12 +172,34 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 			}
 		}
 
-		if err := root.WriteFile(item.path, contents, 0o600); err != nil {
+		if err := writeSeedFile(root, item.path, contents); err != nil {
 			return fmt.Errorf("write seed file: %w", err)
 		}
 	}
 
 	return nil
+}
+
+func lockSeedRoot(root *os.Root) (*FileLock, error) {
+	file, err := root.OpenFile(seedManifestFileName+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open seed lock: %w", err)
+	}
+
+	for {
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+
+	if err != nil {
+		_ = file.Close()
+
+		return nil, fmt.Errorf("lock seed root: %w", err)
+	}
+
+	return &FileLock{file: file}, nil
 }
 
 // seedManifestMaxBytes bounds the manifest read back from a harness-owned
@@ -220,11 +249,15 @@ func writeSeedManifest(root *os.Root, manifest map[string]struct{}) error {
 	// A string slice cannot fail to marshal.
 	data, _ := json.Marshal(entries)
 
+	return writeSeedFile(root, seedManifestFileName, data)
+}
+
+func writeSeedFile(root *os.Root, name string, data []byte) error {
 	staging := seedManifestFileName + "." + rand.Text()
 
 	file, err := root.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("stage seed manifest: %w", err)
+		return fmt.Errorf("stage seed file: %w", err)
 	}
 
 	_, writeErr := file.Write(data)
@@ -237,16 +270,16 @@ func writeSeedManifest(root *os.Root, manifest map[string]struct{}) error {
 	}
 
 	if writeErr == nil {
-		writeErr = root.Rename(staging, seedManifestFileName)
+		writeErr = root.Rename(staging, name)
 	}
 
 	if writeErr != nil {
 		_ = root.Remove(staging)
 
-		return fmt.Errorf("write seed manifest: %w", writeErr)
+		return fmt.Errorf("publish seed file: %w", writeErr)
 	}
 
-	if directory, openErr := root.Open("."); openErr == nil {
+	if directory, openErr := root.Open(filepath.Dir(name)); openErr == nil {
 		_ = directory.Sync()
 		_ = directory.Close()
 	}

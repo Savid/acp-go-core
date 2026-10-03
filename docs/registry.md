@@ -15,7 +15,7 @@ changes its public surface.
 | opencode | multiplexed runtime | `opencode serve` authenticated loopback HTTP and global SSE; `opencode db` for scoped history reads | One server per Agent serves every session and holds a native-data-directory file lock. Short-lived native database commands read a conversation graph and its stability fence. Close releases a logical binding; a dead server is replaced on the next operation and the addressed session is rebound. |
 | opencodev2 | multiplexed runtime | OpenCode v2 `opencode serve`, authenticated loopback HTTP and global SSE | One server per Agent serves every session and holds a native-data-directory file lock. Native session export/import supplies persistence. Close releases a logical binding; the next operation replaces a dead server and rebinds the addressed session. |
 | amp | prompt runtime | `amp threads continue <thread> --execute --stream-json-input` stream-json plus a temporary native lifecycle plugin | One process per prompt. `session/new` runs `amp threads new` eagerly. Each prompt attaches to the remote thread, refuses to submit while remote work is active, and is reaped before export and publication; restore and observation attach without input. The plugin is installed under the native plugin directory named for the adapter process that wrote it and removed after its process is reaped; a plugin an earlier, now-dead adapter left behind is swept on the next start. |
-| nanocodex | prompt runtime | Bundled `acp-go-nanocodex-native` JSONL helper embedding the native Rust library | One process per prompt. Short observation processes initialize or restore native state without input. Go holds the native UUID lock under `CODEX_HOME/nanocodex/acp-locks/` from before hydration through helper exit and reap; an untouched binding replacement holds both UUID locks. Stopped-file snapshots reacquire the UUID lock through the store commit. The private helper caller owns this coordination. Rollouts live under `CODEX_HOME/sessions/`. |
+| nanocodex | prompt runtime | Bundled `acp-go-nanocodex-native` JSONL helper embedding the native Rust library | One process per prompt. Short observation processes initialize or restore native state without input. Go holds the native UUID lock under `CODEX_HOME/nanocodex/acp-locks/` from before hydration through helper exit and reap; an untouched binding replacement holds both UUID locks. Stopped-file snapshots reacquire the UUID lock through the store commit. The helper also holds a UUID writer lock until shutdown; hydration and stopped snapshots acquire it to exclude surviving helpers after an adapter crash. Rollouts live under `CODEX_HOME/sessions/`. |
 
 Native bindings name the Claude conversation UUID, Codex thread id, Hermes stored
 session key, OpenCode session ID, Pi or Nanocodex session UUID, or Amp thread id. The
@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
 | opencodev2 | Native session exports plus a `config` subpath | The main record contains one raw export per conversation in a parent-first graph, including the root even when empty. Configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, model, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. The helper appends an `acp_checkpoint` rollout row after native shutdown to retain snapshot metadata and context accounting; restoration uses it only at its matching final file boundary. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, model, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, and context accounting; `config.checkpoint` mirrors the latest copy. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -236,8 +236,9 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   subtracts cache reads and writes from input only when both figures are
   reported. Native cache-write zeros are omitted because the native type loses
   whether the provider supplied them; positive cache writes are retained.
-  The terminal prompt result carries native turn totals; no settlement usage
-  update is emitted.
+  Compaction usage contributes to the terminal turn total but has no per-call
+  usage update. The terminal prompt result carries native turn totals; no
+  settlement usage update is emitted.
 
 ### Response ids
 
@@ -510,7 +511,7 @@ establishment (claude, hermes, opencode, opencodev2, pi).
 | opencode | Final native messages and parts are reduced from sync events. Local images are captured in the same generation under `config`; missing or invalid stored artifacts fail load. |
 | opencodev2 | Native exports provide projected messages with text, reasoning, tool content, and user files. Local image bytes or refusals commit with configuration; missing or invalid stored artifacts fail load. |
 | amp | User and assistant messages of the mirrored export are projected with their tool calls and inline images through the output gate; compaction summaries are not projected. Historic usage comes from the configuration record. |
-| nanocodex | Native input-acceptance events provide user content; response items provide assistant text, visible reasoning summaries, function/custom calls, and textual tool results. Inline user images pass through the output gate. |
+| nanocodex | Native input-acceptance events provide user content; response items and the suffix after the latest user item in compacted replacement history provide assistant text, visible reasoning summaries, function/custom calls, and textual tool results. Items removed by native mid-turn compaction before persistence cannot replay. Inline user images pass through the output gate. |
 
 ## Known Deviations
 
@@ -522,18 +523,26 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   to localhost and loopback IP addresses. Native ChatGPT authentication refuses
   custom provider endpoints.
   Gateway requests omit `prompt_cache_key`.
-  Native Code Mode/freeform patch tools are excluded; shell tools remain available.
+  Freeform patch tools are excluded on gateway routes; shell tools remain available.
   Automatic compaction uses the native model threshold and a terminal
   `compaction_trigger` on `/responses`, requiring provider support for encrypted
   compaction items. Compacted context persists in the native rollout.
   Transient gateway failures retry up to five total attempts with exponential
   backoff and jitter, stopping after assistant or reasoning output is delivered.
-  Valid `Retry-After` delays up to 60 seconds are honored; longer delays fail
-  without retrying early. Cancellation interrupts requests and retry delays.
+  Valid `Retry-After` and `retry-after-ms` delays up to 60 seconds are honored
+  with normal backoff as a minimum; longer delays fail without retrying early.
+  Cancellation interrupts requests and retry delays.
   The native model parser bounds supported models; gateway namespaces only
   change provider wire identifiers. Additional directories, approvals,
-  elicitation, and delegated-agent lifecycle events are not exposed.
-  In-memory tool state and shell sessions end with each prompt's helper.
+  and elicitation are not exposed. The forced-compaction flag after provider
+  context overflow is not retained across helper restarts. Providers must support
+  the compaction trigger; no local summary fallback is used.
+
+- **Nanocodex tools and limits:** Code Mode is disabled on every route. Prompt
+  parameters are limited to 12 MiB of encoded JSON before admission. Gateway
+  responses require SSE and limit each event and accumulated response event data
+  to 4 MiB. Native rollout rows containing whole histories are not protocol frames
+  and are not subject to the helper's 32 MiB frame bound.
 
 - **Nanocodex persistence:** full native-file reads preserve a complete final
   JSON row without a newline and discard only a bounded invalid unterminated

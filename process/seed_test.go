@@ -1,10 +1,14 @@
 package process
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,6 +89,67 @@ func TestWriteSeedFilesRefusesSymlinksAndStagesTheManifest(t *testing.T) {
 		names = append(names, entry.Name())
 	}
 
-	require.ElementsMatch(t, []string{seedManifestFileName, "away", "config.toml", "dangling.conf", "linked.conf"}, names, "no manifest staging file is left behind")
+	require.ElementsMatch(t, []string{seedManifestFileName, seedManifestFileName + ".lock", "away", "config.toml", "dangling.conf", "linked.conf"}, names, "no manifest staging file is left behind")
 	require.ErrorAs(t, WriteSeedFiles(dir, map[string]string{seedManifestFileName + ".staging": "x"}), &seedErr, "manifest staging names are reserved")
+}
+
+func TestWriteSeedFilesConcurrentLaunches(t *testing.T) {
+	t.Parallel()
+	contents := strings.Repeat("shared seed contents\n", 4096)
+	for range 20 {
+		dir := t.TempDir()
+		start := make(chan struct{})
+		var workers sync.WaitGroup
+		for index := range 8 {
+			workers.Go(func() {
+				<-start
+				err := WriteSeedFiles(dir, map[string]string{
+					"shared.conf":                        contents,
+					fmt.Sprintf("worker-%d.conf", index): "worker",
+				})
+				if !assert.NoError(t, err) {
+					return
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "shared.conf"))
+				assert.NoError(t, err)
+				assert.Equal(t, contents, string(data))
+			})
+		}
+		close(start)
+		workers.Wait()
+		root, err := os.OpenRoot(dir)
+		require.NoError(t, err)
+		manifest, err := loadSeedManifest(root)
+		require.NoError(t, root.Close())
+		require.NoError(t, err)
+		require.Len(t, manifest, 9)
+	}
+}
+
+func TestWriteSeedFilesPublishesCompleteFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	first, second := strings.Repeat("a", 1<<18), strings.Repeat("b", 1<<18)
+	require.NoError(t, WriteSeedFiles(dir, map[string]string{"config": first}))
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Go(func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				data, err := os.ReadFile(filepath.Join(dir, "config"))
+				if !assert.NoError(t, err) || !assert.True(t, string(data) == first || string(data) == second, "reader saw a partial seed file") {
+					return
+				}
+			}
+		}
+	})
+	for range 20 {
+		assert.NoError(t, WriteSeedFiles(dir, map[string]string{"config": second}))
+		assert.NoError(t, WriteSeedFiles(dir, map[string]string{"config": first}))
+	}
+	close(done)
+	readers.Wait()
 }

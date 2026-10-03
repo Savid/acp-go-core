@@ -237,7 +237,7 @@ format restores after deleting all native state:
 | Messages | User and assistant messages, parts, tool parts, usage, and stop or error state restore well enough for load replay and resume. |
 | Auxiliary state | Todos and permission history needed for display survive. |
 | Model settings | Provider id, model id, mode, and relevant config restore. |
-| Pending-input absence | Commit is blocked while a foreground-blocking action or message generation is pending. |
+| Pending-input absence | Commit is blocked while a foreground-blocking action or foreground message generation is pending. |
 | Native state deletion | The proof deletes the native state before hydrating. |
 | Native binding | Different ACP and native ids route load, resume, prompts, events, and native continuation correctly. Replacement recovery retains the ACP id and commits the verified history with its new native id. |
 | Lifecycle snapshot | The restored state reconstructs a truthful `lifecycle_snapshot`, or the sibling resumes only at an idle boundary. |
