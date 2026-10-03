@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
 | opencodev2 | Native session exports plus a `config` subpath | The main record contains one raw export per conversation in a parent-first graph, including the root even when empty. Configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, model, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, model, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. The helper appends an `acp_checkpoint` rollout row after native shutdown to retain snapshot metadata and context accounting; restoration uses it only at its matching final file boundary. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -522,8 +522,14 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   to localhost and loopback IP addresses. Native ChatGPT authentication refuses
   custom provider endpoints.
   Gateway requests omit `prompt_cache_key`.
-  Native Code Mode/freeform patch tools, remote compaction, and automatic
-  retries are unavailable on these routes. Shell tools remain available.
+  Native Code Mode/freeform patch tools are excluded; shell tools remain available.
+  Automatic compaction uses the native model threshold and a terminal
+  `compaction_trigger` on `/responses`, requiring provider support for encrypted
+  compaction items. Compacted context persists in the native rollout.
+  Transient gateway failures retry up to five total attempts with exponential
+  backoff and jitter, stopping after assistant or reasoning output is delivered.
+  Valid `Retry-After` delays up to 60 seconds are honored; longer delays fail
+  without retrying early. Cancellation interrupts requests and retry delays.
   The native model parser bounds supported models; gateway namespaces only
   change provider wire identifiers. Additional directories, approvals,
   elicitation, and delegated-agent lifecycle events are not exposed.
