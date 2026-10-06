@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
 | opencodev2 | Native session exports plus a `config` subpath | The main record contains one raw export per conversation in a parent-first graph, including the root even when empty. Configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, model, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, and update time. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -72,7 +72,9 @@ size. OpenCode replaces image data URLs with their encoded size. Pi empties
 image `data` members and adds their decoded size as `sizeBytes`. Amp has no
 permanent channel: it emits the admitted stream-json records of the current
 prompt process and removes image payloads. Nanocodex forwards typed native events
-inside the current prompt and replaces inline image URLs with an omission marker.
+inside the current prompt and replaces inline image URLs with an omission marker;
+in a gateway-model session it reports the gateway model in place of the base
+model and removes the cost estimates.
 
 ## Lifecycle Extension
 
@@ -231,11 +233,12 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   tokens, replaced by the result frame's usage when the prompt settles.
 
 - **nanocodex:** each native `model.call.completed` supplies its Responses usage.
-  `used` is that call's total tokens; `size` is the configured native context
-  window when reported for the selected model, otherwise zero. The breakdown
-  subtracts cache reads and writes from input only when both figures are
-  reported. Native cache-write zeros are omitted because the native type loses
-  whether the provider supplied them; positive cache writes are retained.
+  `used` is that call's total tokens; `size` is the session's configured
+  context window, else the native model's default window, else zero for a
+  gateway model with no configured window. The breakdown subtracts cache reads
+  and writes from input only when both figures are reported. Native cache-write
+  zeros are omitted because the native type loses whether the provider supplied
+  them; positive cache writes are retained.
   Compaction usage contributes to the terminal turn total but has no per-call
   usage update. The terminal prompt result carries native turn totals; no
   settlement usage update is emitted.
@@ -316,7 +319,7 @@ Every sibling's provider and gateway reads follow the
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`; startup requires the native `OutputFormatJsonSchema` schema. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
 | opencodev2 | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Not advertised: OpenCode v2 has no schema-enforced prompt API. `outputSchema` is refused; no `WithSessionOutputSchema` helper is exported. |
 | amp | `mode` | Not advertised; `outputSchema` and `model` are refused. |
-| nanocodex | `thinking`, `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile` | Not advertised; `outputSchema` is refused. |
+| nanocodex | `baseModel`, `contextWindow`, `thinking`, `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile` | Not advertised; `outputSchema` is refused. |
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
 thread's `config.shell_environment_policy.set` on `thread/start` and
@@ -358,7 +361,7 @@ entries fail.
 | opencode | `GET /config/providers` per binding | Provider-qualified IDs, native context window and variant names; configured and selected IDs append after catalog entries. |
 | opencodev2 | Location-scoped `GET /api/model` per binding | Provider-qualified IDs, `limit.context`, `limit.output`, and native variant names; configured and selected IDs append after catalog entries. |
 | amp | none | No catalog: Amp selects models through modes. `WithDefaultModel` and `WithConfiguredModels` refuse nonempty values. |
-| nanocodex | The helper enumerates native `Model::ALL`, appends the selected native model if absent, and reports native effort support during initialization | `modelId`, configured native context window, and supported effort levels; configured and default IDs append after native entries. The native model parser accepts selections outside its default picker; gateway namespaces are separate from native model IDs. |
+| nanocodex | The helper enumerates native `Model::ALL`, appends the selected native or gateway model if absent, and reports effort support during initialization | `modelId`, context window, and supported effort levels; native rows carry their default window and the selected native row the configured one, and a gateway model's row carries its base model's efforts and only a configured window. Configured and default IDs append after native entries. The native model parser accepts selections and aliases outside its default picker; aliases are native IDs, and gateway namespaces apply only to native model IDs. |
 
 Hermes, OpenCode, and Pi refuse a host-listed id with no provider prefix at construction.
 
@@ -524,14 +527,23 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   custom provider endpoints.
   Gateway requests omit `prompt_cache_key`.
   Freeform patch tools are excluded on gateway routes; shell tools remain available.
-  Automatic compaction uses the native model threshold. The helper requests a
-  plain-text summary through an ordinary `/responses` call that repeats the
-  generation request with `tool_choice:"none"`, stores it as a marked native
-  `compaction` item, and sends it to the provider as a prefixed user message, so
-  no provider compaction support is required. After the first committed turn,
-  load and resume refuse an `apiBaseUrl` or `websocketUrl` change that moves a
-  session between a custom endpoint and the native route; changes between custom
-  endpoints remain allowed. Compacted context persists in the native rollout.
+  Gateway routes accept a non-native model ID as a gateway model, sent verbatim
+  with the settings of a native base model. Gateway-model requests rewrite the
+  developer prompt's first sentence, `You are <name>, ...`, to name the gateway
+  model while keeping the agent name; a base prompt without that sentence fails
+  session setup. For a gateway model, usage `size` and the model row's
+  `contextWindow` are the window the caller configures, not verified against
+  the gateway model; with none configured, `size` is 0.
+  Automatic compaction runs at 90% of the session's context window for GPT
+  models and GPT bases; other models compact only after an overflow. The helper
+  requests a plain-text summary through an ordinary `/responses` call that
+  repeats the generation request with `tool_choice:"none"`, stores it as a
+  marked native `compaction` item, and sends it to the provider as a prefixed
+  user message, so no provider compaction support is required. After the first
+  committed turn, load and resume refuse an `apiBaseUrl` or `websocketUrl`
+  change that moves a session between a custom endpoint and the native route;
+  changes between custom endpoints remain allowed. Compacted context persists
+  in the native rollout.
   Gateway generation and compaction retry connection failures, HTTP 408, 409,
   429, and 5xx responses without `x-should-retry: false`, and `response.failed`
   and error events, plus `response.incomplete` during generation, up to five
@@ -544,11 +556,9 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   delays up to 60 seconds are honored with normal backoff as a minimum; longer
   delays fail without retrying early. Cancellation interrupts requests and retry
   delays.
-  The native model parser bounds supported models; gateway namespaces only
-  change provider wire identifiers. Additional directories, approvals,
-  and elicitation are not exposed. A turn that fails with a native
-  context-window error or a `context_length_exceeded` or `context_window_exceeded`
-  `providerCode` records a pending compaction in the checkpoint sidecar, and the
+  Additional directories, approvals, and elicitation are not exposed. A turn
+  that fails with a native context-window error or a `context_length_exceeded`
+  or `context_window_exceeded` `providerCode` records a pending compaction in the checkpoint sidecar, and the
   next prompt, in any later helper, runs native compaction before submitting its
   input. A gateway summary request that exceeds the context window is resent
   without its oldest turn, at most three times; native history is unchanged.
