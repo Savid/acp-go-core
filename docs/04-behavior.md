@@ -209,7 +209,9 @@ never fabricated. An adapter that cannot determine it sets `size: 0`.
   figure. It reports nothing when no call has followed a compaction.
 - **Cancellation ends reporting.** A cancelled cycle emits no `usage_update`
   after the cancel.
-- `cost`, when the harness reports one, is the session's cumulative cost.
+- `cost` is the session's cumulative cost in USD as the harness or its provider
+  prices it; an unpriced call adds nothing. An adapter MUST NOT price calls
+  itself. An update without `cost` leaves the last reported figure in place.
 - `PromptResponse.usage`, when the harness reports per-call usage, is the
   turn's consumption summed over its calls.
 
