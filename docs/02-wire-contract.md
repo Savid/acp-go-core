@@ -533,6 +533,36 @@ characters, or a `sizeBytes` that is not a non-negative integer is
 `invalid_handoff` before any file is touched. With the root unset every
 handoff-form block is `invalid_handoff`; there is no fallback transport.
 
+## Compaction Envelope
+
+A live top-level context compaction MUST use notification `_meta` member
+`acp-go.dev/compaction`, beside `sessionId` and `update`. `wire.Compaction` is
+its shape; `wire.CompactionCarrier` is its carrier. The update MUST be an
+otherwise empty `session_info_update`, with no title, timestamp, conversation
+content, usage, or lifecycle envelope.
+
+```json
+{"sessionId":"session-id","update":{"sessionUpdate":"session_info_update"},"_meta":{"acp-go.dev/compaction":{"compactionId":"opaque-attempt-id","status":"completed","trigger":"auto","contextBefore":150000,"contextAfter":24000}}}
+```
+
+| Member | Requirement |
+|---|---|
+| `compactionId` | Required nonempty opaque ID, unique per attempt within the session, including across restoration and native restarts. |
+| `status` | Required: `in_progress`, `completed`, `failed`, or `cancelled`. |
+| `trigger` | Optional `auto` or `manual`, only when native evidence identifies it. |
+| `contextBefore` | Optional nonnegative integer tokens reported by the harness before compaction. |
+| `contextAfter` | Optional nonnegative integer tokens reported by the harness after compaction. |
+
+Each notification MUST include all optional facts known for its attempt.
+Unknown members MUST be omitted; a reported zero MUST remain zero. Native
+context counts MAY be harness estimates; they are not necessarily measured.
+An adapter MUST NOT estimate missing counts or substitute summary-call usage
+for context.
+
+This member requires no capability negotiation. Siblings MUST NOT advertise an
+upstream compaction capability for it. Its [publication rules](04-behavior.md#context-compaction)
+and [native coverage](registry.md#context-compaction) define when it appears.
+
 ## Lifecycle Envelope
 
 `acp-go.dev/lifecycle` is the family's ordered session-lifecycle extension.

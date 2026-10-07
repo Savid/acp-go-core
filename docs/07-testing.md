@@ -148,6 +148,30 @@ after the native rows, one the native list already carries published once,
 and construction refusing an empty, whitespace, or duplicate id. Coverage
 never depends on the developer's own environment for a credential or a route.
 
+### Context Compaction
+
+Core tests MUST prove the exact [carrier](02-wire-contract.md#compaction-envelope)
+through pinned SDK serialization and deserialization, omission of unknown facts,
+preservation of reported zeroes, reserved caller-metadata rejection, and refusal
+of a start without a correlation key.
+
+Each sibling that publishes [compaction](04-behavior.md#context-compaction)
+MUST prove its [supported native mappings](registry.md#context-compaction)
+using recorded or synthetic native events:
+
+- Every supported start and terminal outcome, including terminal-only sources
+  and native cancellation where available.
+- Correlated IDs, native publication order, repeated-delivery deduplication
+  where native identity permits it, and distinct IDs for separate attempts,
+  including retries and terminal-only failures.
+- Exclusion of subagent and side-session events.
+- Historical replay preserves native transcript content and emits no live
+  compaction metadata. Live recovery compaction, where supported, MUST be
+  tested separately, including work before prompt acceptance.
+- Transport delivery preserves compaction metadata without adding conversation
+  content. Existing usage tests continue to prove context resets, cost, and
+  per-call accounting independently of compaction notifications.
+
 ### Image Gates
 
 Every sibling proves these deterministic gates with fixtures and fake native

@@ -289,6 +289,19 @@ Each sibling's source for the gateway's response id that chunks carry as
   Native default-route and replayed chunks carry none because their source
   exposes no attributable response id at publication.
 
+## Context Compaction
+
+| Sibling | Starts | Completions | Failures | Cancellations | Native mapping and optional facts |
+|---|---|---|---|---|---|
+| claude | No | Yes | No | No | Top-level `compact_boundary`, deduplicated by event UUID; `compact_metadata.trigger`, `pre_tokens`, and optional `post_tokens` supply trigger and context counts. |
+| codex | No | Yes | No | No | Live `contextCompaction` item completion proves successful replacement, deduplicated by turn and item ID. Native failures and interruptions can leave an item without completion, so starts are not published. Turn outcomes supply no compaction outcome. No trigger or context counts. |
+| pi | Yes | Yes | Yes | Yes | Ordered `compaction_start` / `compaction_end`; result means completed, `aborted` means cancelled, and `errorMessage` without a result means failed. `manual` maps to manual; `threshold` and `overflow` map to auto. Result `tokensBefore` supplies pre-context; `estimatedTokensAfter` supplies Pi's estimate of resulting context. Overflow retry exhaustion supplies a failure without a new start. An end without an outcome supplies no terminal notification. |
+| opencode | Yes | Yes | Yes | Yes | Summary assistant creation starts an attempt keyed by message ID. Its error supplies failure or `MessageAbortedError` cancellation. Ordered `session.compacted` supplies success; summary completion alone does not. The parent compaction part's `auto` flag supplies auto/manual. No context counts. |
+| opencodev2 | Yes | Yes | Yes | Yes | Ordered `session.compaction.started`, `session.compaction.ended`, and `session.compaction.failed`, deduplicated by event ID and correlated by native compaction message identity and ordered terminals. Failure types `aborted` and `compaction.interrupted` mean cancelled. Reason supplies auto/manual. Summary tokens supply no context count. |
+| nanocodex | Yes | Yes | Yes | Yes | Native `model.compaction.*` events, correlated by native request, model-call index, and start sequence; includes pre-acceptance recovery. Native cancellation is classified before sanitizing the failed event. Starts supply `active_context_tokens` as pre-context. No trigger or resulting context count. |
+| hermes | No | No | No | No | Gateway progress has no reliable terminal outcome: `compacted` also closes aborted work, and ready status identifies no outcome. |
+| amp | No | No | No | No | The consumed plugin lifecycle supplies no explicit compaction signal. Summary records in exports supply historical content only. |
+
 ## Account Usage
 
 | Sibling | Scope | Native source and mapping | Native `plan` | Native `usageAllowed` |

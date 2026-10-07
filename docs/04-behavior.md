@@ -258,6 +258,33 @@ Account allowance is a separate on-demand read,
 [`_<vendor>/accountUsage`](02-wire-contract.md#account-usage); it never rides
 `usage_update`.
 
+## Context Compaction
+
+Adapters MUST publish the [compaction envelope](02-wire-contract.md#compaction-envelope)
+for observed top-level compaction signals of the addressed session when the
+native surface can identify an outcome. A source that exposes only progress
+MUST NOT publish compaction notifications. A source that cannot distinguish
+how started attempts end MUST publish outcomes only. Subagent and side-session
+compactions MUST NOT be attributed to the parent.
+
+`wire.Compactions.Publish` MUST correlate native attempt keys, retain reported
+facts, assign opaque IDs, and deduplicate transitions. Adapters MUST supply
+signals in native order through the session's ordered publisher and keep keys
+distinct across native runs. Each observed attempt MUST produce at most one
+`in_progress` and at most one terminal notification, with the same ID. Distinct
+attempts, including retries within a prompt, MUST remain distinct. A source
+that exposes only an outcome MUST publish that outcome without inventing a
+start. A terminal notification MUST reflect the native outcome; silence,
+transport loss, missing usage, and ACP cancellation alone prove no outcome.
+Connection loss can leave a start without a terminal notification.
+
+Compaction publication MUST preserve [usage accounting](#usage-updates),
+including context resets and call breakdowns. Historical replay MUST NOT emit
+live compaction metadata or synthesize conversation or thought chunks solely
+to announce compaction. Native transcript content follows the replay contract.
+A new compaction during restoration or recovery follows these live publication
+rules, including work before prompt acceptance.
+
 ## Assistant Text Streaming
 
 `agent_message_chunk` and `agent_thought_chunk` are append-only deltas:
