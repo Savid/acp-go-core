@@ -236,9 +236,10 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   `used` is that call's total tokens; `size` is the session's configured
   context window, else the native model's default window, else zero for a
   gateway model with no configured window. The breakdown subtracts cache reads
-  and writes from input only when both figures are reported. Native cache-write
-  zeros are omitted because the native type loses whether the provider supplied
-  them; positive cache writes are retained.
+  and writes from input only when both figures are reported. Gateway responses
+  retain reported cache reads and writes, including zero, and omit absent counts.
+  Native routes omit cache-write zeros because the native type loses whether
+  the provider supplied them; positive cache writes are retained.
   Compaction usage contributes to the terminal turn total but has no per-call
   usage update. The terminal prompt result carries native turn totals; no
   settlement usage update is emitted. `cost` is the cumulative sum of the
