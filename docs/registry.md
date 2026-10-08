@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. |
 | opencodev2 | Native session exports plus a `config` subpath | The main record contains one raw export per conversation in a parent-first graph, including the root even when empty. Configuration holds cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, title, started state, update time, and the cumulative cost once a call is priced. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, tool-shell environment names, title, started state, update time, and the cumulative cost once a call is priced. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -337,7 +337,7 @@ Every sibling's provider and gateway reads follow the
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`; startup requires the native `OutputFormatJsonSchema` schema. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
 | opencodev2 | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Not advertised: OpenCode v2 has no schema-enforced prompt API. `outputSchema` is refused; no `WithSessionOutputSchema` helper is exported. |
 | amp | `mode` | Not advertised; `outputSchema` and `model` are refused. |
-| nanocodex | `baseModel`, `contextWindow`, `thinking`, `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile` | Not advertised; `outputSchema` is refused. |
+| nanocodex | `baseModel`, `contextWindow`, `thinking`, `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile`, `shellEnv` (names of helper environment variables the native tool shell receives despite its sensitive-name filter; an explicit empty list travels so it overrides the helper's environment selection) | Not advertised; `outputSchema` is refused. |
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
 thread's `config.shell_environment_policy.set` on `thread/start` and
@@ -347,7 +347,9 @@ the session's native process environment (amp, claude, hermes, nanocodex, pi); o
 `shell.env` plugin reading the addressed session’s metadata, following parent
 IDs for child sessions (opencode); or an `execute.before` plugin that resolves
 that carrier through native parent IDs and sets the addressed session’s
-`/environment` before each tool execution (opencodev2).
+`/environment` before each tool execution (opencodev2). The nanocodex tool
+shell strips variables whose names have sensitive parts unless `shellEnv`
+names them.
 
 Codex's local execution tools prepend the installed package's `codex-path`
 directory after applying the session environment policy. The live test
