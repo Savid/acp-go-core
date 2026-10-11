@@ -11,10 +11,11 @@ fail() { printf 'FAIL %s\n' "$*"; status=1; }
 skip() { printf 'SKIP %s\n' "$*"; }
 pass() { printf 'PASS %s\n' "$*"; }
 
-pin() { rg -o --no-line-number "^\| $1 \| \`([^\`]+)\`" -r '$1' "$repo_root/README.md" | head -1; }
-sdk_pin=$(pin 'ACP SDK'); go_pin=$(pin 'Go directive')
-[[ -n "$sdk_pin" && -n "$go_pin" ]] || { fail "README shared pins are missing"; exit 1; }
-sdk_module=${sdk_pin%@*}; sdk_version=${sdk_pin#*@}; go_version=${go_pin#go }
+core_mod="$repo_root/go.mod"
+go_version=$(rg -o --no-line-number '^go (\S+)$' -r '$1' "$core_mod")
+sdk_module=github.com/coder/acp-go-sdk
+sdk_version=$(rg -o --no-line-number "^\s*$sdk_module (v\S+)$" -r '$1' "$core_mod")
+[[ -n "$go_version" && -n "$sdk_version" ]] || { fail "acp-go-core: go.mod names no Go directive or ACP SDK version"; exit 1; }
 core_module=$(rg -o --no-line-number '^module (\S+)$' -r '$1' "$repo_root/go.mod")
 [[ -n "$core_module" ]] || { fail "acp-go-core: go.mod names no module"; exit 1; }
 
@@ -35,9 +36,8 @@ done < <(sed -nE 's/^\| \[acp-go-([a-z0-9]+)\]\([^)]*\) \| `([^`]+)` \| `([^`]+)
 
 account_usage_rows=$(awk '/^## Account Usage$/{f=1;next} /^## /{f=0} f' "$repo_root/docs/registry.md")
 
-rg -q "^go $go_version\$" "$repo_root/go.mod" || fail "acp-go-core: go directive differs from README pin"
+[[ $go_version =~ ^[0-9]+\.[0-9]+$ ]] || fail "acp-go-core: go directive $go_version carries a patch component"
 rg -q '^toolchain ' "$repo_root/go.mod" && fail "acp-go-core: toolchain line present"
-rg -q "^\s*$sdk_module $sdk_version\$" "$repo_root/go.mod" || fail "acp-go-core: ACP SDK pin differs from README"
 [[ -f "$repo_root/lifecycle/testdata/fixtures/manifest.json" ]] || fail "acp-go-core: lifecycle fixture battery missing"
 
 check_sibling() {
@@ -59,9 +59,9 @@ check_sibling() {
     esac
   done
   rg -q "^module github.com/savid/$name\$" "$repo/go.mod" || fail "$name: module path is not github.com/savid/$name"
-  rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from README pin"
+  rg -q "^go $go_version\$" "$repo/go.mod" || fail "$name: go directive differs from acp-go-core"
   rg -q '^toolchain ' "$repo/go.mod" && fail "$name: toolchain line present"
-  rg -q "^\s*$sdk_module $sdk_version\$" "$repo/go.mod" || fail "$name: ACP SDK pin differs from README"
+  rg -q "^\s*$sdk_module $sdk_version\$" "$repo/go.mod" || fail "$name: ACP SDK version differs from acp-go-core"
   local core_version
   core_version=$(rg -o --no-line-number "^\s*$core_module (v\S+)" -r '$1' "$repo/go.mod" | head -1)
   if [[ -z "$core_version" ]]; then

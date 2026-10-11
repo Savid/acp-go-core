@@ -11,7 +11,7 @@ shared across harnesses live here.
 
 | Source | Authority |
 |---|---|
-| [README.md](README.md) | Family membership and shared version pins |
+| [README.md](README.md) | Family membership and the shared-version rule |
 | `docs/*.md` other than the registry | Current family contract |
 | [docs/registry.md](docs/registry.md) | Per-sibling facts that differ between siblings |
 | [lifecycle/testdata/fixtures/manifest.json](lifecycle/testdata/fixtures/manifest.json) | Canonical lifecycle reducer battery |
@@ -93,8 +93,8 @@ make drift-check     # family structural contract across sibling checkouts
 - A rule enters the contract when a sibling proves it. The registry records
   only current facts that differ between siblings; uniform rules, native
   versions, and verification runs are not recorded there.
-- Keep the README family table, shared pins, and registry consistent. Pin
-  values live only in the README.
+- Keep the README family table, shared pins, and registry consistent.
+  Dependency versions live only in `go.mod` files.
 - Preserve useful heading anchors and repair callers when a heading changes.
 - Keep secrets, credential values, and user-specific paths out of docs.
 

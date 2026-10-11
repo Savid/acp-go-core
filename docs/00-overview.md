@@ -138,9 +138,9 @@ repository names and store formats. Every sibling claims exactly one of each:
 
 ### Shared Pins
 
-The ACP SDK and the Go directive are pinned family-wide in the
-[README](../README.md#shared-pins), and every sibling requires one shared
-version of this module. Wire behavior follows protocol version and
+The ACP SDK version and the Go directive are shared family-wide as the
+[README](../README.md#shared-pins) states, and every sibling requires one
+shared version of this module. Wire behavior follows protocol version and
 capabilities; `Unstable` Go symbols may back stable methods only where this
 contract permits it. A pin move covers every sibling and reruns every
 conformance suite.

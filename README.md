@@ -41,21 +41,21 @@ reducer.
 
 ## Shared Pins
 
-Every sibling moves together on these pins. Values live only in this table.
-
-| Pin | Value |
-|---|---|
-| ACP SDK | `github.com/coder/acp-go-sdk@v0.13.5` |
-| Go directive | `go 1.27.1` |
+Every sibling moves together on the ACP SDK
+(`github.com/coder/acp-go-sdk`), the Go directive, and this module. Versions
+live only in `go.mod` files: this module's `go.mod` sets the family's ACP SDK
+version and Go directive, and every sibling matches it. The Go directive is the
+language version the module needs, without a patch component or a
+`toolchain` line.
 
 Every sibling MUST require one shared version of this module, a commit on its
 `master`, without a `replace` directive for it; `make drift-check` compares
 the siblings. Local development may use an untracked Go workspace.
 
-A pin change covers every sibling and reruns each conformance suite. Shared
-direct dependencies such as OpenTelemetry and testify also move together;
-their versions live in `go.mod` files and are compared by
-`make drift-check`.
+A shared-version change covers every sibling and reruns each conformance
+suite. Shared direct dependencies such as OpenTelemetry and testify also move
+together; `make drift-check` requires one version of every module across the
+family's `go.mod` files.
 
 ### Protocol Posture
 
