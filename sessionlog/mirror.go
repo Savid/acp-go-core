@@ -71,10 +71,13 @@ func (m *Mirror) Adopt(rows [][]byte, record any, next Cursor) error {
 
 // Commit reads the native rows source returns and publishes them with the
 // configuration record returns for that read. record runs under the mirror's
-// lock after the read, so the configuration matches the rows it commits. The
-// commit is durable when it returns; a failure leaves the previous generation
-// intact. A history shorter than the committed one fails unless the mirror
-// was Reset.
+// lock after the read, so the configuration matches the rows it commits. When
+// an append fails, Commit reads the whole history again and computes its
+// configuration for that read, so source and record may each run more than
+// once in one Commit; a caller applies anything they decide only after Commit
+// returns nil. The commit is durable when it returns; a failure leaves the
+// previous generation intact. A history shorter than the committed one fails
+// unless the mirror was Reset.
 func (m *Mirror) Commit(ctx context.Context, source Source, record func(Tail) (any, error)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

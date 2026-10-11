@@ -3,6 +3,7 @@ package sessionlog
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -184,10 +185,12 @@ func TestCutTornTailKeepsOnlyCompleteLines(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, tc := range map[string]struct{ before, after string }{
-		"torn":      {"{\"a\":1}\n{\"b\":", "{\"a\":1}\n"},
-		"complete":  {"{\"a\":1}\n", "{\"a\":1}\n"},
-		"all torn":  {"{\"a\":", ""},
-		"long torn": {"{\"a\":1}\n" + strings.Repeat("y", 3*cursorCheckBytes), "{\"a\":1}\n"},
+		"torn":                {"{\"a\":1}\n{\"b\":", "{\"a\":1}\n"},
+		"complete":            {"{\"a\":1}\n", "{\"a\":1}\n"},
+		"all torn":            {"{\"a\":", ""},
+		"unterminated record": {"{\"a\":1}\n{\"b\":2}", "{\"a\":1}\n{\"b\":2}\n"},
+		"unterminated scalar": {"{\"a\":1}\n42", "{\"a\":1}\n"},
+		"long torn":           {"{\"a\":1}\n" + strings.Repeat("y", 3*cursorCheckBytes), "{\"a\":1}\n"},
 	} {
 		path := filepath.Join(dir, name+".jsonl")
 		appendFile(t, path, tc.before)
@@ -200,6 +203,11 @@ func TestCutTornTailKeepsOnlyCompleteLines(t *testing.T) {
 
 	require.NoError(t, CutTornTail(filepath.Join(dir, "absent.jsonl")))
 	require.NoFileExists(t, filepath.Join(dir, "absent.jsonl"))
+}
+
+func TestCursorsAreNotComparable(t *testing.T) {
+	t.Parallel()
+	require.False(t, reflect.TypeFor[Cursor]().Comparable(), "a position may hold a map, so == would panic")
 }
 
 func TestPositionCarriesANonFileSourceValue(t *testing.T) {

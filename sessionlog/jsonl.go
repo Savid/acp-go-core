@@ -18,8 +18,10 @@ const cursorCheckBytes = 4096
 // Cursor records how far a source has read. A JSONL cursor holds the offset
 // after the last complete line, the file's identity, and checksums of the
 // first and last bytes before the offset. A non-file source carries its own
-// position. The zero Cursor is the start of any history.
+// position. The zero Cursor is the start of any history. Cursors are not
+// comparable: a position may hold a map.
 type Cursor struct {
+	_        [0]func()
 	offset   int64
 	file     os.FileInfo
 	head     [sha256.Size]byte
@@ -180,10 +182,14 @@ func digestRange(file *os.File, start, end int64) ([sha256.Size]byte, error) {
 	return sha256.Sum256(window), nil
 }
 
-// CutTornTail truncates the JSONL file at path after its last complete line,
-// removing the bytes a writer that died mid-line left behind, so the next line
-// a harness appends starts on a line of its own. A missing file is left
-// missing.
+// CutTornTail ends the JSONL file at path on a line boundary, so the next line
+// a harness appends starts on a line of its own. A trailing line without its
+// newline that is one complete JSON object is a record whose newline was not
+// written, and is terminated; any other unterminated tail is bytes a writer
+// that died mid-record left behind, and is cut. A harness that writes a record
+// without its newline in the same write can leave a record that still parses
+// as complete while more was due; that harness must not rely on this cut. A
+// missing file is left missing.
 func CutTornTail(path string) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
@@ -227,6 +233,19 @@ func cutTornTail(file *os.File) error {
 
 	if end == info.Size() {
 		return nil
+	}
+
+	tail := make([]byte, info.Size()-end)
+	if _, err := file.ReadAt(tail, end); err != nil {
+		return fmt.Errorf("read native log: %w", err)
+	}
+
+	if validRow(tail) {
+		if _, err := file.WriteAt([]byte{'\n'}, info.Size()); err != nil {
+			return fmt.Errorf("terminate native record: %w", err)
+		}
+
+		return file.Sync()
 	}
 
 	if err := file.Truncate(end); err != nil {

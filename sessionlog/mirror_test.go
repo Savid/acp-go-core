@@ -411,3 +411,34 @@ func TestMirrorHydrateCutsATornNativeTail(t *testing.T) {
 	require.NoError(t, mirror.Commit(ctx, File(path), fixed(record)), "the next native line starts on a line of its own")
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
 }
+
+func TestMirrorRereadsSourceAndRecordAfterAFailedAppend(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"other":1}`), []byte(`{"other":2}`)}, testRecord{Model: "other"}))
+	appendFile(t, path, "{\"b\":2}\n")
+
+	var reads, records int
+
+	source := func(from Cursor) (Tail, error) {
+		reads++
+
+		return ReadJSONL(path, from)
+	}
+	record := func(Tail) (any, error) {
+		records++
+
+		return testRecord{Model: "one"}, nil
+	}
+
+	require.NoError(t, mirror.Commit(ctx, source, record))
+	require.Equal(t, 2, reads, "the refused append rereads the whole history")
+	require.Equal(t, 2, records, "the configuration is computed for each read")
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
+}

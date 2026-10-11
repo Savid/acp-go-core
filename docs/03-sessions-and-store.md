@@ -152,7 +152,11 @@ a non-file source continues from the value it stored with
 the whole history when it is given the zero cursor or cannot continue.
 
 `Commit` reads the source, then computes the configuration for what it read
-under the mirror's lock, so rows and configuration match. A commit:
+under the mirror's lock, so rows and configuration match. A failed append
+makes `Commit` read the whole history again and compute its configuration
+anew, so the source and the configuration callback may each run more than once
+per commit; a sibling applies what they decide only after `Commit` returns
+nil. A commit:
 
 - appends only the rows after the committed ones, replacing the configuration
   record only when its encoding changed, when the native history still extends
@@ -173,8 +177,9 @@ generation.
 
 `ReadJSONL` returns only complete lines after its cursor and reads the whole
 file again when it was replaced, truncated, or rewritten within the first or
-last 4 KiB before the cursor. `CutTornTail` truncates a file after its last
-complete line. `WriteJSONL` materializes rows by staging and renaming.
+last 4 KiB before the cursor. `CutTornTail` ends a file on a line boundary: it
+terminates an unterminated last line that is one complete JSON object and cuts
+any other. `WriteJSONL` materializes rows by staging and renaming.
 
 ### Commit Ordering
 
