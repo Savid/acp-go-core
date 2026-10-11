@@ -259,6 +259,9 @@ leaves the mirror holding the stored generation, so the next commit appends.
 
 A session's title is its first prompt's first non-empty text, whitespace
 collapsed and bounded to 256 runes by `wire.NormalizeTitle`.
+A stored session's title lives in its configuration record, so
+`session/list` reads stored sessions through `sessionlog.LoadRecord` without
+decoding native rows.
 `session/list` orders live and stored sessions by descending `updatedAt`,
 then ascending session id, and paginates through `wire.PaginateSessions`.
 Cursors are raw URL-base64 offsets. An empty cwd filter includes every cwd.
