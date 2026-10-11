@@ -65,7 +65,7 @@ beside its own scoped key, never inside `SessionKey`.
 |---|---|
 | `Load` | Atomically returns the latest complete session generation as subpath → entries, preserving row order; nil when missing or tombstoned. A live empty main record is present at key `""`. Returned maps, slices, and bytes belong to the caller. |
 | `Replace` | Atomically publishes one session's complete generation and is durable before return. It copies the entries it receives; the caller keeps ownership and may reuse them. Uncommitted generations are invisible; failure preserves the previous generation. |
-| `Append` | Atomically extends the main record of the committed generation with `entries` and replaces each listed non-main subpath, keeping unlisted subpaths; durable before return; copies what it receives. Fails without writing when the main record does not hold exactly `base` entries or the session has no committed generation. A tombstoned session writes nothing and succeeds. Failure preserves the previous generation. |
+| `Append` | Atomically extends the main record of the committed generation with `entries` and replaces each listed subpath, keeping unlisted subpaths as they are; durable before return; copies what it receives; advances `UpdatedAtUnixMilli`. Fails without writing when the main record does not hold exactly `base` entries or the session has no committed generation. `base` compares counts only: it refuses a generation of another length, not one of the same length with other rows. A tombstoned session writes nothing and succeeds. Failure preserves the previous generation. |
 | `Delete` | Durable tombstone first. Deleting main cascades to all subpaths; deleting a subpath deletes only it. Missing keys succeed. |
 | `ListSessions` | Committed, non-tombstoned main keys, newest `UpdatedAtUnixMilli` first, then `SessionID`. |
 
@@ -77,7 +77,8 @@ Every store call MUST be bounded by `SessionStoreTimeout`. `sessionlog.Load`,
 they make.
 
 All timestamps are Unix milliseconds. An empty `SessionID` makes delete a
-no-op and load return nil; every replace fails `ErrSessionIDRequired`.
+no-op and load return nil; every replace and append fails
+`ErrSessionIDRequired`.
 
 ### Replacement Shape
 
@@ -93,6 +94,12 @@ A `Replace` addresses exactly one session:
   and returns success. The store enforces this itself.
 - External stores stage generation entries and publish a final commit marker;
   reads pin one committed generation for every returned subpath and ignore uncommitted generations.
+
+An `Append` addresses exactly one session the same way: `main.Subpath` equals
+`SessionStoreMainSubpath`, and every replacement key names a distinct non-main
+subpath of `main.SessionID`. A listed subpath has its tombstone cleared; an
+unlisted tombstoned subpath stays tombstoned. Refusals happen before any
+write.
 
 `storetest.Run` proves these rules against any implementation.
 
@@ -135,26 +142,38 @@ trust. A poisoned session refuses every operation but `session/close` and
 
 ### Incremental Mirror
 
-A `Mirror` remembers the rows and configuration it committed: their count, a
-digest of the rows, and, for an append-only JSONL file read through
-`sessionlog.File` or `ReadJSONL`, a cursor after the last complete line. A
-commit:
+A `Mirror` remembers what the store holds: the committed row count, a digest
+of the rows, a digest of the encoded configuration, and the source cursor
+after the last committed row. A `Source` reads the rows after a cursor:
+`sessionlog.File` continues an append-only JSONL file from a byte offset, and
+a non-file source continues from the value it stored with
+`sessionlog.Position`, such as the last committed message id. A source returns
+the whole history when it is given the zero cursor or cannot continue.
+
+`Commit` reads the source, then computes the configuration for what it read
+under the mirror's lock, so rows and configuration match. A commit:
 
 - appends only the rows after the committed ones, replacing the configuration
   record only when its encoding changed, when the native history still extends
-  the committed rows;
+  the committed rows; only those new rows are validated;
 - writes nothing when neither rows nor configuration changed;
 - otherwise republishes the whole generation through `Replace`: on the first
   commit, after `Reset`, when the native history no longer extends the
   committed rows, or when an append fails;
 - fails, leaving the generation intact, when the native history is shorter
-  than the committed one. A native binding change calls `Reset` first.
+  than the committed one. A native binding change, or a source that rewrites
+  its history in place, calls `Reset` first.
+
+A restore that loaded the generation tells the mirror with `Adopt`, which
+writes nothing, so the next commit appends. `Mirror.Hydrate` applies the
+[hydrate rules](#hydrate-in) to an append-only JSONL file, cutting a torn
+trailing line before the harness writes after it, and adopts the stored
+generation.
 
 `ReadJSONL` returns only complete lines after its cursor and reads the whole
-file again when it was replaced, truncated, or rewritten before the cursor.
-`WriteJSONL` materializes rows by staging and renaming. `Mirror.Hydrate`
-applies the [hydrate rules](#hydrate-in) to an append-only JSONL file and
-leaves the mirror holding the stored generation, so the next commit appends.
+file again when it was replaced, truncated, or rewritten within the first or
+last 4 KiB before the cursor. `CutTornTail` truncates a file after its last
+complete line. `WriteJSONL` materializes rows by staging and renaming.
 
 ### Commit Ordering
 

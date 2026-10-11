@@ -3,6 +3,7 @@ package sessionlog
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -152,4 +153,58 @@ func TestWriteJSONLPublishesRowsAndContinuesFromItsCursor(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "a failed write leaves no staging file and keeps the previous file")
+}
+
+func TestReadJSONLRereadsAFileRewrittenBeforeItsLastWindow(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	filler := `{"pad":"` + strings.Repeat("x", 2*cursorCheckBytes) + `"}`
+	appendFile(t, path, "{\"a\":1}\n"+filler+"\n")
+
+	first, err := ReadJSONL(path, Cursor{})
+	require.NoError(t, err)
+
+	// Same inode, same length, a different first row: only the head window
+	// changed.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	require.NoError(t, err)
+	_, err = file.WriteString("{\"a\":2}\n" + filler + "\n{\"b\":3}\n")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+
+	tail, err := ReadJSONL(path, first.Next)
+	require.NoError(t, err)
+	require.True(t, tail.Full, "a rewrite of the head is read in full")
+	require.Equal(t, `{"a":2}`, string(tail.Rows[0]))
+	require.Len(t, tail.Rows, 3)
+}
+
+func TestCutTornTailKeepsOnlyCompleteLines(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	for name, tc := range map[string]struct{ before, after string }{
+		"torn":      {"{\"a\":1}\n{\"b\":", "{\"a\":1}\n"},
+		"complete":  {"{\"a\":1}\n", "{\"a\":1}\n"},
+		"all torn":  {"{\"a\":", ""},
+		"long torn": {"{\"a\":1}\n" + strings.Repeat("y", 3*cursorCheckBytes), "{\"a\":1}\n"},
+	} {
+		path := filepath.Join(dir, name+".jsonl")
+		appendFile(t, path, tc.before)
+		require.NoError(t, CutTornTail(path))
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, tc.after, string(data), name)
+	}
+
+	require.NoError(t, CutTornTail(filepath.Join(dir, "absent.jsonl")))
+	require.NoFileExists(t, filepath.Join(dir, "absent.jsonl"))
+}
+
+func TestPositionCarriesANonFileSourceValue(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, Cursor{}.Position())
+	require.Equal(t, 42, Position(42).Position())
+	require.Zero(t, Position(42).Offset())
 }

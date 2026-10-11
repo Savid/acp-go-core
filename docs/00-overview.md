@@ -136,13 +136,13 @@ repository names and store formats. Every sibling claims exactly one of each:
 | Extension prefix | `_<vendor>/` | `_pi/` |
 | Store format | `<vendor>-<native-state-kind>-v1` | `pi-session-jsonl-v1` |
 
-### Shared Pins
+### Shared Versions
 
 The ACP SDK version and the Go directive are shared family-wide as the
-[README](../README.md#shared-pins) states, and every sibling requires one
+[README](../README.md#shared-versions) states, and every sibling requires one
 shared version of this module. Wire behavior follows protocol version and
 capabilities; `Unstable` Go symbols may back stable methods only where this
-contract permits it. A pin move covers every sibling and reruns every
+contract permits it. A shared-version change covers every sibling and reruns every
 conformance suite.
 
 ## Uniform Error Shapes

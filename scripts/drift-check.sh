@@ -89,6 +89,7 @@ check_sibling() {
   fi
   rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
   rg -q 'process\.ForwardedSignals\(\)' "$repo/cmd/$name/main.go" || fail "$name: forwarded signals are not core's"
+  rg -q --type go -g '!*_test.go' 'StartSessionStore\([^,]+, *"' "$repo" && fail "$name: a session store observation names its own operation"
   resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\([^;]*, base\)' "$repo" || true)
   [[ -n "$resolving" ]] || fail "$name: executable resolution does not use core with the base environment"
   while IFS= read -r f; do

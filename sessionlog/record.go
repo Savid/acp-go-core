@@ -42,7 +42,8 @@ func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, rec
 }
 
 // LoadRecord decodes only the required configuration into record, for callers
-// such as session listing that need no native rows.
+// such as session listing that need no native rows. The store still reads the
+// whole generation; only the rows' validation and copies are skipped.
 func LoadRecord(ctx context.Context, store acpcore.SessionStore, sessionID string, record any) (found bool, err error) {
 	generation, err := loadGeneration(ctx, store, sessionID, record)
 
@@ -154,11 +155,11 @@ func uniqueValue(decoder *json.Decoder, depth int) error {
 	return err
 }
 
-// Reconcile returns the longer log when both agree at every shared position
+// reconcile returns the longer log when both agree at every shared position
 // and reports whether the native log is the one to keep. The native log may
 // contain rows written outside ACP; a shorter native log is replaced by the
 // store's copy.
-func Reconcile(native, stored [][]byte) (rows [][]byte, nativeWins bool, err error) {
+func reconcile(native, stored [][]byte) (rows [][]byte, nativeWins bool, err error) {
 	for index := 0; index < len(native) && index < len(stored); index++ {
 		if !bytes.Equal(native[index], stored[index]) {
 			return nil, false, fmt.Errorf("native row %d disagrees with the store", index)

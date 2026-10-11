@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -44,6 +45,9 @@ func Run(t *testing.T, newStore func(t *testing.T) acpcore.SessionStore) {
 		{"append owns the entries it receives", appendOwnsEntries},
 		{"load reads one complete generation during appends", concurrentAppend},
 		{"append requires a session id", appendEmptySessionID},
+		{"append continues from a shorter replacement's base", appendAfterShorterReplace},
+		{"append advances the session's update time", appendAdvancesUpdatedAt},
+		{"append keeps a deleted subpath deleted unless it lists it", appendAfterSubpathDelete},
 	}
 
 	for _, tc := range cases {
@@ -514,4 +518,60 @@ func concurrentAppend(t *testing.T, store acpcore.SessionStore) {
 		require.NoError(t, err)
 		require.Equal(t, marker(len(generation[""])), generation[configSubpath], "a reader observed a partial append")
 	}
+}
+
+func appendAfterShorterReplace(t *testing.T, store acpcore.SessionStore) {
+	t.Helper()
+
+	ctx := context.Background()
+	require.NoError(t, publish(ctx, store, "s", entries(`{"a":1}`, `{"b":2}`)))
+	require.NoError(t, store.Append(ctx, main("s"), 2, entries(`{"c":3}`), nil))
+	require.NoError(t, publish(ctx, store, "s", entries(`{"x":1}`)))
+
+	require.Error(t, store.Append(ctx, main("s"), 3, entries(`{"y":2}`), nil), "the base before the replacement is stale")
+	require.NoError(t, store.Append(ctx, main("s"), 1, entries(`{"y":2}`), nil))
+
+	got, err := loadEntries(ctx, store, main("s"))
+	require.NoError(t, err)
+	require.Equal(t, entries(`{"x":1}`, `{"y":2}`), got)
+}
+
+func appendAdvancesUpdatedAt(t *testing.T, store acpcore.SessionStore) {
+	t.Helper()
+
+	ctx := context.Background()
+	require.NoError(t, publish(ctx, store, "s", entries(`{"a":1}`)))
+
+	before, err := store.ListSessions(ctx)
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, store.Append(ctx, main("s"), 1, entries(`{"b":2}`), nil))
+
+	after, err := store.ListSessions(ctx)
+	require.NoError(t, err)
+	require.Len(t, after, 1)
+	require.Greater(t, after[0].UpdatedAtUnixMilli, before[0].UpdatedAtUnixMilli)
+}
+
+func appendAfterSubpathDelete(t *testing.T, store acpcore.SessionStore) {
+	t.Helper()
+
+	ctx := context.Background()
+	require.NoError(t, publish(ctx, store, "s", entries(`{}`),
+		acpcore.SessionStoreReplacement{Key: sub("s", "a"), Entries: entries(`{"v":1}`)},
+		acpcore.SessionStoreReplacement{Key: sub("s", "b"), Entries: entries(`{"v":1}`)},
+	))
+	require.NoError(t, store.Delete(ctx, sub("s", "a")))
+	require.NoError(t, store.Delete(ctx, sub("s", "b")))
+	require.NoError(t, store.Append(ctx, main("s"), 1, entries(`{"row":2}`),
+		[]acpcore.SessionStoreReplacement{{Key: sub("s", "b"), Entries: entries(`{"v":2}`)}}))
+
+	generation, err := store.Load(ctx, "s")
+	require.NoError(t, err)
+	require.Equal(t, map[string][]acpcore.SessionStoreEntry{
+		"":  entries(`{}`, `{"row":2}`),
+		"b": entries(`{"v":2}`),
+	}, generation, "an unlisted deleted subpath stays deleted; a listed one is live again")
 }

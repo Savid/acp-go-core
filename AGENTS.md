@@ -93,7 +93,7 @@ make drift-check     # family structural contract across sibling checkouts
 - A rule enters the contract when a sibling proves it. The registry records
   only current facts that differ between siblings; uniform rules, native
   versions, and verification runs are not recorded there.
-- Keep the README family table, shared pins, and registry consistent.
+- Keep the README family table, shared versions, and registry consistent.
   Dependency versions live only in `go.mod` files.
 - Preserve useful heading anchors and repair callers when a heading changes.
 - Keep secrets, credential values, and user-specific paths out of docs.
@@ -131,7 +131,7 @@ make drift-check     # family structural contract across sibling checkouts
 ## Ask Before
 
 Unless already authorized, ask before changing family policy in `docs/01`
-through `docs/07`, shared pins, family membership, the numbering of `docs/`,
+through `docs/07`, shared versions, family membership, the numbering of `docs/`,
 or an exported Go symbol. A correction supported by the current contract and
 code does not require a new decision. Do independent preparation before
 asking about an unresolved decision.

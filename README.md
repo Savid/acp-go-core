@@ -39,7 +39,7 @@ A sibling imports what it needs and re-exports nothing. A host imports the
 root package for the store types it implements and `lifecycle` for the
 reducer.
 
-## Shared Pins
+## Shared Versions
 
 Every sibling moves together on the ACP SDK
 (`github.com/coder/acp-go-sdk`), the Go directive, and this module. Versions

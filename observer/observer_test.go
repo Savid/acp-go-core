@@ -50,11 +50,11 @@ func TestObserverRecordsSpansAndMetrics(t *testing.T) {
 	_, finishPrompt := observer.StartPrompt(ctx, nil, "model")
 	finishPrompt(PromptResult{StopReason: "end_turn", InputTokens: 3, OutputTokens: 2})
 
-	_, finishStore := observer.StartSessionStore(ctx, "replace")
+	_, finishStore := observer.StartSessionStore(ctx, SessionStoreCommit)
 	finishStore(errors.New("store down"))
 
 	observer.RecordProcessExit(ctx, "exit", nil)
-	observer.recordSessionStore(ctx, time.Now(), "load", nil)
+	observer.recordSessionStore(ctx, time.Now(), SessionStoreLoad, nil)
 
 	spans := exporter.GetSpans()
 	require.NotEmpty(t, spans)

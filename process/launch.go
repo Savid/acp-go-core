@@ -153,14 +153,15 @@ func (p *Process) StderrTail() string {
 }
 
 // LaunchFailure explains a launch that failed before the harness named name was
-// ready. A process that already exited is reported as such; either way the
-// stderr tail, where a dying or stalled harness states its reason, follows
-// err.
+// ready. A failed handshake often means the harness is exiting, so it waits up
+// to stderrFlushWait for the process to be reaped; one that exited is reported
+// as such. Either way the stderr tail, where a dying or stalled harness states
+// its reason, follows err.
 func LaunchFailure(p *Process, name string, err error) error {
 	select {
 	case <-p.Done():
 		err = fmt.Errorf("%s exited before it was ready: %w", name, err)
-	default:
+	case <-time.After(stderrFlushWait):
 	}
 
 	if tail := p.StderrTail(); tail != "" {

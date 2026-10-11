@@ -108,6 +108,8 @@ The structural gate checks these symbols and literals in every sibling:
   directories come from `process.ScratchDir` or `process.ScratchPath`.
 - Native process death reports its stderr tail through
   `process.(*Process).StderrTail`.
+- Session store observations name an `observer.SessionStore*` operation:
+  `commit`, `load`, `load_record`, or `list`.
 - A sibling that exports `AccountUsageMethod` in non-test Go spells it
   `"_<vendor>/accountUsage"`, decodes through
   `wire.DecodeAccountUsageRequest`, advertises

@@ -459,14 +459,26 @@ func (o *Observer) StartElicitation(ctx context.Context) (context.Context, func(
 	}
 }
 
+// SessionStoreOperation names one observed session store operation.
+type SessionStoreOperation string
+
+// The session store operations a sibling observes: a mirror commit, a full
+// load, a configuration-only load, and a listing.
+const (
+	SessionStoreCommit     SessionStoreOperation = "commit"
+	SessionStoreLoad       SessionStoreOperation = "load"
+	SessionStoreLoadRecord SessionStoreOperation = "load_record"
+	SessionStoreList       SessionStoreOperation = "list"
+)
+
 // recordSessionStore records one session store operation.
-func (o *Observer) recordSessionStore(ctx context.Context, start time.Time, operation string, err error) {
+func (o *Observer) recordSessionStore(ctx context.Context, start time.Time, operation SessionStoreOperation, err error) {
 	if o == nil {
 		return
 	}
 
 	attrs := []attribute.KeyValue{
-		attribute.String(attrSessionStoreOp, operation),
+		attribute.String(attrSessionStoreOp, string(operation)),
 		attribute.String(attrOutcome, outcomeFromError(err)),
 	}
 	if errType := errorType(err); errType != "" {
@@ -478,9 +490,9 @@ func (o *Observer) recordSessionStore(ctx context.Context, start time.Time, oper
 }
 
 // StartSessionStore begins one session store operation observation.
-func (o *Observer) StartSessionStore(ctx context.Context, operation string) (context.Context, func(error)) {
+func (o *Observer) StartSessionStore(ctx context.Context, operation SessionStoreOperation) (context.Context, func(error)) {
 	start := time.Now()
-	ctx, finishSpan := o.startSpan(ctx, "acp.session_store."+operation, attribute.String(attrSessionStoreOp, operation))
+	ctx, finishSpan := o.startSpan(ctx, "acp.session_store."+string(operation), attribute.String(attrSessionStoreOp, string(operation)))
 
 	return ctx, func(err error) {
 		finishSpan(err)

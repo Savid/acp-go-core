@@ -11,19 +11,31 @@ import (
 	"path/filepath"
 )
 
-// cursorCheckBytes is how much of the file before a cursor its checksum covers.
+// cursorCheckBytes is how much of the file at each end of the read prefix a
+// cursor's checksums cover.
 const cursorCheckBytes = 4096
 
-// Cursor records how far an append-only JSONL file has been read: the offset
-// after the last complete line, the file's identity, and a checksum of the
-// bytes just before the offset. The zero Cursor is the start of any file.
+// Cursor records how far a source has read. A JSONL cursor holds the offset
+// after the last complete line, the file's identity, and checksums of the
+// first and last bytes before the offset. A non-file source carries its own
+// position. The zero Cursor is the start of any history.
 type Cursor struct {
-	offset int64
-	file   os.FileInfo
-	check  [sha256.Size]byte
+	offset   int64
+	file     os.FileInfo
+	head     [sha256.Size]byte
+	check    [sha256.Size]byte
+	position any
 }
 
-// Offset is the byte offset after the last complete line read.
+// Position is the cursor of a non-file source that has read through v, such
+// as the last row id or sequence it returned.
+func Position(v any) Cursor { return Cursor{position: v} }
+
+// Position returns the value a non-file source stored with Position, or nil.
+func (c Cursor) Position() any { return c.position }
+
+// Offset is the byte offset after the last complete line a JSONL read
+// returned.
 func (c Cursor) Offset() int64 { return c.offset }
 
 // Tail is what one read returned: the rows after the cursor it was given, or
@@ -41,6 +53,7 @@ type Tail struct {
 
 // Source reads native rows after from. A source returns a Full tail when from
 // is the zero Cursor, and may return one whenever it cannot continue from.
+// A continuation returns only rows after from, with the cursor after them.
 type Source func(from Cursor) (Tail, error)
 
 // File is the source for an append-only JSONL file at path.
@@ -56,8 +69,11 @@ func Rows(rows [][]byte) Source {
 // ReadJSONL reads the complete lines appended to the JSONL file at path after
 // from. It reads every line from the start, and reports Full, when from is the
 // zero Cursor or the file no longer extends what from read: it was replaced,
-// truncated, or rewritten before the cursor. A trailing line without its
-// newline is left for a later read. A missing file reads as an empty history.
+// truncated, or rewritten within the first or last 4 KiB before the cursor. A
+// rewrite confined to the bytes between those windows is not detected; a
+// source that rewrites its file in place resets its mirror. A trailing line
+// without its newline is left for a later read. A missing file reads as an
+// empty history.
 func ReadJSONL(path string, from Cursor) (Tail, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -96,12 +112,12 @@ func ReadJSONLFile(file *os.File, from Cursor, size int64) (Tail, error) {
 	start := int64(0)
 
 	if from.offset > 0 && from.offset <= size && from.file != nil && os.SameFile(from.file, info) {
-		check, checkErr := checksum(file, from.offset)
+		head, check, checkErr := checksums(file, from.offset)
 		if checkErr != nil {
 			return Tail{}, checkErr
 		}
 
-		if check == from.check {
+		if head == from.head && check == from.check {
 			start = from.offset
 		}
 	}
@@ -119,7 +135,7 @@ func ReadJSONLFile(file *os.File, from Cursor, size int64) (Tail, error) {
 	next := Cursor{offset: start + int64(consumed), file: info}
 
 	if next.offset > 0 {
-		if next.check, err = checksum(file, next.offset); err != nil {
+		if next.head, next.check, err = checksums(file, next.offset); err != nil {
 			return Tail{}, err
 		}
 	}
@@ -142,16 +158,82 @@ func splitLines(data []byte) ([][]byte, int) {
 	return rows, end
 }
 
-// checksum digests the bytes of file just before offset.
-func checksum(file *os.File, offset int64) ([sha256.Size]byte, error) {
-	start := max(offset-cursorCheckBytes, 0)
-	window := make([]byte, offset-start)
+// checksums digest the first and the last cursorCheckBytes of file before
+// offset.
+func checksums(file *os.File, offset int64) (head, tail [sha256.Size]byte, err error) {
+	if head, err = digestRange(file, 0, min(offset, cursorCheckBytes)); err != nil {
+		return head, tail, err
+	}
+
+	tail, err = digestRange(file, max(offset-cursorCheckBytes, 0), offset)
+
+	return head, tail, err
+}
+
+func digestRange(file *os.File, start, end int64) ([sha256.Size]byte, error) {
+	window := make([]byte, end-start)
 
 	if _, err := file.ReadAt(window, start); err != nil {
 		return [sha256.Size]byte{}, fmt.Errorf("read native log: %w", err)
 	}
 
 	return sha256.Sum256(window), nil
+}
+
+// CutTornTail truncates the JSONL file at path after its last complete line,
+// removing the bytes a writer that died mid-line left behind, so the next line
+// a harness appends starts on a line of its own. A missing file is left
+// missing.
+func CutTornTail(path string) error {
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = file.Close() }()
+
+	return cutTornTail(file)
+}
+
+func cutTornTail(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	end := info.Size()
+	window := make([]byte, min(end, cursorCheckBytes))
+
+	for end > 0 {
+		start := max(end-int64(len(window)), 0)
+		chunk := window[:end-start]
+
+		if _, err := file.ReadAt(chunk, start); err != nil {
+			return fmt.Errorf("read native log: %w", err)
+		}
+
+		if index := bytes.LastIndexByte(chunk, '\n'); index >= 0 {
+			end = start + int64(index) + 1
+
+			break
+		}
+
+		end = start
+	}
+
+	if end == info.Size() {
+		return nil
+	}
+
+	if err := file.Truncate(end); err != nil {
+		return fmt.Errorf("cut torn native line: %w", err)
+	}
+
+	return file.Sync()
 }
 
 // WriteJSONL publishes rows as the JSONL file at path, one row per line,
@@ -212,7 +294,7 @@ func writeRows(file *os.File, rows [][]byte) (Cursor, error) {
 		return Cursor{}, err
 	}
 
-	check, err := checksum(file, info.Size())
+	head, check, err := checksums(file, info.Size())
 
-	return Cursor{offset: info.Size(), file: info, check: check}, err
+	return Cursor{offset: info.Size(), file: info, head: head, check: check}, err
 }

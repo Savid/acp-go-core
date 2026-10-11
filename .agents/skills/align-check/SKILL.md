@@ -48,7 +48,7 @@ lifecycle emitter validation through the reducer. Follow the
 
 | Failure family | Contract rule |
 |---|---|
-| family table, pins, checkout not found | `README.md#the-family`, `README.md#shared-pins` |
+| family table, shared versions, checkout not found | `README.md#the-family`, `README.md#shared-versions` |
 | module, package, binary, prefix, or store format identity | `docs/00-overview.md#identity-constants` |
 | required file, layout, or Go file structure | `docs/06-repository-standards.md#layout`, `#go-file-structure` |
 | surface presence symbol or forbidden literal | `docs/06-repository-standards.md#surface-presence` |

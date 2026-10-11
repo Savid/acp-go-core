@@ -84,18 +84,18 @@ func TestLoadRejectsInvalidCurrentRecords(t *testing.T) {
 	}
 }
 
-func TestReconcileNativeContinuation(t *testing.T) {
+func TestReconcilePrefersTheLongerAgreeingLog(t *testing.T) {
 	t.Parallel()
 	rows := [][]byte{[]byte(`{"text":"ACP"}`), []byte(`{"text":"native"}`)}
-	merged, nativeWins, err := Reconcile(rows, rows[:1])
+	merged, nativeWins, err := reconcile(rows, rows[:1])
 	require.NoError(t, err)
 	require.True(t, nativeWins)
 	require.Equal(t, rows, merged)
-	merged, nativeWins, err = Reconcile(rows[:1], rows)
+	merged, nativeWins, err = reconcile(rows[:1], rows)
 	require.NoError(t, err)
 	require.False(t, nativeWins)
 	require.Equal(t, rows, merged)
-	_, _, err = Reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
+	_, _, err = reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
 	require.Error(t, err)
 }
 
@@ -190,5 +190,10 @@ func TestStoreCallsBoundTheirDeadline(t *testing.T) {
 
 // commitRows publishes rows through a fresh mirror, as a one-shot commit.
 func commitRows(ctx context.Context, store acpcore.SessionStore, sessionID string, rows [][]byte, record any) error {
-	return NewMirror(store, sessionID).Commit(ctx, Rows(rows), record)
+	return NewMirror(store, sessionID).Commit(ctx, Rows(rows), fixed(record))
+}
+
+// fixed is the configuration callback for a record known before the read.
+func fixed(record any) func(Tail) (any, error) {
+	return func(Tail) (any, error) { return record, nil }
 }

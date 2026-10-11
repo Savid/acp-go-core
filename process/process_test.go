@@ -268,6 +268,21 @@ func TestLaunchFailureNamesAnExitedHarnessAndItsStderr(t *testing.T) {
 	require.NoError(t, running.Close())
 }
 
+func TestLaunchFailureWaitsForAHarnessThatIsExiting(t *testing.T) {
+	t.Parallel()
+
+	for range 10 {
+		child, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "echo 'Error: bad flag' >&2; exit 2"}, Env: []string{"PATH=/bin"}})
+		require.NoError(t, err)
+
+		go func() { _, _ = io.Copy(io.Discard, child.Stdout()) }()
+
+		failure := LaunchFailure(child, "harness", io.EOF)
+		require.Equal(t, "harness exited before it was ready: EOF: Error: bad flag", failure.Error())
+		require.NoError(t, child.Close())
+	}
+}
+
 func TestForwardedSignals(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}, ForwardedSignals())
