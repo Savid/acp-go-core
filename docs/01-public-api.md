@@ -12,7 +12,7 @@ types that cross the sibling boundary. The module owns:
 
 | Package | Contents |
 |---|---|
-| `acpcore` | `SessionStore` and its types, the optional `SessionStoreAppender` capability, `InMemorySessionStore`, and `SessionStoreTimeout`, the bound on one store call ([03-sessions-and-store.md](03-sessions-and-store.md#store-api)). |
+| `acpcore` | `SessionStore` and its types, `InMemorySessionStore`, and `SessionStoreTimeout`, the bound on one store call ([03-sessions-and-store.md](03-sessions-and-store.md#store-api)). |
 | `acpcore/sessionlog` | The per-session `Mirror` with its incremental, bounded, atomic native-log and configuration commits and JSONL hydration; the append-only JSONL tail reader and staged writer; strict record decoding; and native-log reconciliation. |
 | `acpcore/observer` | OpenTelemetry spans and metrics with sibling identity supplied at construction, and prompt response usage mapping. |
 | `acpcore/observer/exporters` | The `OTEL_*` exporter, propagator, and log-bridge wiring a sibling's command binary hands to its Agent; library code never imports it. |

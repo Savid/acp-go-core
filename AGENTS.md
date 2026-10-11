@@ -25,7 +25,7 @@ within the task's scope. Never weaken a rule merely to match an implementation.
 
 | Path | Owns |
 |---|---|
-| `store.go` | `SessionStore` types, the optional `SessionStoreAppender`, `InMemorySessionStore`, and the store call bound |
+| `store.go` | `SessionStore` types, `InMemorySessionStore`, and the store call bound |
 | `sessionlog/` | The incremental session mirror, JSONL tail reads and staged writes, record decoding, native-log reconciliation |
 | `observer/` | Shared OpenTelemetry instrumentation; `exporters/` is the command-binary bootstrap |
 | `storetest/` | The exported store contract battery |

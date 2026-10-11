@@ -214,23 +214,6 @@ func TestMirrorFailureKeepsThePreviousGeneration(t *testing.T) {
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "two")
 }
 
-func TestMirrorReplacesWhenTheStoreCannotAppend(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	store := &failingStore{SessionStore: acpcore.NewInMemorySessionStore()}
-	path := filepath.Join(t.TempDir(), "log.jsonl")
-	mirror := NewMirror(store, "s")
-
-	appendFile(t, path, "{\"a\":1}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
-	appendFile(t, path, "{\"b\":2}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
-	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
-
-	store.fail = true
-	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}), "an unchanged generation needs no write")
-}
-
 func TestMirrorHydrateMaterializesStoredRowsThenAppends(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

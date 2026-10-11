@@ -13,8 +13,7 @@ import (
 )
 
 // Run drives the contract battery against a fresh store from newStore for each
-// case. A store that implements acpcore.SessionStoreAppender also runs the
-// append cases.
+// case.
 func Run(t *testing.T, newStore func(t *testing.T) acpcore.SessionStore) {
 	t.Helper()
 
@@ -38,18 +37,6 @@ func Run(t *testing.T, newStore func(t *testing.T) acpcore.SessionStore) {
 		{"delete of a missing key succeeds", deleteMissing},
 		{"list sessions orders newest first then by id", listSessions},
 		{"empty session id", emptySessionID},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.run(t, newStore(t))
-		})
-	}
-
-	appendCases := []struct {
-		name string
-		run  func(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender)
-	}{
 		{"append extends main and replaces only listed subpaths", appendExtends},
 		{"append refuses a stale base or a missing generation before writing", appendRefusesStale},
 		{"append refuses a main, foreign, or duplicate replacement before writing", appendRefusesBadKeys},
@@ -59,16 +46,9 @@ func Run(t *testing.T, newStore func(t *testing.T) acpcore.SessionStore) {
 		{"append requires a session id", appendEmptySessionID},
 	}
 
-	for _, tc := range appendCases {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := newStore(t)
-
-			appender, ok := store.(acpcore.SessionStoreAppender)
-			if !ok {
-				t.Skip("store does not implement acpcore.SessionStoreAppender")
-			}
-
-			tc.run(t, store, appender)
+			tc.run(t, newStore(t))
 		})
 	}
 }
@@ -394,7 +374,7 @@ func concurrentGeneration(t *testing.T, store acpcore.SessionStore) {
 	}
 }
 
-func appendExtends(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendExtends(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -403,9 +383,9 @@ func appendExtends(t *testing.T, store acpcore.SessionStore, appender acpcore.Se
 		acpcore.SessionStoreReplacement{Key: sub("s", "kept"), Entries: entries(`{"k":1}`)},
 	))
 
-	require.NoError(t, appender.Append(ctx, main("s"), 1, entries(`{"b":2}`, `{"c":3}`),
+	require.NoError(t, store.Append(ctx, main("s"), 1, entries(`{"b":2}`, `{"c":3}`),
 		[]acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: entries(`{"c":2}`)}}))
-	require.NoError(t, appender.Append(ctx, main("s"), 3, nil, nil), "an empty append is valid")
+	require.NoError(t, store.Append(ctx, main("s"), 3, nil, nil), "an empty append is valid")
 
 	generation, err := store.Load(ctx, "s")
 	require.NoError(t, err)
@@ -421,16 +401,16 @@ func appendExtends(t *testing.T, store acpcore.SessionStore, appender acpcore.Se
 	require.Equal(t, "s", sessions[0].SessionID)
 }
 
-func appendRefusesStale(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendRefusesStale(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := context.Background()
 	require.NoError(t, publish(ctx, store, "s", entries(`{"a":1}`), acpcore.SessionStoreReplacement{Key: sub("s", configSubpath), Entries: entries(`{"c":1}`)}))
 
 	update := []acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: entries(`{"c":2}`)}}
-	require.Error(t, appender.Append(ctx, main("s"), 0, entries(`{"b":2}`), update), "a base below the committed length is refused")
-	require.Error(t, appender.Append(ctx, main("s"), 2, entries(`{"b":2}`), update), "a base beyond the committed length is refused")
-	require.Error(t, appender.Append(ctx, main("never"), 0, entries(`{"b":2}`), nil), "a session with no generation is refused")
+	require.Error(t, store.Append(ctx, main("s"), 0, entries(`{"b":2}`), update), "a base below the committed length is refused")
+	require.Error(t, store.Append(ctx, main("s"), 2, entries(`{"b":2}`), update), "a base beyond the committed length is refused")
+	require.Error(t, store.Append(ctx, main("never"), 0, entries(`{"b":2}`), nil), "a session with no generation is refused")
 
 	generation, err := store.Load(ctx, "s")
 	require.NoError(t, err)
@@ -444,7 +424,7 @@ func appendRefusesStale(t *testing.T, store acpcore.SessionStore, appender acpco
 	require.Nil(t, missing, "a refused append creates no generation")
 }
 
-func appendRefusesBadKeys(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendRefusesBadKeys(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -455,30 +435,30 @@ func appendRefusesBadKeys(t *testing.T, store acpcore.SessionStore, appender acp
 		{{Key: sub("other", "x")}},
 		{{Key: sub("s", "x")}, {Key: sub("s", "x")}},
 	} {
-		require.Error(t, appender.Append(ctx, main("s"), 1, entries(`{"b":2}`), replacements))
+		require.Error(t, store.Append(ctx, main("s"), 1, entries(`{"b":2}`), replacements))
 	}
 
-	require.Error(t, appender.Append(ctx, sub("s", "x"), 1, entries(`{"b":2}`), nil), "a non-main key is refused")
+	require.Error(t, store.Append(ctx, sub("s", "x"), 1, entries(`{"b":2}`), nil), "a non-main key is refused")
 
 	generation, err := store.Load(ctx, "s")
 	require.NoError(t, err)
 	require.Equal(t, map[string][]acpcore.SessionStoreEntry{"": entries(`{"keep":true}`)}, generation, "a refused append writes nothing")
 }
 
-func appendDeleted(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendDeleted(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := context.Background()
 	require.NoError(t, publish(ctx, store, "s", entries(`{}`)))
 	require.NoError(t, store.Delete(ctx, main("s")))
-	require.NoError(t, appender.Append(ctx, main("s"), 1, entries(`{"late":true}`), []acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: entries(`{}`)}}))
+	require.NoError(t, store.Append(ctx, main("s"), 1, entries(`{"late":true}`), []acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: entries(`{}`)}}))
 
 	generation, err := store.Load(ctx, "s")
 	require.NoError(t, err)
 	require.Nil(t, generation, "a deleted session never revives")
 }
 
-func appendOwnsEntries(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendOwnsEntries(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -486,7 +466,7 @@ func appendOwnsEntries(t *testing.T, store acpcore.SessionStore, appender acpcor
 
 	rows := entries(`{"b":2}`)
 	config := entries(`{"c":3}`)
-	require.NoError(t, appender.Append(ctx, main("s"), 1, rows, []acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: config}}))
+	require.NoError(t, store.Append(ctx, main("s"), 1, rows, []acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: config}}))
 
 	rows[0][2] = 'z'
 	config[0][2] = 'z'
@@ -499,13 +479,13 @@ func appendOwnsEntries(t *testing.T, store acpcore.SessionStore, appender acpcor
 	}, generation, "mutating entries after Append must not change the store")
 }
 
-func appendEmptySessionID(t *testing.T, _ acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func appendEmptySessionID(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
-	require.ErrorIs(t, appender.Append(context.Background(), main(""), 0, entries(`{}`), nil), acpcore.ErrSessionIDRequired)
+	require.ErrorIs(t, store.Append(context.Background(), main(""), 0, entries(`{}`), nil), acpcore.ErrSessionIDRequired)
 }
 
-func concurrentAppend(t *testing.T, store acpcore.SessionStore, appender acpcore.SessionStoreAppender) {
+func concurrentAppend(t *testing.T, store acpcore.SessionStore) {
 	t.Helper()
 
 	ctx := t.Context()
@@ -517,7 +497,7 @@ func concurrentAppend(t *testing.T, store acpcore.SessionStore, appender acpcore
 
 	go func() {
 		for index := range 200 {
-			err := appender.Append(ctx, main("s"), index, entries(`{"row":true}`),
+			err := store.Append(ctx, main("s"), index, entries(`{"row":true}`),
 				[]acpcore.SessionStoreReplacement{{Key: sub("s", configSubpath), Entries: marker(index + 1)}})
 			if err != nil {
 				done <- err

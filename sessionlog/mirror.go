@@ -15,8 +15,7 @@ import (
 )
 
 // Mirror publishes one session's native rows and configuration to a store and
-// remembers what it committed. When the store implements
-// acpcore.SessionStoreAppender and the native history still extends the
+// remembers what it committed. When the native history still extends the
 // committed rows, a commit appends only the new rows, replacing the
 // configuration record only when it changed. Otherwise it republishes the
 // whole generation. Every write to the session's store generation goes
@@ -72,10 +71,8 @@ func (m *Mirror) Commit(ctx context.Context, source Source, record any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	appender, appends := m.store.(acpcore.SessionStoreAppender)
-
 	from := Cursor{}
-	if appends && m.committed {
+	if m.committed {
 		from = m.cursor
 	}
 
@@ -84,24 +81,23 @@ func (m *Mirror) Commit(ctx context.Context, source Source, record any) error {
 		return fmt.Errorf("read native rows: %w", err)
 	}
 
-	appendable := appends && m.committed
-
 	if !tail.Full {
-		appendErr := m.appendTail(ctx, appender, tail, encoded)
+		appendErr := m.appendTail(ctx, tail, encoded)
 		if appendErr == nil || errors.Is(appendErr, errInvalidRow) {
 			return appendErr
 		}
 
-		// The base check refuses an append to a generation the mirror does
-		// not hold; republishing the whole history repairs either case.
-		appendable = false
-
+		// An append fails when the store holds a generation the mirror did
+		// not commit or cannot write; republishing the whole history repairs
+		// the first and reports the second.
 		if tail, err = source(Cursor{}); err != nil {
 			return fmt.Errorf("read native rows: %w", err)
 		}
+
+		return m.commitFull(ctx, false, tail, encoded)
 	}
 
-	return m.commitFull(ctx, appender, appendable, tail, encoded)
+	return m.commitFull(ctx, true, tail, encoded)
 }
 
 // Hydrate reconciles the native JSONL file at path with the rows the store
@@ -143,8 +139,7 @@ func (m *Mirror) Hydrate(ctx context.Context, path string, stored [][]byte, reco
 
 	if nativeWins {
 		if len(rows) > len(stored) {
-			appender, appends := m.store.(acpcore.SessionStoreAppender)
-			if commitErr := m.commitFull(ctx, appender, appends, Tail{Rows: rows, Full: true}, encoded); commitErr != nil {
+			if commitErr := m.commitFull(ctx, true, Tail{Rows: rows, Full: true}, encoded); commitErr != nil {
 				return nil, commitErr
 			}
 		}
@@ -167,7 +162,7 @@ func (m *Mirror) Hydrate(ctx context.Context, path string, stored [][]byte, reco
 var errInvalidRow = errors.New("invalid native row")
 
 // appendTail appends a continuation of the committed rows.
-func (m *Mirror) appendTail(ctx context.Context, appender acpcore.SessionStoreAppender, tail Tail, encoded []byte) error {
+func (m *Mirror) appendTail(ctx context.Context, tail Tail, encoded []byte) error {
 	if err := validRows(tail.Rows); err != nil {
 		return err
 	}
@@ -178,7 +173,7 @@ func (m *Mirror) appendTail(ctx context.Context, appender acpcore.SessionStoreAp
 		return nil
 	}
 
-	if err := m.append(ctx, appender, tail.Rows, encoded); err != nil {
+	if err := m.append(ctx, tail.Rows, encoded); err != nil {
 		return err
 	}
 
@@ -193,7 +188,7 @@ func (m *Mirror) appendTail(ctx context.Context, appender acpcore.SessionStoreAp
 // holds it, appended when it extends the committed rows and appendable is set,
 // otherwise republished. A failure keeps what the mirror remembers, since the
 // store keeps its previous generation.
-func (m *Mirror) commitFull(ctx context.Context, appender acpcore.SessionStoreAppender, appendable bool, tail Tail, encoded []byte) error {
+func (m *Mirror) commitFull(ctx context.Context, appendable bool, tail Tail, encoded []byte) error {
 	if err := validRows(tail.Rows); err != nil {
 		return err
 	}
@@ -210,7 +205,7 @@ func (m *Mirror) commitFull(ctx context.Context, appender acpcore.SessionStoreAp
 			return nil
 		}
 
-		if appendable && m.append(ctx, appender, added, encoded) == nil {
+		if appendable && m.append(ctx, added, encoded) == nil {
 			m.extend(added)
 			m.record = encoded
 			m.cursor = tail.Next
@@ -242,7 +237,7 @@ func (m *Mirror) extendsCommitted(rows [][]byte) bool {
 	return bytes.Equal(digest.Sum(nil), m.digest.Sum(nil))
 }
 
-func (m *Mirror) append(ctx context.Context, appender acpcore.SessionStoreAppender, rows [][]byte, encoded []byte) error {
+func (m *Mirror) append(ctx context.Context, rows [][]byte, encoded []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
 	defer cancel()
 
@@ -251,7 +246,7 @@ func (m *Mirror) append(ctx context.Context, appender acpcore.SessionStoreAppend
 		replacements = []acpcore.SessionStoreReplacement{m.configReplacement(encoded)}
 	}
 
-	return appender.Append(ctx, acpcore.SessionKey{SessionID: m.sessionID}, m.rows, entries(rows), replacements)
+	return m.store.Append(ctx, acpcore.SessionKey{SessionID: m.sessionID}, m.rows, entries(rows), replacements)
 }
 
 func (m *Mirror) replace(ctx context.Context, rows [][]byte, encoded []byte) error {

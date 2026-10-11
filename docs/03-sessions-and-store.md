@@ -44,13 +44,9 @@ type SessionStoreReplacement struct {
 type SessionStore interface {
     Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error)
     Replace(ctx context.Context, main SessionKey, replacements []SessionStoreReplacement) error
+    Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
     Delete(ctx context.Context, key SessionKey) error
     ListSessions(ctx context.Context) ([]SessionSummary, error)
-}
-
-// Optional: a store MAY implement it; siblings fall back to Replace.
-type SessionStoreAppender interface {
-    Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
 }
 
 type InMemorySessionStore struct { /* unexported fields only */ }
@@ -69,12 +65,12 @@ beside its own scoped key, never inside `SessionKey`.
 |---|---|
 | `Load` | Atomically returns the latest complete session generation as subpath → entries, preserving row order; nil when missing or tombstoned. A live empty main record is present at key `""`. Returned maps, slices, and bytes belong to the caller. |
 | `Replace` | Atomically publishes one session's complete generation and is durable before return. It copies the entries it receives; the caller keeps ownership and may reuse them. Uncommitted generations are invisible; failure preserves the previous generation. |
-| `Append` (optional) | Atomically extends the main record of the committed generation with `entries` and replaces each listed non-main subpath, keeping unlisted subpaths; durable before return; copies what it receives. Fails without writing when the main record does not hold exactly `base` entries or the session has no committed generation. A tombstoned session writes nothing and succeeds. Failure preserves the previous generation. |
+| `Append` | Atomically extends the main record of the committed generation with `entries` and replaces each listed non-main subpath, keeping unlisted subpaths; durable before return; copies what it receives. Fails without writing when the main record does not hold exactly `base` entries or the session has no committed generation. A tombstoned session writes nothing and succeeds. Failure preserves the previous generation. |
 | `Delete` | Durable tombstone first. Deleting main cascades to all subpaths; deleting a subpath deletes only it. Missing keys succeed. |
 | `ListSessions` | Committed, non-tombstoned main keys, newest `UpdatedAtUnixMilli` first, then `SessionID`. |
 
-`InMemorySessionStore` implements `Append`, holds its own copy of every entry,
-and returns another copy from `Load`.
+`InMemorySessionStore` holds its own copy of every entry and returns another
+copy from `Load`.
 
 Every store call MUST be bounded by `SessionStoreTimeout`. `sessionlog.Load`,
 `sessionlog.LoadRecord`, and `sessionlog.Mirror` apply that bound to each call
@@ -98,8 +94,7 @@ A `Replace` addresses exactly one session:
 - External stores stage generation entries and publish a final commit marker;
   reads pin one committed generation for every returned subpath and ignore uncommitted generations.
 
-`storetest.Run` proves these rules against any implementation, and the
-`Append` rules against a store that implements it.
+`storetest.Run` proves these rules against any implementation.
 
 ## Ephemeral Sessions
 
@@ -145,14 +140,13 @@ digest of the rows, and, for an append-only JSONL file read through
 `sessionlog.File` or `ReadJSONL`, a cursor after the last complete line. A
 commit:
 
-- appends only the rows after the committed ones through
-  `SessionStoreAppender`, replacing the configuration record only when its
-  encoding changed, when the store implements it and the native history still
-  extends the committed rows;
+- appends only the rows after the committed ones, replacing the configuration
+  record only when its encoding changed, when the native history still extends
+  the committed rows;
 - writes nothing when neither rows nor configuration changed;
 - otherwise republishes the whole generation through `Replace`: on the first
-  commit, after `Reset`, with a store without `Append`, when the native
-  history no longer extends the committed rows, or when an append fails;
+  commit, after `Reset`, when the native history no longer extends the
+  committed rows, or when an append fails;
 - fails, leaving the generation intact, when the native history is shorter
   than the committed one. A native binding change calls `Reset` first.
 

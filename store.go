@@ -48,27 +48,21 @@ type SessionStoreReplacement struct {
 
 // SessionStore is the durability boundary a host provides. Replace publishes
 // one complete generation and is durable before it returns; it copies the
-// entries it receives, so the caller keeps them. Load atomically reads every
-// live subpath of one session; the returned map, slices, and bytes belong to
-// the caller.
+// entries it receives, so the caller keeps them. Append extends the committed
+// generation: it atomically appends entries to the main record and replaces
+// each listed subpath, keeping every unlisted subpath. base is the number of
+// main entries the caller expects the generation to hold; when it holds
+// another number, or the session has no committed generation, Append fails
+// without writing. Append to a deleted session writes nothing and succeeds;
+// it is durable before it returns, copies what it receives, and on failure
+// preserves the previous generation. Load atomically reads every live subpath
+// of one session; the returned map, slices, and bytes belong to the caller.
 type SessionStore interface {
 	Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error)
 	Replace(ctx context.Context, main SessionKey, replacements []SessionStoreReplacement) error
+	Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
 	Delete(ctx context.Context, key SessionKey) error
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
-}
-
-// SessionStoreAppender is an optional SessionStore capability that extends a
-// committed generation instead of republishing it. Append atomically appends
-// entries to the main record of main's committed generation and replaces each
-// listed subpath, keeping every unlisted subpath. base is the number of main
-// entries the caller expects the generation to hold; when it holds another
-// number, or when the session has no committed generation, Append fails
-// without writing. An append to a deleted session writes nothing and returns
-// success. Append is durable before it returns, copies what it receives, and
-// on failure preserves the previous generation.
-type SessionStoreAppender interface {
-	Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
 }
 
 // InMemorySessionStore is the default store when a host provides none, and the
@@ -89,10 +83,7 @@ type storedSession struct {
 	updatedAt int64
 }
 
-var (
-	_ SessionStore         = (*InMemorySessionStore)(nil)
-	_ SessionStoreAppender = (*InMemorySessionStore)(nil)
-)
+var _ SessionStore = (*InMemorySessionStore)(nil)
 
 // NewInMemorySessionStore creates an empty process-local store.
 func NewInMemorySessionStore() *InMemorySessionStore {
