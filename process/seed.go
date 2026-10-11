@@ -181,7 +181,7 @@ func WriteSeedFiles(dir string, files map[string]string) error {
 }
 
 func lockSeedRoot(root *os.Root) (*FileLock, error) {
-	file, err := root.OpenFile(seedManifestFileName+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	file, err := openSeedLock(root)
 	if err != nil {
 		return nil, fmt.Errorf("open seed lock: %w", err)
 	}
@@ -200,6 +200,20 @@ func lockSeedRoot(root *os.Root) (*FileLock, error) {
 	}
 
 	return &FileLock{file: file}, nil
+}
+
+// openSeedLock opens the lock file, creating it when absent. Creation is
+// exclusive and a lost race opens the winner's file: some kernels fail a
+// concurrent non-exclusive no-follow create with ENOENT.
+func openSeedLock(root *os.Root) (*os.File, error) {
+	name := seedManifestFileName + ".lock"
+
+	file, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		file, err = root.OpenFile(name, os.O_RDWR|syscall.O_NOFOLLOW, 0)
+	}
+
+	return file, err
 }
 
 // seedManifestMaxBytes bounds the manifest read back from a harness-owned
