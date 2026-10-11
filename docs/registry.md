@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds the title, cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. Restore imports missing events one conversation at a time, parents first. |
 | opencodev2 | Native message rows plus a `config` subpath | The main record holds one row per settled native message, each naming its session, merged by creation time; a session with no messages, including an empty root, has no rows. Configuration holds the graph's native session objects, the title, cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, tool-shell environment names, output-token bound, title, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its identity, size, or modification time changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, tool-shell environment names, output-token bound, title, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its file changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -342,7 +342,7 @@ Every sibling's provider and gateway reads follow the
 | opencode | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Native `format: json_schema`. The result is `_meta.opencode.structuredOutput` on the prompt response. Empty schemas are refused. |
 | opencodev2 | `mode`, `permission` (`ask`\|`allow`\|`deny`), `effort` | Not advertised: OpenCode v2 has no schema-enforced prompt API. `outputSchema` is refused; no `WithSessionOutputSchema` helper is exported. |
 | amp | `mode` | Not advertised; `outputSchema` and `model` are refused. |
-| nanocodex | `baseModel`, `contextWindow`, `thinking` (`WithNanocodexEffort`; the `thought_level` option selects the same value), `maxOutputTokens` (the output-token bound of each gateway generation response, reasoning included; unset sends no bound; native routes refuse it), `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile`, `shellEnv` (names of helper environment variables the native tool shell receives despite its sensitive-name filter; an explicit empty list travels so it overrides the helper's environment selection) | Not advertised; `outputSchema` is refused. |
+| nanocodex | `baseModel`, `contextWindow`, `effort` (`WithNanocodexEffort`), `maxOutputTokens` (the output-token bound of each gateway generation response, reasoning included; unset sends no bound; native routes refuse it), `apiBaseUrl`, `websocketUrl`, `modelIdPrefix`, `transport`, `apiKeyEnv`, `authFile`, `shellEnv` (names of helper environment variables the native tool shell receives despite its sensitive-name filter; an explicit empty list travels so it overrides the helper's environment selection) | Not advertised; `outputSchema` is refused. |
 
 Session `env` and `extraPathDirs` reach the native boundary as: the addressed
 thread's `config.shell_environment_policy.set` on `thread/start` and
@@ -374,7 +374,7 @@ entries fail.
 | opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
 | opencodev2 | `model`, `mode`, `effort` | Native session model and agent endpoints apply selections. Model IDs must be provider-qualified. The model variant carries effort; `effort` appears only while set. Unspecified selections resolve from native model and agent defaults. |
 | amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
-| nanocodex | `model`, `thought_level` | `thought_level` selects the `thinking` session option that `WithNanocodexEffort` sets. Short observation processes validate selections and report effective values. Model changes are accepted only before the first committed turn; effort changes apply to subsequent prompts. |
+| nanocodex | `model`, `effort` (category `thought_level`) | `effort` selects the `effort` session option. Short observation processes validate selections and report effective values. Model changes are accepted only before the first committed turn; effort changes apply to subsequent prompts. |
 
 ### How each model catalog is built
 
@@ -662,11 +662,14 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   thread, rewrites each such call's arguments as `{}` in the rollout, resumes
   the thread, and republishes the whole rollout before the turn's failure
   returns with `recovery`. A restore whose stored copy still holds such a call
-  repairs it the same way.
+  repairs it in the stored copy and, after unloading the thread, rewrites it in
+  the native rollout before comparing the two.
 - **Codex tool output:** ACP replaces a tool call's whole content array on
   every update, so streamed output accumulates in one text block sent on the
-  first delta and whenever it has doubled since the last send; the terminal
-  update carries the complete output.
+  first delta, whenever it has doubled since the last send, and once output
+  that grew without doubling has waited at least two seconds since the last
+  send, longer for large output so those sends carry at most 64 KiB a second.
+  The terminal update carries the complete output.
 - **Pi snapshots its catalog once** at native start; a mid-session credential
   change does not move the menu.
 - **Pi extensions:** the wrapper-owned bridge and PATH extensions load with
