@@ -33,7 +33,7 @@ defines storage and wire publication.
 | opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The record adds model, mode, permission, variant, output schema, and captured local image bytes or refusal records. Restore imports missing events one conversation at a time, parents first. |
 | opencodev2 | Native message rows plus a `config` subpath | The main record holds one row per settled native message, each naming its session, merged by creation time; a session with no messages, including an empty root, has no rows. The record adds the graph's native session objects, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
 | amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The record adds the service origin, mode, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The record adds a home-relative rollout path, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, tool-shell environment names, output-token bound, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its file changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The record adds the absolute rollout path inside the native home as `nativePath`, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, tool-shell environment names, output-token bound, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its file changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -234,8 +234,9 @@ and the [call breakdown](04-behavior.md#call-breakdown):
   tokens, replaced by the result frame's usage when the prompt settles.
 
 - **nanocodex:** each native `model.call.completed` supplies its Responses usage.
-  Each retried gateway attempt is published as `_meta.nanocodex.attemptDiscarded`
-  on an otherwise empty `session_info_update`, carrying the attempt's item keys,
+  Each retried gateway attempt is published, before its retry delay, as
+  `_meta.nanocodex.attemptDiscarded` on an otherwise empty
+  `session_info_update`, carrying the attempt's item keys,
   each `{messageId, kind}` its discarded chunks carried (`message` or
   `thought`), streamed bytes, classification, and reported usage; that usage is
   added to the prompt response's usage.
@@ -578,8 +579,12 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   assistant or reasoning output is delivered. A failure retries unless its
   `providerCode` is terminal: a three-digit code follows the same status rule,
   and quota, authorization, model, invalid-request, context-window, image-input,
-  and content-policy codes and the `max_output_tokens` and `content_filter`
-  incomplete reasons are terminal. Valid `Retry-After` and `retry-after-ms`
+  and content-policy codes and the `content_filter` incomplete reason are
+  terminal. A generation response stopped at `max_output_tokens` that carries
+  assistant text ends the turn with stop reason `max_tokens`: native history
+  keeps its assistant messages and drops its incomplete tool calls and
+  reasoning. Without assistant text the turn fails with `providerCode`
+  `max_output_tokens`. Valid `Retry-After` and `retry-after-ms`
   delays up to 60 seconds are honored with normal backoff as a minimum; longer
   delays fail without retrying early. Cancellation interrupts requests and retry
   delays.
@@ -597,9 +602,11 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   and are not subject to the helper's 32 MiB frame bound.
 
 - **Nanocodex persistence:** only newline-terminated records are mirrored.
-  While the helper is stopped and its writer lock is held, a final record
-  without its newline receives one when it is a complete JSON object of any
-  length and is removed otherwise, before the helper opens the rollout.
+  While the helper is stopped and its writer lock is held, the adapter
+  confines the rollout to the session's native tree and settles its tail with
+  [`CutTornTail`](03-sessions-and-store.md#incremental-mirror) before the
+  helper opens it; `Mirror.Hydrate` also cuts invalid rows past the stored
+  ones.
   Listing skips malformed stored generations; store backend failures
   return the bare internal-failure token. Its optional internal-failure classes
   are `native_start`, `native_state`, and `lifecycle`.
