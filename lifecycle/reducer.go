@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"iter"
+	"slices"
 )
 
 // Options configures a reducer.
@@ -65,8 +67,47 @@ func NewReducer(opts Options) *Reducer {
 // Negotiated reports the configuration the reducer validates against.
 func (r *Reducer) Negotiated() Negotiated { return r.negotiated }
 
-// State returns the projection proved so far.
+// State returns a copy of the projection proved so far. The accessors below
+// read one part of it without copying the rest.
 func (r *Reducer) State() State { return r.state.clone() }
+
+// StreamID is the incarnation the projection belongs to.
+func (r *Reducer) StreamID() string { return r.state.StreamID }
+
+// Foreground returns the foreground projection, when the stream asserted one.
+func (r *Reducer) Foreground() (Foreground, bool) {
+	if r.state.Foreground == nil {
+		return Foreground{}, false
+	}
+
+	return *r.state.Foreground, true
+}
+
+// Settled reports State().Settled.
+func (r *Reducer) Settled() bool { return r.state.Settled() }
+
+// Turn returns one turn's projection.
+func (r *Reducer) Turn(turnID string) (TurnRecord, bool) { return r.state.Turn(turnID) }
+
+// Activity returns one activity's projection.
+func (r *Reducer) Activity(activityID string) (ActivityRecord, bool) {
+	return r.state.Activity(activityID)
+}
+
+// Action returns one action's projection.
+func (r *Reducer) Action(actionID string) (ActionRecord, bool) { return r.state.Action(actionID) }
+
+// Turns yields each turn's projection in order. The reducer must not reduce
+// while the sequence is iterated.
+func (r *Reducer) Turns() iter.Seq[TurnRecord] { return slices.Values(r.state.Turns) }
+
+// Activities yields each activity's projection in order. The reducer must not
+// reduce while the sequence is iterated.
+func (r *Reducer) Activities() iter.Seq[ActivityRecord] { return slices.Values(r.state.Activities) }
+
+// Actions yields each action's projection in order. The reducer must not
+// reduce while the sequence is iterated.
+func (r *Reducer) Actions() iter.Seq[ActionRecord] { return slices.Values(r.state.Actions) }
 
 // Close records that the addressed session's close completed. The session is
 // over: every later event bearing its identity is stale, a would-be new

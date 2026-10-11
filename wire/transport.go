@@ -111,8 +111,7 @@ func (r *transportReader) Read(p []byte) (int, error) {
 	if len(r.pending) == 0 {
 		line, err := r.readLine()
 		if len(line) > 0 {
-			r.transport.observeInbound(line)
-			line = r.transport.bindInbound(line)
+			line = r.transport.inbound(line)
 		}
 
 		r.pending = line
@@ -166,41 +165,77 @@ func (w *transportWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-type frame struct {
+// frameHead is the part of a JSON-RPC frame the transport routes by. Params
+// are read separately, and only for the methods that need them.
+type frameHead struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
 	Error  json.RawMessage `json:"error"`
+	Params struct {
+		SessionID acp.SessionId `json:"sessionId"`
+	} `json:"params"`
 }
 
-type sessionParams struct {
-	SessionID acp.SessionId `json:"sessionId"`
+// decodeHead decodes a frame's head. Params that are not an object leave the
+// session id empty.
+func decodeHead(line []byte) (frameHead, bool) {
+	var head frameHead
+
+	err := json.Unmarshal(line, &head)
+	if _, typed := errors.AsType[*json.UnmarshalTypeError](err); err != nil && !typed {
+		return frameHead{}, false
+	}
+
+	return head, true
+}
+
+// frameParams returns a copy of a frame's raw params.
+func frameParams(line []byte) json.RawMessage {
+	var f struct {
+		Params json.RawMessage `json:"params"`
+	}
+
+	_ = json.Unmarshal(line, &f)
+
+	return f.Params
+}
+
+// inbound decodes one inbound frame once, records what the transport needs
+// from it, and returns the line the SDK reads.
+func (t *Transport) inbound(line []byte) []byte {
+	head, ok := decodeHead(line)
+	if !ok || head.Method == "" || len(head.ID) == 0 {
+		return line
+	}
+
+	t.observeInbound(line, head)
+
+	return t.bindInbound(line, head)
 }
 
 // observeInbound records the request id and, for the surfaces whose owned
 // metadata must be read strictly, the raw params.
-func (t *Transport) observeInbound(line []byte) {
-	var f frame
-	if err := json.Unmarshal(line, &f); err != nil || f.Method == "" || len(f.ID) == 0 {
-		return
+func (t *Transport) observeInbound(line []byte, head frameHead) {
+	var params json.RawMessage
+
+	switch head.Method {
+	case acp.AgentMethodInitialize, acp.AgentMethodSessionPrompt:
+		params = frameParams(line)
 	}
-
-	var params sessionParams
-
-	_ = json.Unmarshal(f.Params, &params)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	id := frameID(f.ID)
-	t.requests[id] = inboundRequest{method: f.Method, sessionID: params.SessionID}
+	id := frameID(head.ID)
+	sessionID := head.Params.SessionID
+	t.requests[id] = inboundRequest{method: head.Method, sessionID: sessionID}
 
-	switch f.Method {
+	switch head.Method {
 	case acp.AgentMethodInitialize:
-		t.raw[acp.AgentMethodInitialize] = append(t.raw[acp.AgentMethodInitialize], rawParams{id: id, params: f.Params})
+		t.raw[acp.AgentMethodInitialize] = append(t.raw[acp.AgentMethodInitialize], rawParams{id: id, params: params})
 	case acp.AgentMethodSessionPrompt:
-		key := rawKeyPrompt(params.SessionID)
-		t.raw[key] = append(t.raw[key], rawParams{id: id, params: f.Params})
+		key := rawKeyPrompt(sessionID)
+		t.raw[key] = append(t.raw[key], rawParams{id: id, params: params})
 	}
 }
 
@@ -297,20 +332,15 @@ func (t *Transport) RequestContext(ctx context.Context, meta map[string]any) con
 
 // bindInbound carries the request identity through the SDK's typed dispatch.
 // The marker exists only between this reader and RequestContext.
-func (t *Transport) bindInbound(line []byte) []byte {
-	var f frame
-	if json.Unmarshal(line, &f) != nil || len(f.ID) == 0 {
-		return line
-	}
-
-	switch f.Method {
+func (t *Transport) bindInbound(line []byte, head frameHead) []byte {
+	switch head.Method {
 	case acp.AgentMethodSessionNew, acp.AgentMethodSessionLoad, acp.AgentMethodSessionResume:
 	default:
 		return line
 	}
 
 	var params map[string]json.RawMessage
-	if json.Unmarshal(f.Params, &params) != nil || params == nil {
+	if json.Unmarshal(frameParams(line), &params) != nil || params == nil {
 		return line
 	}
 
@@ -323,7 +353,7 @@ func (t *Transport) bindInbound(line []byte) []byte {
 		meta = make(map[string]json.RawMessage)
 	}
 
-	meta[t.requestKey], _ = json.Marshal(string(f.ID))
+	meta[t.requestKey], _ = json.Marshal(string(head.ID))
 	params["_meta"], _ = json.Marshal(meta)
 
 	var fields map[string]json.RawMessage
@@ -366,6 +396,16 @@ func (t *Transport) RegisterHook(ctx context.Context, sessionID acp.SessionId, h
 // correlation releases its announcement.
 func (t *Transport) observeOutbound(data []byte) {
 	t.mu.Lock()
+
+	// A write of exactly one complete frame, the SDK's usual shape, is
+	// observed in place without buffering a copy.
+	if len(t.partial) == 0 && bytes.IndexByte(data, '\n') == len(data)-1 {
+		t.mu.Unlock()
+		t.observeOutboundFrame(data[:len(data)-1])
+
+		return
+	}
+
 	t.partial = append(t.partial, data...)
 
 	var lines [][]byte
@@ -379,6 +419,10 @@ func (t *Transport) observeOutbound(data []byte) {
 		lines = append(lines, bytes.Clone(t.partial[:index]))
 		t.partial = t.partial[index+1:]
 	}
+
+	if len(t.partial) == 0 {
+		t.partial = nil
+	}
 	t.mu.Unlock()
 
 	for _, line := range lines {
@@ -387,24 +431,24 @@ func (t *Transport) observeOutbound(data []byte) {
 }
 
 func (t *Transport) observeOutboundFrame(line []byte) {
-	var f frame
-	if err := json.Unmarshal(line, &f); err != nil {
+	head, ok := decodeHead(line)
+	if !ok {
 		return
 	}
 
-	if f.Method != "" {
-		if len(f.ID) != 0 && (f.Method == acp.ClientMethodSessionRequestPermission || f.Method == acp.ClientMethodElicitationCreate) {
-			t.releaseRequestWrite(f.Params)
+	if head.Method != "" {
+		if len(head.ID) != 0 && (head.Method == acp.ClientMethodSessionRequestPermission || head.Method == acp.ClientMethodElicitationCreate) {
+			t.releaseRequestWrite(frameParams(line))
 		}
 
 		return
 	}
 
-	if len(f.ID) == 0 {
+	if len(head.ID) == 0 {
 		return
 	}
 
-	id := frameID(f.ID)
+	id := frameID(head.ID)
 
 	t.mu.Lock()
 	request, ok := t.requests[id]
@@ -428,7 +472,7 @@ func (t *Transport) observeOutboundFrame(line []byte) {
 	t.mu.Unlock()
 
 	if publication != nil {
-		go t.publishOpening(publication.sessionID, publication, len(f.Error) == 0)
+		go t.publishOpening(publication.sessionID, publication, len(head.Error) == 0)
 	}
 }
 

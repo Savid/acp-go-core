@@ -23,14 +23,15 @@ const sessionUpdateField = "sessionUpdate"
 // DecodeSessionUpdate reads the lifecycle delivery carried by one session/update
 // notification payload. It reports ErrNoEnvelope for a frame with no extension
 // value, and a *ViolationError naming the closed token for every frame it refuses.
+// A frame without an envelope is split into its top-level members only; the
+// whole frame is decoded into a value only when it carries an envelope.
 func DecodeSessionUpdate(params json.RawMessage, negotiated Negotiated) (Delivery, error) {
-	frame, readable := decodeValue(params)
-	if !readable {
-		return Delivery{}, violation(ViolationMalformedEnvelope, "", 0, "the notification is not decodable JSON")
-	}
-
 	notification, ok := jsonObject(params)
 	if !ok {
+		if !json.Valid(params) {
+			return Delivery{}, violation(ViolationMalformedEnvelope, "", 0, "the notification is not decodable JSON")
+		}
+
 		return Delivery{}, violation(ViolationMalformedEnvelope, "", 0, "the notification is not an object")
 	}
 
@@ -58,6 +59,11 @@ func DecodeSessionUpdate(params json.RawMessage, negotiated Negotiated) (Deliver
 	if carrier := carrierClassForSessionUpdate(notification[updateField]); carrier != CarrierSessionInfo {
 		return Delivery{}, violation(ViolationIllegalCarrier, dec.streamID, dec.sequence,
 			"only the identity-only "+sessionUpdateField+" "+string(CarrierSessionInfo)+" carries an envelope")
+	}
+
+	frame, readable := decodeValue(params)
+	if !readable {
+		return Delivery{}, violation(ViolationMalformedEnvelope, dec.streamID, dec.sequence, "the notification is not decodable JSON")
 	}
 
 	return Delivery{

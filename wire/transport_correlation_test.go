@@ -77,8 +77,8 @@ func TestRestoreResponseCannotDiscardAnotherOpening(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				tr := NewTransport(nil, io.Discard)
 				defer tr.Close()
-				tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s"}}`))
-				tr.observeInbound([]byte(`{"id":2,"method":"session/load","params":{"sessionId":"s"}}`))
+				tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s"}}`))
+				tr.inbound([]byte(`{"id":2,"method":"session/load","params":{"sessionId":"s"}}`))
 				ran := false
 				registerTransportHook(t, tr, "1", "s", func(context.Context) { ran = true })
 				waited := make(chan error, 1)
@@ -104,8 +104,8 @@ func TestOpeningRequestsRemainOrderedBeforeEitherResponse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		tr := NewTransport(nil, io.Discard)
 		defer tr.Close()
-		tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s"}}`))
-		tr.observeInbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s"}}`))
+		tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s"}}`))
+		tr.inbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s"}}`))
 		var order []int
 		registerTransportHook(t, tr, "1", "s", func(context.Context) { order = append(order, 1) })
 		registerTransportHook(t, tr, "2", "s", func(context.Context) { order = append(order, 2) })

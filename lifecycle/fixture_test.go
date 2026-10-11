@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,7 +143,47 @@ func TestReducerFixtures(t *testing.T) {
 			}
 
 			requireStateEquals(t, vector.Expect.State, reducer.State())
+			requireAccessorsAgree(t, reducer)
 		})
+	}
+}
+
+// requireAccessorsAgree proves every copy-free accessor reads what State
+// copies.
+func requireAccessorsAgree(t *testing.T, reducer *Reducer) {
+	t.Helper()
+
+	state := reducer.State()
+	require.Equal(t, state.StreamID, reducer.StreamID())
+	require.Equal(t, state.Settled(), reducer.Settled())
+
+	foreground, present := reducer.Foreground()
+	require.Equal(t, state.Foreground != nil, present)
+
+	if present {
+		require.Equal(t, *state.Foreground, foreground)
+	}
+
+	require.Equal(t, state.Turns, append([]TurnRecord{}, slices.Collect(reducer.Turns())...))
+	require.Equal(t, state.Activities, append([]ActivityRecord{}, slices.Collect(reducer.Activities())...))
+	require.Equal(t, state.Actions, append([]ActionRecord{}, slices.Collect(reducer.Actions())...))
+
+	for _, turn := range state.Turns {
+		got, known := reducer.Turn(turn.TurnID)
+		require.True(t, known)
+		require.Equal(t, turn, got)
+	}
+
+	for _, activity := range state.Activities {
+		got, known := reducer.Activity(activity.ActivityID)
+		require.True(t, known)
+		require.Equal(t, activity, got)
+	}
+
+	for _, action := range state.Actions {
+		got, known := reducer.Action(action.ActionID)
+		require.True(t, known)
+		require.Equal(t, action, got)
 	}
 }
 

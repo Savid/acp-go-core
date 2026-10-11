@@ -120,7 +120,7 @@ func TestTransportCloseReleasesSessionWaiters(t *testing.T) {
 	t.Parallel()
 
 	tr := NewTransport(bytes.NewBuffer(nil), io.Discard)
-	tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
+	tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
 	registerTransportHook(t, tr, "1", "s1", func(context.Context) {})
 	tr.Close()
 
@@ -176,7 +176,7 @@ func TestTransportReplacingPendingHookKeepsWaiters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		tr := NewTransport(bytes.NewBuffer(nil), io.Discard)
 		defer tr.Close()
-		tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
+		tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
 		registerTransportHook(t, tr, "1", "s1", func(context.Context) { t.Error("replaced hook ran") })
 		waited := make(chan error, 1)
 		go func() { waited <- tr.AwaitSession(t.Context(), "s1") }()
@@ -201,8 +201,8 @@ func TestTransportKeepsOpeningGenerationsOrdered(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				tr := NewTransport(bytes.NewBuffer(nil), io.Discard)
 				defer tr.Close()
-				tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
-				tr.observeInbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s1"}}`))
+				tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
+				tr.inbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s1"}}`))
 				release := make(chan struct{})
 				registerTransportHook(t, tr, "1", "s1", func(context.Context) { <-release })
 				tr.observeOutboundFrame([]byte(`{"id":1,"result":{}}`))
@@ -239,8 +239,8 @@ func TestTransportFinishingHookKeepsLaterBarrier(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		tr := NewTransport(bytes.NewBuffer(nil), io.Discard)
 		defer tr.Close()
-		tr.observeInbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
-		tr.observeInbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s1"}}`))
+		tr.inbound([]byte(`{"id":1,"method":"session/load","params":{"sessionId":"s1"}}`))
+		tr.inbound([]byte(`{"id":2,"method":"session/resume","params":{"sessionId":"s1"}}`))
 		release := make(chan struct{})
 		registerTransportHook(t, tr, "1", "s1", func(context.Context) { <-release })
 		tr.observeOutboundFrame([]byte(`{"id":1,"result":{}}`))
