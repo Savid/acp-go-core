@@ -39,6 +39,7 @@ const (
 	attrOperation                          = "operation"
 	attrOutcome                            = "outcome"
 	attrSessionStoreOp                     = "session.store.operation"
+	attrSessionStoreRepublish              = "session.store.republish"
 	attrStopReason                         = "stop_reason"
 
 	genAIOperationChat = "chat"
@@ -487,6 +488,16 @@ func (o *Observer) recordSessionStore(ctx context.Context, start time.Time, oper
 	}
 
 	o.sessionStoreOperationDuration.Record(ctx, durationSeconds(start), metric.WithAttributes(attrs...))
+}
+
+// RecordRepublish marks the session store span in ctx with why a mirror
+// commit published the whole generation. An empty reason records nothing.
+func (o *Observer) RecordRepublish(ctx context.Context, reason string) {
+	if o == nil || reason == "" {
+		return
+	}
+
+	trace.SpanFromContext(ctx).SetAttributes(attribute.String(attrSessionStoreRepublish, reason))
 }
 
 // StartSessionStore begins one session store operation observation.

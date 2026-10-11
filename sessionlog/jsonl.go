@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +52,41 @@ type Tail struct {
 	// Full reports that Rows are the complete history rather than a
 	// continuation of the cursor.
 	Full bool
+
+	// origin, data, and start locate a JSONL read's rows in its file: data
+	// is the buffer read from byte start of the file origin names.
+	origin string
+	data   []byte
+	start  int64
+}
+
+// locate names where row index of the tail lives: its byte offset in its
+// file for a JSONL read, else its index.
+func (t Tail) locate(index int) string {
+	if t.origin == "" {
+		return fmt.Sprintf("row %d", index)
+	}
+
+	return fmt.Sprintf("%s at byte %d", t.origin, t.offset(index))
+}
+
+// offset is the byte offset in its file of row index of a JSONL read.
+func (t Tail) offset(index int) int64 {
+	offset, row := 0, 0
+
+	for line := range bytes.Lines(t.data) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			if row == index {
+				break
+			}
+
+			row++
+		}
+
+		offset += len(line)
+	}
+
+	return t.start + int64(offset)
 }
 
 // Source reads native rows after from. A source returns a Full tail when from
@@ -142,7 +178,7 @@ func ReadJSONLFile(file *os.File, from Cursor, size int64) (Tail, error) {
 		}
 	}
 
-	return Tail{Rows: rows, Next: next, Full: start == 0}, nil
+	return Tail{Rows: rows, Next: next, Full: start == 0, origin: file.Name(), data: data[:consumed], start: start}, nil
 }
 
 // splitLines returns the trimmed non-empty complete lines of data and the
@@ -182,22 +218,35 @@ func digestRange(file *os.File, start, end int64) ([sha256.Size]byte, error) {
 	return sha256.Sum256(window), nil
 }
 
+// TornTail reports what CutTornTail did to a file's unterminated last line.
+// The zero TornTail means the file already ended on a line boundary.
+type TornTail struct {
+	// Cut is how many bytes of an incomplete last line were removed.
+	Cut int64
+	// Terminated reports that a complete last record received its newline.
+	Terminated bool
+}
+
+// Changed reports whether CutTornTail modified the file.
+func (t TornTail) Changed() bool { return t.Cut > 0 || t.Terminated }
+
 // CutTornTail ends the JSONL file at path on a line boundary, so the next line
 // a harness appends starts on a line of its own. A trailing line without its
 // newline that is one complete JSON object is a record whose newline was not
 // written, and is terminated; any other unterminated tail is bytes a writer
 // that died mid-record left behind, and is cut. A harness that writes a record
 // without its newline in the same write can leave a record that still parses
-// as complete while more was due; that harness must not rely on this cut. A
-// missing file is left missing.
-func CutTornTail(path string) error {
+// as complete while more was due; that harness must not rely on this cut. The
+// tail is examined as a stream, never read whole. A missing file is left
+// missing.
+func CutTornTail(path string) (TornTail, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return TornTail{}, nil
 	}
 
 	if err != nil {
-		return err
+		return TornTail{}, err
 	}
 
 	defer func() { _ = file.Close() }()
@@ -205,54 +254,91 @@ func CutTornTail(path string) error {
 	return cutTornTail(file)
 }
 
-func cutTornTail(file *os.File) error {
+func cutTornTail(file *os.File) (TornTail, error) {
 	info, err := file.Stat()
 	if err != nil {
-		return err
+		return TornTail{}, err
 	}
 
-	end := info.Size()
-	window := make([]byte, min(end, cursorCheckBytes))
+	size := info.Size()
 
-	for end > 0 {
+	end, err := lastLineEnd(file, size)
+	if err != nil || end == size {
+		return TornTail{}, err
+	}
+
+	complete, err := oneObject(io.NewSectionReader(file, end, size-end))
+	if err != nil {
+		return TornTail{}, err
+	}
+
+	if complete {
+		if _, err := file.WriteAt([]byte{'\n'}, size); err != nil {
+			return TornTail{}, fmt.Errorf("terminate native record: %w", err)
+		}
+
+		return TornTail{Terminated: true}, file.Sync()
+	}
+
+	if err := file.Truncate(end); err != nil {
+		return TornTail{}, fmt.Errorf("cut torn native line: %w", err)
+	}
+
+	return TornTail{Cut: size - end}, file.Sync()
+}
+
+// lastLineEnd returns the offset just after the last newline in the first
+// size bytes of file, or zero when there is none.
+func lastLineEnd(file *os.File, size int64) (int64, error) {
+	window := make([]byte, min(size, cursorCheckBytes))
+
+	for end := size; end > 0; {
 		start := max(end-int64(len(window)), 0)
 		chunk := window[:end-start]
 
 		if _, err := file.ReadAt(chunk, start); err != nil {
-			return fmt.Errorf("read native log: %w", err)
+			return 0, fmt.Errorf("read native log: %w", err)
 		}
 
 		if index := bytes.LastIndexByte(chunk, '\n'); index >= 0 {
-			end = start + int64(index) + 1
-
-			break
+			return start + int64(index) + 1, nil
 		}
 
 		end = start
 	}
 
-	if end == info.Size() {
-		return nil
+	return 0, nil
+}
+
+// oneObject reports whether r holds exactly one complete JSON object between
+// optional whitespace. It walks the tokens, so it holds at most one token at a
+// time rather than the whole value.
+func oneObject(r io.Reader) (bool, error) {
+	decoder := json.NewDecoder(r)
+	decoder.UseNumber()
+
+	first, err := decoder.Token()
+	if delimiter, ok := first.(json.Delim); err != nil || !ok || delimiter != '{' {
+		return false, nil //nolint:nilerr // An undecodable tail is torn, not a read failure.
 	}
 
-	tail := make([]byte, info.Size()-end)
-	if _, err := file.ReadAt(tail, end); err != nil {
-		return fmt.Errorf("read native log: %w", err)
-	}
-
-	if validRow(tail) {
-		if _, err := file.WriteAt([]byte{'\n'}, info.Size()); err != nil {
-			return fmt.Errorf("terminate native record: %w", err)
+	for depth := 1; depth > 0; {
+		token, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return false, nil //nolint:nilerr // An undecodable tail is torn, not a read failure.
 		}
 
-		return file.Sync()
+		switch token {
+		case json.Delim('{'), json.Delim('['):
+			depth++
+		case json.Delim('}'), json.Delim(']'):
+			depth--
+		}
 	}
 
-	if err := file.Truncate(end); err != nil {
-		return fmt.Errorf("cut torn native line: %w", err)
-	}
+	_, err = decoder.Token()
 
-	return file.Sync()
+	return errors.Is(err, io.EOF), nil
 }
 
 // WriteJSONL publishes rows as the JSONL file at path, one row per line,

@@ -190,8 +190,11 @@ func TestStoreCallsBoundTheirDeadline(t *testing.T) {
 
 // commitRows publishes rows through a fresh mirror, as a one-shot commit.
 func commitRows(ctx context.Context, store acpcore.SessionStore, sessionID string, rows [][]byte, record any) error {
-	return NewMirror(store, sessionID).Commit(ctx, Rows(rows), fixed(record))
+	return errOf(NewMirror(store, sessionID).Commit(ctx, Rows(rows), fixed(record)))
 }
+
+// errOf keeps only the error of a commit.
+func errOf(_ CommitReport, err error) error { return err }
 
 // fixed is the configuration callback for a record known before the read.
 func fixed(record any) func(Tail) (any, error) {

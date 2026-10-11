@@ -194,15 +194,41 @@ func TestCutTornTailKeepsOnlyCompleteLines(t *testing.T) {
 	} {
 		path := filepath.Join(dir, name+".jsonl")
 		appendFile(t, path, tc.before)
-		require.NoError(t, CutTornTail(path))
+		_, err := CutTornTail(path)
+		require.NoError(t, err)
 
 		data, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, tc.after, string(data), name)
 	}
 
-	require.NoError(t, CutTornTail(filepath.Join(dir, "absent.jsonl")))
+	_, err := CutTornTail(filepath.Join(dir, "absent.jsonl"))
+	require.NoError(t, err)
 	require.NoFileExists(t, filepath.Join(dir, "absent.jsonl"))
+}
+
+func TestCutTornTailReportsWhatItDid(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	for name, tc := range map[string]struct {
+		before string
+		report TornTail
+	}{
+		"torn":      {"{\"a\":1}\n{\"b\":", TornTail{Cut: 5}},
+		"record":    {"{\"a\":1}\n{\"b\":{\"c\":[1,2]}} ", TornTail{Terminated: true}},
+		"trailing":  {"{\"a\":1}\n{\"b\":2} x", TornTail{Cut: 9}},
+		"complete":  {"{\"a\":1}\n", TornTail{}},
+		"long torn": {"{\"a\":\"" + strings.Repeat("y", 3*cursorCheckBytes), TornTail{Cut: int64(6 + 3*cursorCheckBytes)}},
+	} {
+		path := filepath.Join(dir, name+".jsonl")
+		appendFile(t, path, tc.before)
+
+		report, err := CutTornTail(path)
+		require.NoError(t, err, name)
+		require.Equal(t, tc.report, report, name)
+		require.Equal(t, tc.report.Cut > 0 || tc.report.Terminated, report.Changed(), name)
+	}
 }
 
 func TestCursorsAreNotComparable(t *testing.T) {

@@ -27,6 +27,38 @@ func TestNilObserverIsNoop(t *testing.T) {
 	observer.RecordProcessExit(ctx, "exit", nil)
 	observer.AddActiveSession(ctx, 1)
 	observer.RecordRawMessageEmitFailure(ctx, errors.New("x"))
+	observer.RecordRepublish(ctx, "rewritten")
+}
+
+func TestRecordRepublishMarksTheStoreSpan(t *testing.T) {
+	t.Parallel()
+
+	exporter := tracetest.NewInMemoryExporter()
+	observer := New(Config{Vendor: "pi", NativeClient: "rpc", Version: "test", TracerProvider: sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))})
+
+	ctx, finish := observer.StartSessionStore(context.Background(), SessionStoreCommit)
+	observer.RecordRepublish(ctx, "append_failed")
+	finish(nil)
+
+	_, quiet := observer.StartSessionStore(context.Background(), SessionStoreCommit)
+	quiet(nil)
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 2)
+
+	values := func(span tracetest.SpanStub) []string {
+		var found []string
+
+		for _, attr := range span.Attributes {
+			if attr.Key == attrSessionStoreRepublish {
+				found = append(found, attr.Value.AsString())
+			}
+		}
+
+		return found
+	}
+	require.Equal(t, []string{"append_failed"}, values(spans[0]))
+	require.Empty(t, values(spans[1]), "a commit that did not republish carries no reason")
 }
 
 func TestObserverRecordsSpansAndMetrics(t *testing.T) {

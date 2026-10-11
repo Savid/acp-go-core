@@ -84,14 +84,14 @@ func TestMirrorAppendsOnlyNewRowsAndChangedConfiguration(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n{\"b\":2}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 
 	replaces, appends, _, _ := store.counts()
 	require.Equal(t, 1, replaces, "the first commit publishes the whole generation")
 	require.Zero(t, appends)
 
 	appendFile(t, path, "{\"c\":3}\n{\"d\":")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
 
 	replaces, appends, appended, configs := store.counts()
@@ -100,7 +100,7 @@ func TestMirrorAppendsOnlyNewRowsAndChangedConfiguration(t *testing.T) {
 	require.Equal(t, 1, appended)
 	require.Zero(t, configs, "an unchanged configuration is not rewritten")
 
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "two")
 
 	_, appends, appended, configs = store.counts()
@@ -108,14 +108,14 @@ func TestMirrorAppendsOnlyNewRowsAndChangedConfiguration(t *testing.T) {
 	require.Equal(t, 1, appended)
 	require.Equal(t, 1, configs)
 
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 
 	replaces, appends, _, _ = store.counts()
 	require.Equal(t, 1, replaces)
 	require.Equal(t, 2, appends, "an unchanged generation is not written")
 
 	appendFile(t, path, "4}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`, `{"d":4}`}, "two")
 }
 
@@ -127,11 +127,11 @@ func TestMirrorRepublishesARewrittenHistory(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 
 	_, err := WriteJSONL(path, [][]byte{[]byte(`{"x":1}`), []byte(`{"y":2}`)})
 	require.NoError(t, err)
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	requireStored(t, store, []string{`{"x":1}`, `{"y":2}`}, "one")
 
 	replaces, appends, _, _ := store.counts()
@@ -140,7 +140,7 @@ func TestMirrorRepublishesARewrittenHistory(t *testing.T) {
 
 	_, err = WriteJSONL(path, [][]byte{[]byte(`{"x":1}`), []byte(`{"y":2}`), []byte(`{"z":3}`)})
 	require.NoError(t, err)
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	requireStored(t, store, []string{`{"x":1}`, `{"y":2}`, `{"z":3}`}, "one")
 
 	replaces, appends, appended, _ := store.counts()
@@ -157,14 +157,14 @@ func TestMirrorRefusesAShorterHistoryUntilReset(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n{\"b\":2}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	require.NoError(t, os.Remove(path))
 
-	require.ErrorContains(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})), "shrank")
+	require.ErrorContains(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))), "shrank")
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
 
 	mirror.Reset()
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "rebound"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "rebound"}))))
 	requireStored(t, store, []string{}, "rebound")
 }
 
@@ -176,11 +176,11 @@ func TestMirrorRepairsAGenerationWrittenAroundIt(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"other":1}`), []byte(`{"other":2}`)}, testRecord{Model: "other"}))
 
 	appendFile(t, path, "{\"b\":2}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
 }
 
@@ -192,23 +192,23 @@ func TestMirrorFailureKeepsThePreviousGeneration(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 
 	appendFile(t, path, "{\"b\":2}\n")
 	store.mu.Lock()
 	store.fail = true
 	store.mu.Unlock()
-	require.Error(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.Error(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 	requireStored(t, store, []string{`{"a":1}`}, "one")
 
 	store.mu.Lock()
 	store.fail = false
 	store.mu.Unlock()
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "two")
 
 	appendFile(t, path, "not json\n")
-	require.Error(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"})))
+	require.Error(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "two"}))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "two")
 }
 
@@ -227,7 +227,7 @@ func TestMirrorHydrateMaterializesStoredRowsThenAppends(t *testing.T) {
 
 	var validated int
 
-	rows, err := mirror.Hydrate(ctx, path, stored, record, func(rows [][]byte) error {
+	rows, _, err := mirror.Hydrate(ctx, path, stored, record, func(rows [][]byte) error {
 		validated = len(rows)
 
 		return nil
@@ -241,7 +241,7 @@ func TestMirrorHydrateMaterializesStoredRowsThenAppends(t *testing.T) {
 	require.Equal(t, "{\"a\":1}\n{\"b\":2}\n", string(data))
 
 	appendFile(t, path, "{\"c\":3}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(record)))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(record))))
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
 
 	replaces, appends, appended, configs := store.counts()
@@ -265,7 +265,7 @@ func TestMirrorHydrateAdoptsLongerNativeRows(t *testing.T) {
 	require.NoError(t, err)
 
 	mirror := NewMirror(store, "s")
-	rows, err := mirror.Hydrate(ctx, path, stored, record, nil)
+	rows, _, err := mirror.Hydrate(ctx, path, stored, record, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{`{"a":1}`, `{"native":2}`}, rowStrings(rows))
 	requireStored(t, store, []string{`{"a":1}`, `{"native":2}`}, "one")
@@ -276,11 +276,11 @@ func TestMirrorHydrateAdoptsLongerNativeRows(t *testing.T) {
 
 	_, err = WriteJSONL(path, [][]byte{[]byte(`{"different":1}`)})
 	require.NoError(t, err)
-	_, err = NewMirror(store, "s").Hydrate(ctx, path, rows, record, nil)
+	_, _, err = NewMirror(store, "s").Hydrate(ctx, path, rows, record, nil)
 	require.Error(t, err, "a disagreement at a shared position fails")
 
 	refused := errors.New("not this session's rows")
-	_, err = NewMirror(store, "s").Hydrate(ctx, filepath.Join(t.TempDir(), "absent.jsonl"), rows, record, func([][]byte) error { return refused })
+	_, _, err = NewMirror(store, "s").Hydrate(ctx, filepath.Join(t.TempDir(), "absent.jsonl"), rows, record, func([][]byte) error { return refused })
 	require.ErrorIs(t, err, refused)
 }
 
@@ -317,9 +317,9 @@ func TestMirrorContinuesANonFileSourceFromItsPosition(t *testing.T) {
 		return testRecord{Model: "one"}, nil
 	}
 
-	require.NoError(t, mirror.Commit(ctx, source.read, record))
+	require.NoError(t, errOf(mirror.Commit(ctx, source.read, record)))
 	source.rows = append(source.rows, []byte(`{"m":2}`), []byte(`{"m":3}`))
-	require.NoError(t, mirror.Commit(ctx, source.read, record))
+	require.NoError(t, errOf(mirror.Commit(ctx, source.read, record)))
 	requireStored(t, store, []string{`{"m":1}`, `{"m":2}`, `{"m":3}`}, "one")
 
 	require.Equal(t, []any{nil, 1}, source.reads, "the second read continues from the committed position")
@@ -350,7 +350,7 @@ func TestMirrorAdoptWritesNothingAndContinues(t *testing.T) {
 	require.Equal(t, 1, replaces, "adopting writes nothing")
 	require.Zero(t, appends)
 
-	require.NoError(t, mirror.Commit(ctx, source.read, fixed(record)))
+	require.NoError(t, errOf(mirror.Commit(ctx, source.read, fixed(record))))
 	requireStored(t, store, []string{`{"m":1}`, `{"m":2}`, `{"m":3}`}, "one")
 	require.Equal(t, []any{2}, source.reads)
 
@@ -366,7 +366,7 @@ func TestMirrorRecordFailureWritesNothing(t *testing.T) {
 	store := newCountingStore()
 	refused := errors.New("session is closing")
 
-	err := NewMirror(store, "s").Commit(t.Context(), Rows([][]byte{[]byte(`{"a":1}`)}), func(Tail) (any, error) { return nil, refused })
+	err := errOf(NewMirror(store, "s").Commit(t.Context(), Rows([][]byte{[]byte(`{"a":1}`)}), func(Tail) (any, error) { return nil, refused }))
 	require.ErrorIs(t, err, refused)
 
 	replaces, appends, _, _ := store.counts()
@@ -385,8 +385,8 @@ func TestMirrorValidatesOnlyRowsPastTheCommittedPrefix(t *testing.T) {
 		{Key: acpcore.SessionKey{SessionID: "s"}, Entries: entries(held)},
 	}))
 
-	require.NoError(t, mirror.Commit(ctx, Rows(append(held, []byte(`{"c":3}`))), fixed(testRecord{Model: "one"})))
-	require.Error(t, mirror.Commit(ctx, Rows(append(held, []byte(`{"c":3}`), []byte(`{`))), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, Rows(append(held, []byte(`{"c":3}`))), fixed(testRecord{Model: "one"}))))
+	require.Error(t, errOf(mirror.Commit(ctx, Rows(append(held, []byte(`{"c":3}`), []byte(`{`))), fixed(testRecord{Model: "one"}))))
 }
 
 func TestMirrorHydrateCutsATornNativeTail(t *testing.T) {
@@ -403,12 +403,12 @@ func TestMirrorHydrateCutsATornNativeTail(t *testing.T) {
 	require.NoError(t, err)
 
 	mirror := NewMirror(store, "s")
-	rows, err := mirror.Hydrate(ctx, path, stored, record, nil)
+	rows, _, err := mirror.Hydrate(ctx, path, stored, record, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{`{"a":1}`, `{"b":2}`}, rowStrings(rows))
 
 	appendFile(t, path, "{\"c\":3}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(record)), "the next native line starts on a line of its own")
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(record))), "the next native line starts on a line of its own")
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
 }
 
@@ -420,7 +420,7 @@ func TestMirrorRereadsSourceAndRecordAfterAFailedAppend(t *testing.T) {
 	mirror := NewMirror(store, "s")
 
 	appendFile(t, path, "{\"a\":1}\n")
-	require.NoError(t, mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"})))
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
 	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"other":1}`), []byte(`{"other":2}`)}, testRecord{Model: "other"}))
 	appendFile(t, path, "{\"b\":2}\n")
 
@@ -437,8 +437,108 @@ func TestMirrorRereadsSourceAndRecordAfterAFailedAppend(t *testing.T) {
 		return testRecord{Model: "one"}, nil
 	}
 
-	require.NoError(t, mirror.Commit(ctx, source, record))
+	require.NoError(t, errOf(mirror.Commit(ctx, source, record)))
 	require.Equal(t, 2, reads, "the refused append rereads the whole history")
 	require.Equal(t, 2, records, "the configuration is computed for each read")
 	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
+}
+
+func TestMirrorReportsWhatEachCommitWrote(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+	record := fixed(testRecord{Model: "one"})
+
+	appendFile(t, path, "{\"a\":1}\n")
+	report, err := mirror.Commit(ctx, File(path), record)
+	require.NoError(t, err)
+	require.Equal(t, CommitReport{Republish: RepublishInitial}, report)
+	require.False(t, report.Recovery())
+
+	appendFile(t, path, "{\"b\":2}\n{\"c\":3}\n")
+	report, err = mirror.Commit(ctx, File(path), record)
+	require.NoError(t, err)
+	require.Equal(t, CommitReport{Appended: 2}, report)
+
+	report, err = mirror.Commit(ctx, File(path), record)
+	require.NoError(t, err)
+	require.Equal(t, CommitReport{}, report, "an unchanged generation writes nothing")
+
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"other":1}`)}, testRecord{Model: "other"}))
+	appendFile(t, path, "{\"d\":4}\n")
+	report, err = mirror.Commit(ctx, File(path), record)
+	require.NoError(t, err)
+	require.Equal(t, RepublishAppendFailed, report.Republish)
+	require.Error(t, report.AppendErr, "the refused append is reported, not swallowed")
+	require.True(t, report.Recovery())
+
+	_, err = WriteJSONL(path, [][]byte{[]byte(`{"x":1}`), []byte(`{"y":2}`), []byte(`{"z":3}`), []byte(`{"w":4}`)})
+	require.NoError(t, err)
+	report, err = mirror.Commit(ctx, File(path), record)
+	require.NoError(t, err)
+	require.Equal(t, CommitReport{Republish: RepublishRewritten}, report)
+	require.True(t, report.Recovery())
+}
+
+func TestMirrorNamesTheFileAndOffsetOfAnInvalidRow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))))
+
+	appendFile(t, path, "{\"b\":2}\n{\"half\n")
+	_, err := mirror.Commit(ctx, File(path), fixed(testRecord{Model: "one"}))
+	require.ErrorContains(t, err, path+" at byte 16")
+	requireStored(t, store, []string{`{"a":1}`}, "one")
+}
+
+func TestMirrorHydrateCutsInvalidUncommittedRows(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"a":1}`)}, testRecord{Model: "one"}))
+
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	appendFile(t, path, "{\"a\":1}\n{\"b\":2}\n{\"half\n{\"c\":3}\n")
+
+	var record testRecord
+	stored, _, err := Load(ctx, store, "s", &record)
+	require.NoError(t, err)
+
+	mirror := NewMirror(store, "s")
+	rows, report, err := mirror.Hydrate(ctx, path, stored, record, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{`{"a":1}`, `{"b":2}`}, rowStrings(rows))
+	require.Equal(t, int64(len("{\"half\n{\"c\":3}\n")), report.InvalidCut)
+	require.True(t, report.Changed())
+	require.Equal(t, CommitReport{Appended: 1}, report.Commit)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "{\"a\":1}\n{\"b\":2}\n", string(data))
+
+	appendFile(t, path, "{\"d\":4}\n")
+	require.NoError(t, errOf(mirror.Commit(ctx, File(path), fixed(record))), "the next commit is no longer wedged")
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"d":4}`}, "one")
+}
+
+func TestMirrorHydrateReportsARewrite(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"a":1}`)}, testRecord{Model: "one"}))
+
+	var record testRecord
+	stored, _, err := Load(ctx, store, "s", &record)
+	require.NoError(t, err)
+
+	_, report, err := NewMirror(store, "s").Hydrate(ctx, filepath.Join(t.TempDir(), "log.jsonl"), stored, record, nil)
+	require.NoError(t, err)
+	require.Equal(t, HydrateReport{Rewritten: true}, report)
 }
