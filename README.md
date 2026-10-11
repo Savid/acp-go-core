@@ -61,8 +61,9 @@ family's `go.mod` files.
 
 - The family implements published ACP v1. Adopting v2 is one coordinated
   cutover across the family and its hosts.
-- Protocol claims come from the published spec and schema. The pinned Go SDK is
-  evidence for its own generated types and transport bounds only.
+- Protocol claims come from the published spec and schema. The required Go
+  SDK version is evidence for its own generated types and transport bounds
+  only.
 - The reserved family literals are defined in
   [docs/00](docs/00-overview.md#family-global-reserved-literals).
 - Current upstream status and adoption triggers live in the

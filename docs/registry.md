@@ -26,14 +26,14 @@ defines storage and wire publication.
 
 | Sibling | Kind | Carrier record |
 |---|---|---|
-| claude | Native transcript rows plus a `config` subpath | The current record holds cwd, the transcript location as `nativePath`, the title, accepted environment and paths, model, permission mode, effort, system prompt, bare mode, output schema, and output style. Empty conversations commit configuration with an empty main record. |
-| codex | Append-only rollout rows plus a `config` subpath | A generation contains the rollout rows and one session record naming the rollout as `nativePath`, the title, the accepted session environment, the ordered paths, and the session's model, mode, effort, tier, personality, policies, output schema, and admitted image bytes keyed by native tool identity. Empty conversations commit configuration with an empty main record. If native resume reports no rollout and neither the store nor the recorded rollout, re-rooted by its file name in the resuming home, has rows, restore creates a new native thread and commits its binding under the unchanged ACP session id. |
-| pi | Append-only session JSONL rows plus a `config` subpath | A generation contains the native rows and one session record naming pi's session file as `nativePath`, the title, the accepted session environment, the ordered paths, model, thinking level, permission, and auto-retry. Empty conversations commit configuration with an empty main record; restore then resumes the recorded session file without a native header. |
-| hermes | One row per exported message plus a `config` subpath | The configuration holds the exported session object without its messages, the title, cwd, additional directories, environment, ordered paths, model, and effort, so an empty conversation has no rows. A message Hermes changed in place republishes the conversation. Missing state imports before binding a native session. A restore over native history that begins with exactly the stored messages adopts the stored generation without a write; archive flags are not content, so a history Hermes archived after the last commit restores and is republished. Existing shorter or divergent history fails restore. |
-| opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The configuration holds the title, cwd, additional directories, environment, ordered paths, model, mode, permission, variant, output schema, and captured local image bytes or refusal records. Restore imports missing events one conversation at a time, parents first. |
-| opencodev2 | Native message rows plus a `config` subpath | The main record holds one row per settled native message, each naming its session, merged by creation time; a session with no messages, including an empty root, has no rows. Configuration holds the graph's native session objects, the title, cwd, additional directories, environment, ordered paths, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
-| amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The configuration holds cwd, additional directories, ACP and native session ids, service origin, mode, environment, ordered paths, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
-| nanocodex | Raw native rollout rows plus a `config` subpath | The carrier holds ACP/native IDs, a home-relative rollout path, cwd, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, environment, ordered paths, tool-shell environment names, output-token bound, title, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its file changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
+| claude | Native transcript rows plus a `config` subpath | The record adds the transcript location as `nativePath`, model, permission mode, effort, system prompt, bare mode, output schema, and output style. An empty conversation has an empty main record. |
+| codex | Append-only rollout rows plus a `config` subpath | The record adds the rollout as `nativePath`, model, mode, effort, tier, personality, policies, output schema, and admitted image bytes keyed by native tool identity. An empty conversation has an empty main record. If native resume reports no rollout and neither the store nor the recorded rollout, re-rooted by its file name in the resuming home, has rows, restore creates a new native thread and commits its binding under the unchanged ACP session id. |
+| pi | Append-only session JSONL rows plus a `config` subpath | The record adds pi's session file as `nativePath`, model, thinking level, permission, and auto-retry. An empty conversation has an empty main record; restore then resumes the recorded session file without a native header. |
+| hermes | One row per exported message plus a `config` subpath | The record adds the exported session object without its messages, model, and effort, so an empty conversation has no rows. A message Hermes changed in place republishes the conversation. Missing state imports before binding a native session. A restore over native history that begins with exactly the stored messages adopts the stored generation without a write; archive flags are not content, so a history Hermes archived after the last commit restores and is republished. Existing shorter or divergent history fails restore. |
+| opencode | Online native sync-event graph plus a `config` subpath | The graph contains the root conversation and its descendants; it always carries the root creation event, so an empty main record never occurs and fails restore. The record adds model, mode, permission, variant, output schema, and captured local image bytes or refusal records. Restore imports missing events one conversation at a time, parents first. |
+| opencodev2 | Native message rows plus a `config` subpath | The main record holds one row per settled native message, each naming its session, merged by creation time; a session with no messages, including an empty root, has no rows. The record adds the graph's native session objects, model, mode, permission, variant, captured local image bytes or refusals, and deferred synthetic inbox entries. Import creates missing sessions and re-enqueues saved synthetic entries without starting execution; shorter or conflicting native messages fail restore. |
+| amp | Raw native thread export plus a `config` subpath | The main record is one raw `threads export` document, so an empty conversation is an export with no messages. The record adds the service origin, mode, update time, and historic usage keyed by native protocol message id. A confirmed missing thread is imported into a private replacement under the same ACP id; compaction summaries stay in the export and cannot be imported. |
+| nanocodex | Raw native rollout rows plus a `config` subpath | The record adds a home-relative rollout path, the native or gateway model, any explicit `baseModel` and `contextWindow`, effort, endpoint, `modelIdPrefix`, transport, credential-variable name and auth-file path, tool-shell environment names, output-token bound, started state, the time of the last accepted turn or configuration change, and the cumulative cost once a call is priced. A configuration-only change commits no rows, and listing reads configuration records alone. After a prompted helper shuts down, it atomically replaces an optional checkpoint sidecar containing the snapshot head, request prefix, context accounting, and any pending compaction after a context overflow; `config.checkpoint` mirrors the latest copy. The sidecar is read again only when its file changed. Restore uses it only when its boundary, history length, identity, and supported shape match, otherwise rebuilding from native history. Optional checkpoint failures do not fail committed turns. A verified untouched header-only rollout receives a fresh native binding during observation or pre-prompt launch; the prior file remains. |
 
 ### Mirror-Commit Ordering
 
@@ -41,7 +41,7 @@ defines storage and wire publication.
 |---|---|
 | claude | A native `result` settles a prompt. Context usage and transcript rows commit before idle and the response. Close interrupts the turn, signals and waits the process, commits the final transcript, then fences. |
 | codex | Settlement reads the rollout after `turn/completed` and commits the new rows before the terminal idle and the response. Close interrupts any turn, unsubscribes the thread, commits, then fences; the shared app-server stays up for its peers. |
-| pi | Settlement reads pi's session file after `agent_settled` and commits the new rows before the terminal idle and the response. Close aborts any turn once an in-progress compaction ends, waiting at most five minutes, stops the process, commits, then fences. |
+| pi | Settlement reads pi's session file after `agent_settled` and commits the new rows before the terminal idle and the response. Close aborts any turn, stops the process, commits, then fences. |
 | hermes | `message.complete` settles the turn; callbacks finish before HTTP export, atomic mirror, idle, and response. Close interrupts pending work, exports while the gateway is available, then stops it. |
 | opencode | Native prompt HTTP completion settles the turn, which reads its own messages a page at a time from the newest; callbacks join before one idle-bracketed read of the events added since the last commit, appended before idle and response. Events OpenCode writes after the turn reports idle join the next commit. Restore adopts the stored history and commits only newer native events and the configuration. Close snapshots while HTTP remains available, then releases the binding. |
 | opencodev2 | `session.execution.succeeded`, `failed`, or non-shutdown `interrupted` settles execution; HTTP prompt acceptance does not. Callbacks join, then the root export ends at the terminal event’s durable idle marker and each descendant export ends at its latest idle marker, or has empty history before its first completed execution. Each session is exported once, and commits continue from what the store holds: only messages past it and a changed configuration commit before idle and response. The resume point carries a SHA-256 of each session's stored message bytes; a message settling before mirrored ones, a stored message whose bytes changed, or a mirrored session leaving the graph republishes the generation. Restore preserves saved message identity, order, and content while accepting newly completed assistant, shell, and compaction records omitted by earlier exports. A shutdown interrupt ends the binding. Operations without a terminal boundary require native wait and matching idle graph snapshots. Close snapshots while HTTP remains available, then releases the binding. |
@@ -55,7 +55,7 @@ Only pi adds a vendor cause: `extension`.
 | Sibling | Native mapping and disclosed detail |
 |---|---|
 | claude | Native error results supply `errors`, `error`, or `result`. |
-| codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. A refusal naming a function call whose arguments are not JSON runs the history repair and reports its outcome as `recovery`. |
+| codex | A `turn/completed` outside the `completed` and `interrupted` statuses is provider, carrying the native error message, `httpStatusCode` as `statusCode`, and `codexErrorInfo.code` as `providerCode`; a refused `turn/start` and a non-retried `error` notification are provider with the native message. A refusal naming a function call whose arguments are not JSON runs the [history repair](#known-deviations). |
 | pi | Command rejection preserves native text. Wrapper extension failure is `extension` carrying the extension's own error text. |
 | hermes | Native result status or RPC rejection supplies provider detail. |
 | opencode | Prompt HTTP rejection or assistant error records supply provider detail. Failed native history reads are transport errors, preserving native HTTP status as `statusCode`. |
@@ -123,7 +123,7 @@ model and removes the cost estimates.
 |---|---|
 | claude | Cancels callbacks and the turn, signals and waits the process, commits final transcript rows, terminalizes an agent-origin cycle, and fences. |
 | codex | Cancels the turn and its dialogs, interrupts the native turn, unsubscribes the thread, commits rollout rows and the session record, and fences. The app-server and its other threads continue. |
-| pi | Cancels the turn and its dialogs, lets an in-progress compaction end within five minutes, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
+| pi | Cancels the turn and its dialogs, signals and waits the process, commits native rows and the session record, terminalizes an open agent-origin cycle, and fences. |
 | hermes | Cancels and joins callbacks, interrupts pending work, commits the native export, stops and waits the gateway, then fences. |
 | opencode | Cancels callbacks and turns, snapshots the native graph, releases the logical binding, and fences. The shared server continues for peers. |
 | opencodev2 | Cancels callbacks and turns, interrupts native execution, snapshots the native graph, releases the binding, and fences. The shared server continues for peers. |
@@ -236,8 +236,9 @@ and the [call breakdown](04-behavior.md#call-breakdown):
 - **nanocodex:** each native `model.call.completed` supplies its Responses usage.
   Each retried gateway attempt is published as `_meta.nanocodex.attemptDiscarded`
   on an otherwise empty `session_info_update`, carrying the attempt's item keys,
-  streamed bytes, classification, and reported usage; that usage is added to
-  the prompt response's usage.
+  each `{messageId, kind}` its discarded chunks carried (`message` or
+  `thought`), streamed bytes, classification, and reported usage; that usage is
+  added to the prompt response's usage.
   `used` is that call's total tokens; `size` is the session's configured
   context window, else the native model's default window, else zero for a
   gateway model with no configured window. The breakdown subtracts cache reads
@@ -374,7 +375,7 @@ entries fail.
 | opencode | `model`, `mode`, `effort` | Nonempty values forward unchanged on the next prompt. Model IDs must be provider-qualified. `effort` appears only while set. |
 | opencodev2 | `model`, `mode`, `effort` | Native session model and agent endpoints apply selections. Model IDs must be provider-qualified. The model variant carries effort; `effort` appears only while set. Unspecified selections resolve from native model and agent defaults. |
 | amp | `mode` | Forwarded unchanged as `--mode` on the next prompt process; native `agent_mode` updates the accepted value. Menu `low`, `medium`, `high`, `ultra`, plus the accepted value when outside it. No `model` option is advertised and `configId: "model"` is refused. |
-| nanocodex | `model`, `effort` (category `thought_level`) | `effort` selects the `effort` session option. Short observation processes validate selections and report effective values. Model changes are accepted only before the first committed turn; effort changes apply to subsequent prompts. |
+| nanocodex | `model`, `effort` (category `thought_level`) | `effort` selects the `effort` session option. Short observation processes validate selections and report effective values. Model changes are accepted only before the first committed turn; effort changes apply to subsequent prompts, and a gateway request carries the effort of the latest native `configuration_update`. |
 
 ### How each model catalog is built
 
@@ -595,10 +596,10 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   to 4 MiB. Native rollout rows containing whole histories are not protocol frames
   and are not subject to the helper's 32 MiB frame bound.
 
-- **Nanocodex persistence:** full native-file reads preserve a complete final
-  JSON row without a newline and discard only a bounded invalid unterminated
-  tail; committed-byte reads require newline-terminated rows. Locked hydration
-  atomically normalizes final framing before the helper opens the rollout.
+- **Nanocodex persistence:** only newline-terminated records are mirrored.
+  While the helper is stopped and its writer lock is held, a final record
+  without its newline receives one when it is a complete JSON object of any
+  length and is removed otherwise, before the helper opens the rollout.
   Listing skips malformed stored generations; store backend failures
   return the bare internal-failure token. Its optional internal-failure classes
   are `native_start`, `native_state`, and `lifecycle`.
@@ -660,8 +661,7 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   function call whose arguments are not JSON, and a provider that validates
   history refuses every later request. On that refusal the adapter unloads the
   thread, rewrites each such call's arguments as `{}` in the rollout, resumes
-  the thread, and republishes the whole rollout before the turn's failure
-  returns with `recovery`. A restore whose stored copy still holds such a call
+  the thread, and republishes the whole rollout before the turn fails. A restore whose stored copy still holds such a call
   repairs it in the stored copy and, after unloading the thread, rewrites it in
   the native rollout before comparing the two.
 - **Codex tool output:** ACP replaces a tool call's whole content array on
@@ -670,6 +670,11 @@ establishment (claude, hermes, opencode, opencodev2, pi).
   that grew without doubling has waited at least two seconds since the last
   send, longer for large output so those sends carry at most 64 KiB a second.
   The terminal update carries the complete output.
+- **Pi compaction and interrupts:** a `session/cancel` or `session/close` that
+  arrives while pi compacts waits for the compaction to end, under one
+  five-minute deadline per interrupt, before it aborts the run or stops the
+  process, so the summary pi is generating is kept. A cancelled turn then has
+  five seconds to settle before its process is stopped.
 - **Pi snapshots its catalog once** at native start; a mid-session credential
   change does not move the menu.
 - **Pi extensions:** the wrapper-owned bridge and PATH extensions load with

@@ -151,7 +151,7 @@ never depends on the developer's own environment for a credential or a route.
 ### Context Compaction
 
 Core tests MUST prove the exact [carrier](02-wire-contract.md#compaction-envelope)
-through pinned SDK serialization and deserialization, omission of unknown facts,
+through the required SDK version's serialization and deserialization, omission of unknown facts,
 preservation of reported zeroes, reserved caller-metadata rejection, and refusal
 of a start without a correlation key.
 

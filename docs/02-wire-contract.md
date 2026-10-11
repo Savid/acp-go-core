@@ -11,7 +11,7 @@ capabilities, the media bounds, the handoff key, and the lifecycle answer vary.
 The top-level `_meta` block is absent when the host omitted the lifecycle
 capability. `auth`,
 `mcpCapabilities`, `promptCapabilities`, and `sessionCapabilities` are
-struct-typed in the pinned SDK and are always present, empty where nothing is
+struct-typed in the required SDK version and are always present, empty where nothing is
 advertised.
 
 ```json
@@ -305,7 +305,7 @@ and output tokens. No other sibling has this exception.
 
 ## Banned SDK Routes
 
-The pinned SDK dispatches these only if a sibling implements the optional
+The required SDK version dispatches these only if a sibling implements the optional
 interface. No sibling does:
 
 - `session/fork`: no sibling implements `UnstableForkSession`, so the route is
@@ -313,7 +313,7 @@ interface. No sibling does:
 - `document/*`, `nes/*`, `providers/*`.
 - `session/set_mode`: the required method returns method-not-found.
 - `mcp/message`: never implemented. `mcpCapabilities` advertises every
-  transport false: the pinned SDK types it as a struct, so the key rides as
+  transport false: the required SDK version types it as a struct, so the key rides as
   `{}`, which is the ACP default and advertises nothing
   ([watchlist](../tracking/upstream-acp.md)); no MCP server value is ever
   accepted.
@@ -470,7 +470,7 @@ a harness-returned path, not a host handoff path.
 ### Output Frame Clamp
 
 Output limits clamp to 7,864,155 decoded bytes. Base64 of that is 10,485,540
-characters; the pinned SDK's line scanner is bounded at 10,485,760 bytes, which
+characters; the required SDK version's line scanner is bounded at 10,485,760 bytes, which
 leaves 220 bytes for the JSON-RPC envelope. The scanner bound is an unexported
 SDK constant, so an SDK version change re-derives this clamp. The transport refuses
 an inbound line past the same bound before retaining it, so an oversized frame

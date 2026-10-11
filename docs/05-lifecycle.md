@@ -91,7 +91,7 @@ exactly once. A logical session close never terminates peers.
 ## JSON-RPC Request Cancellation
 
 `$/cancel_request` is stable ACP v1 and distinct from `session/cancel`. The
-pinned SDK cancels the addressed handler context and sends a best-effort
+required SDK version cancels the addressed handler context and sends a best-effort
 outbound `$/cancel_request` when an in-flight peer-request context is
 cancelled. Handler work derives from the SDK context, and permission,
 elicitation, and client requests receive their owning turn context rather than
@@ -100,7 +100,7 @@ once with a valid result or `-32800`.
 
 A prompt's native turn is not cancelled by its own handler context. Only
 `session/cancel`, `session/close`, `session/delete`, or incarnation loss
-cancels a turn. The pinned SDK cancels the previous prompt's handler context
+cancels a turn. The required SDK version cancels the previous prompt's handler context
 when a second `session/prompt` arrives for the same session
 ([watchlist](../tracking/upstream-acp.md)); a refused second prompt MUST NOT
 end the first.

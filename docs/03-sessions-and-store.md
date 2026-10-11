@@ -116,8 +116,11 @@ until `session/delete`. Every other rule of a session applies unchanged.
 Each sibling exports exactly one `<vendor>-<native-state-kind>-v<N>` format. A
 stored layout the previous format cannot read takes the next `N`. Raw
 native rows or exports are mirrored after turns under the main subpath, plus a
-configuration sidecar. The [registry](registry.md#session-stores) records each
-sibling's kind and carrier record.
+configuration sidecar. Every configuration record holds the identities
+[below](#lifecycle-stream-and-incarnation-identity), the title, cwd, and the
+accepted session options, such as additional directories, environment, and
+ordered path directories. The [registry](registry.md#session-stores) records
+each sibling's kind and the members its record adds.
 
 A multiplexed runtime persists one logical session at a time and never
 snapshots or restores the shared native runtime root.
@@ -171,9 +174,20 @@ nil. A commit:
 
 A restore that loaded the generation tells the mirror with `Adopt`, which
 writes nothing, so the next commit appends. `Mirror.Hydrate` applies the
-[hydrate rules](#hydrate-in) to an append-only JSONL file, cutting a torn
-trailing line before the harness writes after it, and adopts the stored
-generation.
+[hydrate rules](#hydrate-in) to an append-only JSONL file and adopts the
+stored generation. Before reconciling it cuts a torn trailing line, so the
+harness never writes after one, and cuts the native file from the first
+invalid row past the stored rows, which was never committed. An invalid row
+from a JSONL read fails a commit with an error naming its file and byte
+offset.
+
+Recoveries are reported, never silent. `Commit` returns a `CommitReport`
+naming the rows it appended or why it republished: `initial`, `rewritten`, or
+`append_failed` with the append's error. `Hydrate` returns a `HydrateReport`
+of what it cut, terminated, rewrote, and committed, and `CutTornTail` a
+`TornTail`. A sibling passes a commit's republish reason to
+`observer.RecordRepublish` and logs one warning for each recovery a report
+names.
 
 `ReadJSONL` returns only complete lines after its cursor and reads the whole
 file again when it was replaced, truncated, or rewritten within the first or

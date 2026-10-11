@@ -330,7 +330,9 @@ A native turn failure is any way a turn ends other than a clean stop reason.
   exit status and stderr tail so `message` names the real cause.
 - **A recovery is reported, never hidden.** A sibling that repairs native
   state after a failure so the next prompt can succeed still fails the turn
-  and reports the outcome as `recovery`.
+  and adds `recovery`: `recovered` when the repair succeeded, `failed` when it
+  did not. The [registry](registry.md#turn-failure) records each sibling's
+  recoveries.
 - **The session stays addressable and retriable.** A failure neither removes,
   tombstones, nor poisons the session. The next prompt re-drives the turn,
   relaunching the native process lazily where the lifecycle requires. Only a
