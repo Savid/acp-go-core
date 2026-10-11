@@ -152,6 +152,24 @@ func (p *Process) StderrTail() string {
 	return string(bytes.TrimSpace(p.tail))
 }
 
+// LaunchFailure explains a launch that failed before the harness named name was
+// ready. A process that already exited is reported as such; either way the
+// stderr tail, where a dying or stalled harness states its reason, follows
+// err.
+func LaunchFailure(p *Process, name string, err error) error {
+	select {
+	case <-p.Done():
+		err = fmt.Errorf("%s exited before it was ready: %w", name, err)
+	default:
+	}
+
+	if tail := p.StderrTail(); tail != "" {
+		return fmt.Errorf("%w: %s", err, tail)
+	}
+
+	return err
+}
+
 func (p *Process) flushStderr() {
 	select {
 	case <-p.tailClosed:

@@ -3,7 +3,9 @@
 package wire
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
@@ -45,6 +47,14 @@ const (
 	CauseTransport   = "transport"
 	CauseProvider    = "provider"
 )
+
+// ClassNativeStart is the internal-failure class of a native process that
+// failed to start.
+const ClassNativeStart = "native_start"
+
+// CauseNativeSessionIdentityDrift is the poison cause of an unexpected native
+// session id change.
+const CauseNativeSessionIdentityDrift = "native_session_identity_drift"
 
 // Off-prompt -32603 token suffixes. A sibling prefixes each with its vendor key.
 const (
@@ -114,6 +124,17 @@ func SeedFileRefusal(err error) *acp.RequestError {
 	}
 
 	return nil
+}
+
+// AuthenticateRefused answers every authenticate request: the harness
+// authenticates itself, outside ACP. A reserved lifecycle key in the request
+// metadata is refused first.
+func AuthenticateRefused(params acp.AuthenticateRequest) *acp.RequestError {
+	if refusal := lifecycle.RejectKey(params.Meta); refusal != nil {
+		return ParamRefusal(refusal)
+	}
+
+	return acp.NewInvalidParams(map[string]any{"methodId": params.MethodId})
 }
 
 // CancelledResponse answers a prompt whose turn ended by cancellation.
@@ -199,6 +220,15 @@ func InvalidOptions(vendor, field string) *acp.RequestError {
 // RestoreFailed reports a store entry that could not be restored.
 func RestoreFailed(vendor string) *acp.RequestError {
 	return acp.NewInternalError(map[string]any{FieldError: vendor + "_" + TokenRestoreFailed})
+}
+
+// RestoreRefused logs why the stored session sessionID could not be restored
+// and returns the uniform restore failure; the reason stays in the log.
+func RestoreRefused(ctx context.Context, logger *slog.Logger, vendor string, sessionID acp.SessionId, err error) *acp.RequestError {
+	logger.ErrorContext(ctx, "session restore failed", slog.String("vendor", vendor),
+		slog.String("session_id", string(sessionID)), slog.String("reason", err.Error()))
+
+	return RestoreFailed(vendor)
 }
 
 // RuntimeUnavailable reports a shared runtime that is gone and could not be

@@ -3,6 +3,7 @@ package wire
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -27,8 +28,11 @@ func TestUniformErrors(t *testing.T) {
 		{"invalid options fieldless", InvalidOptions("pi", ""), -32603, map[string]any{"error": "pi_invalid_options"}},
 		{"restore failed", RestoreFailed("codex"), -32603, map[string]any{"error": "codex_restore_failed"}},
 		{"runtime unavailable", RuntimeUnavailable("codex"), -32603, map[string]any{"error": "codex_runtime_unavailable"}},
-		{"poisoned", SessionPoisoned("amp", "native_session_id_drift"), -32603, map[string]any{"error": "amp_session_poisoned", "cause": "native_session_id_drift"}},
-		{"internal", InternalFailure("claude", "deadline"), -32603, map[string]any{"error": "claude_internal_failure", "class": "deadline"}},
+		{"poisoned", SessionPoisoned("amp", CauseNativeSessionIdentityDrift), -32603, map[string]any{"error": "amp_session_poisoned", "cause": "native_session_identity_drift"}},
+		{"internal", InternalFailure("claude", ClassNativeStart), -32603, map[string]any{"error": "claude_internal_failure", "class": "native_start"}},
+		{"authenticate", AuthenticateRefused(acp.AuthenticateRequest{MethodId: "token"}), -32602, map[string]any{"methodId": "token"}},
+		{"authenticate lifecycle key", AuthenticateRefused(acp.AuthenticateRequest{MethodId: "token", Meta: map[string]any{LifecycleKey: map[string]any{}}}), -32602,
+			map[string]any{"error": "unsupported", "field": `_meta["` + LifecycleKey + `"]`}},
 		{"turn failed", TurnFailed("hermes", TurnFailure{Cause: CauseProvider, Message: "boom", StatusCode: 429, ProviderCode: "rate"}), -32603,
 			map[string]any{"error": "hermes_turn_failed", "cause": "provider", "message": "boom", "statusCode": 429, "providerCode": "rate"}},
 		{"image turn failed", TurnFailed("pi", TurnFailure{Cause: CauseTransport, Message: "gone", Stage: "image_output", Reason: "storage_failed"}), -32603,
@@ -42,6 +46,17 @@ func TestUniformErrors(t *testing.T) {
 			require.Equal(t, tc.data, tc.err.Data)
 		})
 	}
+}
+
+func TestRestoreRefusedLogsTheReason(t *testing.T) {
+	t.Parallel()
+
+	var logged strings.Builder
+
+	logger := slog.New(slog.NewTextHandler(&logged, nil))
+	refusal := RestoreRefused(t.Context(), logger, "pi", "session-1", errors.New("row 3 is not json"))
+	require.Equal(t, RestoreFailed("pi"), refusal)
+	require.Contains(t, logged.String(), `msg="session restore failed" vendor=pi session_id=session-1 reason="row 3 is not json"`)
 }
 
 func TestReservedMeta(t *testing.T) {

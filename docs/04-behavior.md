@@ -292,6 +292,8 @@ rules, including work before prompt acceptance.
 - A sibling never emits text it already streamed in the same turn. When the
   harness delivers a terminal full-message frame after deltas, the adapter
   emits only the suffix the deltas did not carry.
+  `wire.StreamedText` accumulates each item's streamed text and yields that
+  suffix.
 - A harness that delivers only a terminal frame produces exactly one chunk.
 - Several native assistant messages in one turn each produce their text once,
   in native order, deduplicated on identity.

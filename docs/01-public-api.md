@@ -18,8 +18,8 @@ types that cross the sibling boundary. The module owns:
 | `acpcore/observer/exporters` | The `OTEL_*` exporter, propagator, and log-bridge wiring a sibling's command binary hands to its Agent; library code never imports it. |
 | `acpcore/storetest` | The store contract battery a host store runs against itself. |
 | `acpcore/lifecycle` | The `acp-go.dev/lifecycle` capability, envelope, event types, the reducer with copy-free projection accessors, the session publisher, and the embedded [fixture battery](07-testing.md#lifecycle-fixtures). |
-| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group, dedicated stdio pipes (or a caller-owned stdout file for a short-lived native command), and a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, and the exclusive native-home file lock. |
-| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, the reserved literals with the collision check for host-supplied `_meta`, the [call breakdown](04-behavior.md#call-breakdown) shape and writer, the [compaction](02-wire-contract.md#compaction-envelope) carrier and attempt publisher, and the [account-usage](02-wire-contract.md#account-usage) request decoder, response shape, and read bound. |
+| `acpcore/process` | Environment merge ([Process Environment](#process-environment)), executable resolution, child launch with its own process group, dedicated stdio pipes (or a caller-owned stdout file for a short-lived native command), a bounded stderr tail, signal-and-wait shutdown, seed-file writes and the `-seed-file` flag value, the exclusive native-home file lock, the launch-failure explanation `LaunchFailure`, and the command binary's `ForwardedSignals`. |
+| `acpcore/wire` | Uniform error constructors, raw-event framing and sequencing, the [request builders](#request-builders), session metadata cloning and validation, native binding metadata through `NativeSessionMeta`, the session admission gate, restore reservation and list pagination, the slash-command sanitizer, the session title and context-resource text rules, ACP transport publication ordering, the reserved literals with the collision check for host-supplied `_meta`, the [call breakdown](04-behavior.md#call-breakdown) shape and writer, the [compaction](02-wire-contract.md#compaction-envelope) carrier and attempt publisher, and the [account-usage](02-wire-contract.md#account-usage) request decoder, response shape, and read bound; the per-item `StreamedText` accumulator, the bounded native `LineReader`, the `AuthenticateRefused` answer, the logged `RestoreRefused` failure, and `ValidateConfiguredModels`. |
 | `acpcore/usage` and provider subpackages | Bounded provider account readers returning `wire.AccountUsageResponse`, verification that native credentials and routes remain stable during a read, and the bounded model-list read of a forwarding gateway (`usage/gateway.Models`); callers supply credentials and an optional HTTP transport. Readers never acquire credentials or launch a harness. |
 | `acpcore/image` | Decoded-byte limits, the media envelope, handoff validation, the image input gate, and output decoding ([02-wire-contract.md](02-wire-contract.md#image-content)). |
 
@@ -74,7 +74,8 @@ Rules:
   returns method-not-found and is not advertised.
 - `Authenticate` and `Logout` exist only because the SDK interface requires
   them. `authMethods` is always empty, `authenticate` answers `-32602`
-  `{"methodId": <the id sent>}`, and `logout` returns method-not-found. The
+  `{"methodId": <the id sent>}` through `wire.AuthenticateRefused`, and
+  `logout` returns method-not-found. The
   harness authenticates itself in its own home, outside ACP.
 - No exported `Session` type and no session methods outside `Agent`.
 - No fork method of any kind. Stable `session/fork` returns method-not-found.
@@ -161,7 +162,8 @@ Rules:
   deletes files under it and never exposes its paths to the harness.
 - `WithConfiguredModels` names the models the host lists explicitly. Each id
   is a configured entry under [catalog membership](04-behavior.md#catalog-membership).
-  An empty, whitespace, or duplicate id fails construction.
+  An empty, whitespace, or duplicate id fails construction
+  (`wire.ValidateConfiguredModels`).
 - `WithImageLimits` counts **decoded** bytes. Omitted, every field is 6 MiB
   (6,291,456). A field set to zero disables that policy limit and never
   bypasses the frame clamp or a native ceiling. A negative field is a

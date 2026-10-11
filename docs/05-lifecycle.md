@@ -24,6 +24,10 @@ never owns stdin or stdout beyond reads and writes on the supplied streams.
   Logical-session cwd,
   model, permission state, callbacks, cancellation, and persistence remain
   independently routed on a multiplexed runtime.
+- LF-delimited native records are read through `wire.LineReader`, bounded by
+  `wire.NativeLineMaxBytes`. A longer or unterminated record breaks the native
+  stream. A launch that fails before the harness is ready is explained by
+  `process.LaunchFailure`.
 - Tests inject native stdout and stderr noise and prove ACP stdout stays valid.
 
 Every native event is fenced by the native-process epoch, logical session, and

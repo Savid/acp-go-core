@@ -2,11 +2,13 @@ package process
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -237,6 +239,38 @@ func TestStderrTailKeepsTheEndOfTheStream(t *testing.T) {
 	require.NotContains(t, tail, "line-0\n")
 	require.LessOrEqual(t, len(tail), stderrTailBytes)
 	require.NoError(t, child.Close())
+}
+
+func TestLaunchFailureNamesAnExitedHarnessAndItsStderr(t *testing.T) {
+	t.Parallel()
+
+	handshake := errors.New("handshake failed")
+
+	exited, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "echo 'Error: no config' >&2; exit 3"}, Env: []string{"PATH=/bin"}})
+	require.NoError(t, err)
+
+	go func() { _, _ = io.Copy(io.Discard, exited.Stdout()) }()
+
+	_, err = exited.Wait(context.Background())
+	require.NoError(t, err)
+
+	failure := LaunchFailure(exited, "harness", handshake)
+	require.ErrorIs(t, failure, handshake)
+	require.Equal(t, "harness exited before it was ready: handshake failed: Error: no config", failure.Error())
+	require.NoError(t, exited.Close())
+
+	running, err := Start(context.Background(), Request{Executable: "/bin/sh", Args: []string{"-c", "sleep 30"}, Env: []string{"PATH=/bin"}})
+	require.NoError(t, err)
+
+	failure = LaunchFailure(running, "harness", handshake)
+	require.Equal(t, handshake, failure, "a live harness without stderr keeps the cause unchanged")
+	require.NoError(t, running.Kill())
+	require.NoError(t, running.Close())
+}
+
+func TestForwardedSignals(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}, ForwardedSignals())
 }
 
 func TestConcurrentClosePreservesPendingStderr(t *testing.T) {

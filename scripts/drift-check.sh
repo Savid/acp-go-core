@@ -43,7 +43,7 @@ rg -q '^toolchain ' "$repo_root/go.mod" && fail "acp-go-core: toolchain line pre
 check_sibling() {
   local sibling=$1 repo=$2 name="acp-go-$1" f
   local vendor=$3 package=$4 format=$5
-  for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/signals_unix.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
+  for f in AGENTS.md CLAUDE.md LICENSE Makefile README.md doc.go example_test.go contract_test.go helpers_test.go agent.go options.go request_builders.go session.go session_meta.go session_prompt.go go.mod .golangci.yml .github/workflows/check.yml "cmd/$name/main.go" "cmd/$name/otel.go" "cmd/$name/version.go" integration/doc.go integration/binary_test.go integration/helpers_test.go; do
     [[ -e "$repo/$f" ]] || fail "$name: missing $f"
   done
   if rg -q --type go -g '!*_test.go' '\.scratchDir\(' "$repo"; then
@@ -88,6 +88,7 @@ check_sibling() {
     printf '%s\n' "$account_usage_rows" | rg -q "^\| $sibling \| \`none\` \|" || fail "$name: registry Account Usage row is not none"
   fi
   rg -q 'exporters\.Configure\(' "$repo/cmd/$name/otel.go" || fail "$name: telemetry bootstrap is not core's"
+  rg -q 'process\.ForwardedSignals\(\)' "$repo/cmd/$name/main.go" || fail "$name: forwarded signals are not core's"
   resolving=$(rg -l --type go -g '!*_test.go' 'process\.ResolveExecutable\([^;]*, base\)' "$repo" || true)
   [[ -n "$resolving" ]] || fail "$name: executable resolution does not use core with the base environment"
   while IFS= read -r f; do

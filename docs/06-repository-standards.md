@@ -23,7 +23,6 @@
 |-- cmd/acp-go-<sibling>/
 |   |-- main.go
 |   |-- otel.go
-|   |-- signals_unix.go
 |   `-- version.go
 |-- integration/
 |   |-- binary_test.go
@@ -97,7 +96,8 @@ The structural gate checks these symbols and literals in every sibling:
   and `acp-go.dev/lifecycle` used in non-test Go, through the `wire`
   constants.
 - `cmd/acp-go-<sibling>/otel.go` obtains its providers from
-  `observer/exporters.Configure`.
+  `observer/exporters.Configure`, and `cmd/acp-go-<sibling>/main.go` cancels
+  on `process.ForwardedSignals()`.
 - The executable is resolved through `process.ResolveExecutable` against the
   base environment.
 - `request_builders.go` declares the vendor option constructors, each

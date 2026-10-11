@@ -11,6 +11,16 @@ import (
 	"github.com/savid/acp-go-core/process"
 )
 
+func TestValidateConfiguredModels(t *testing.T) {
+	t.Parallel()
+	require.NoError(t, ValidateConfiguredModels(nil))
+	require.NoError(t, ValidateConfiguredModels([]string{"a", "provider/b"}))
+
+	for _, ids := range [][]string{{""}, {" a"}, {"a\n"}, {"a", "a"}} {
+		require.Error(t, ValidateConfiguredModels(ids), "%q", ids)
+	}
+}
+
 func TestStringMapOption(t *testing.T) {
 	t.Parallel()
 

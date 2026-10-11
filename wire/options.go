@@ -5,11 +5,32 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/coder/acp-go-sdk"
 
 	"github.com/savid/acp-go-core/process"
 )
+
+// ValidateConfiguredModels refuses a host-listed model id that is empty, has
+// surrounding whitespace, or is listed twice.
+func ValidateConfiguredModels(ids []string) error {
+	seen := make(map[string]struct{}, len(ids))
+
+	for index, id := range ids {
+		if id == "" || id != strings.TrimSpace(id) {
+			return fmt.Errorf("configured model %d %q is not a model id", index, id)
+		}
+
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("configured model %q is listed twice", id)
+		}
+
+		seen[id] = struct{}{}
+	}
+
+	return nil
+}
 
 // StringMapOption validates a string map and copies it at the request boundary.
 func StringMapOption(value any, path string) (map[string]string, *acp.RequestError) {
