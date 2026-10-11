@@ -250,9 +250,9 @@ func (n Negotiated) SupportsVersion(version int) bool {
 	return n.Version == Version && version == Version
 }
 
-// DeclaresActivityKind reports whether the answer advertised an activity kind. A
+// declaresActivityKind reports whether the answer advertised an activity kind. A
 // kind it never advertised is a kind it cannot prove.
-func (n Negotiated) DeclaresActivityKind(kind ActivityKind) bool {
+func (n Negotiated) declaresActivityKind(kind ActivityKind) bool {
 	return slices.Contains(n.ActivityKinds, kind)
 }
 

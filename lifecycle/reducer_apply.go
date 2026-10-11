@@ -370,7 +370,7 @@ func (r *Reducer) checkActivityIdentity(delivery Delivery, update ActivityUpdate
 	case update.Kind == "" || update.Cause == "" || update.OriginTurnID == "":
 		return r.fail(delivery, ViolationImmutableIdentityChange,
 			"activity "+update.ActivityID+" states an incomplete identity")
-	case !r.negotiated.DeclaresActivityKind(update.Kind):
+	case !r.negotiated.declaresActivityKind(update.Kind):
 		return r.fail(delivery, ViolationUnnegotiatedFact, "activity kind "+string(update.Kind))
 	}
 
