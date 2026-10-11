@@ -89,14 +89,6 @@ func (r *Reducer) Settled() bool { return r.state.Settled() }
 // Turn returns one turn's projection.
 func (r *Reducer) Turn(turnID string) (TurnRecord, bool) { return r.state.Turn(turnID) }
 
-// Activity returns one activity's projection.
-func (r *Reducer) Activity(activityID string) (ActivityRecord, bool) {
-	return r.state.Activity(activityID)
-}
-
-// Action returns one action's projection.
-func (r *Reducer) Action(actionID string) (ActionRecord, bool) { return r.state.Action(actionID) }
-
 // Turns yields each turn's projection in order. The reducer must not reduce
 // while the sequence is iterated.
 func (r *Reducer) Turns() iter.Seq[TurnRecord] { return slices.Values(r.state.Turns) }
@@ -104,10 +96,6 @@ func (r *Reducer) Turns() iter.Seq[TurnRecord] { return slices.Values(r.state.Tu
 // Activities yields each activity's projection in order. The reducer must not
 // reduce while the sequence is iterated.
 func (r *Reducer) Activities() iter.Seq[ActivityRecord] { return slices.Values(r.state.Activities) }
-
-// Actions yields each action's projection in order. The reducer must not
-// reduce while the sequence is iterated.
-func (r *Reducer) Actions() iter.Seq[ActionRecord] { return slices.Values(r.state.Actions) }
 
 // Close records that the addressed session's close completed. The session is
 // over: every later event bearing its identity is stale, a would-be new

@@ -25,7 +25,7 @@ func (s *StreamedText) Add(key, delta string) {
 func (s *StreamedText) Suffix(key, final string) string {
 	item := s.item(key)
 
-	suffix := UnstreamedSuffix(item.String(), final)
+	suffix := unstreamedSuffix(item.String(), final)
 	item.WriteString(suffix)
 
 	return suffix

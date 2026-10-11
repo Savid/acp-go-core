@@ -166,24 +166,11 @@ func requireAccessorsAgree(t *testing.T, reducer *Reducer) {
 
 	require.Equal(t, state.Turns, append([]TurnRecord{}, slices.Collect(reducer.Turns())...))
 	require.Equal(t, state.Activities, append([]ActivityRecord{}, slices.Collect(reducer.Activities())...))
-	require.Equal(t, state.Actions, append([]ActionRecord{}, slices.Collect(reducer.Actions())...))
 
 	for _, turn := range state.Turns {
 		got, known := reducer.Turn(turn.TurnID)
 		require.True(t, known)
 		require.Equal(t, turn, got)
-	}
-
-	for _, activity := range state.Activities {
-		got, known := reducer.Activity(activity.ActivityID)
-		require.True(t, known)
-		require.Equal(t, activity, got)
-	}
-
-	for _, action := range state.Actions {
-		got, known := reducer.Action(action.ActionID)
-		require.True(t, known)
-		require.Equal(t, action, got)
 	}
 }
 

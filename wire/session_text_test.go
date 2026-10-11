@@ -42,13 +42,13 @@ func TestValidCommandName(t *testing.T) {
 	}
 }
 
-func TestUnstreamedSuffix(t *testing.T) {
+func TestUnstreamedSuffixKeepsTextAppendOnly(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "full", UnstreamedSuffix("", "full"))
-	require.Equal(t, " tail", UnstreamedSuffix("head", "head tail"))
-	require.Equal(t, "", UnstreamedSuffix("head", "different"))
-	require.Equal(t, "", UnstreamedSuffix("head", "head"))
+	require.Equal(t, "full", unstreamedSuffix("", "full"))
+	require.Equal(t, " tail", unstreamedSuffix("head", "head tail"))
+	require.Equal(t, "", unstreamedSuffix("head", "different"))
+	require.Equal(t, "", unstreamedSuffix("head", "head"))
 }
 
 func TestContextResourceText(t *testing.T) {

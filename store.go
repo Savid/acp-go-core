@@ -53,9 +53,9 @@ type SessionStoreReplacement struct {
 // each listed subpath, keeping every unlisted subpath. base is the number of
 // main entries the caller expects the generation to hold, compared by count
 // only; when it holds another number, or the session has no committed
-// generation, Append fails without writing. Append to a deleted session writes nothing and succeeds;
-// it is durable before it returns, copies what it receives, and on failure
-// preserves the previous generation. Load atomically reads every live subpath
+// generation, Append fails without writing. Append to a deleted session
+// writes nothing and succeeds; it is durable before it returns, copies what
+// it receives, and on failure preserves the previous generation. Load atomically reads every live subpath
 // of one session; the returned map, slices, and bytes belong to the caller.
 type SessionStore interface {
 	Load(ctx context.Context, sessionID string) (map[string][]SessionStoreEntry, error)

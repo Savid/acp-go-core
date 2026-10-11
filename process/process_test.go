@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -281,11 +280,6 @@ func TestLaunchFailureWaitsForAHarnessThatIsExiting(t *testing.T) {
 		require.Equal(t, "harness exited before it was ready: EOF: Error: bad flag", failure.Error())
 		require.NoError(t, child.Close())
 	}
-}
-
-func TestForwardedSignals(t *testing.T) {
-	t.Parallel()
-	require.Equal(t, []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}, ForwardedSignals())
 }
 
 func TestConcurrentClosePreservesPendingStderr(t *testing.T) {

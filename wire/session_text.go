@@ -69,10 +69,10 @@ func ValidCommandName(name string) bool {
 	return true
 }
 
-// UnstreamedSuffix returns the part of a finalized text that was not already
+// unstreamedSuffix returns the part of a finalized text that was not already
 // streamed. A finalized text that does not extend the streamed prefix yields
 // nothing, so assistant text stays append-only.
-func UnstreamedSuffix(streamed string, full string) string {
+func unstreamedSuffix(streamed string, full string) string {
 	if streamed == "" {
 		return full
 	}
