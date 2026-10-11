@@ -2,188 +2,304 @@ package sessionlog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	acpcore "github.com/savid/acp-go-core"
 )
 
-type testRecord struct {
-	Model string `json:"model"`
+// countingStore records the writes a mirror makes.
+type countingStore struct {
+	*acpcore.InMemorySessionStore
+
+	mu       sync.Mutex
+	replaces int
+	appends  int
+	appended int
+	configs  int
+	fail     bool
 }
 
-func TestLoadDistinguishesEmptyConversationFromMissing(t *testing.T) {
-	t.Parallel()
-	store := acpcore.NewInMemorySessionStore()
-	require.NoError(t, Commit(t.Context(), store, "empty", nil, testRecord{Model: "selected"}))
-	var record testRecord
-	rows, found, err := Load(t.Context(), store, "empty", &record)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Empty(t, rows)
-	require.Equal(t, "selected", record.Model)
-	rows, found, err = Load(t.Context(), store, "missing", &record)
-	require.NoError(t, err)
-	require.False(t, found)
-	require.Nil(t, rows)
+func newCountingStore() *countingStore {
+	return &countingStore{InMemorySessionStore: acpcore.NewInMemorySessionStore()}
 }
 
-type failingStore struct {
-	acpcore.SessionStore
-	fail bool
-}
+func (s *countingStore) Replace(ctx context.Context, main acpcore.SessionKey, replacements []acpcore.SessionStoreReplacement) error {
+	s.mu.Lock()
+	s.replaces++
+	fail := s.fail
+	s.mu.Unlock()
 
-func (s *failingStore) Replace(ctx context.Context, main acpcore.SessionKey, replacements []acpcore.SessionStoreReplacement) error {
-	if s.fail {
+	if fail {
 		return errors.New("store unavailable")
 	}
 
-	return s.SessionStore.Replace(ctx, main, replacements)
+	return s.InMemorySessionStore.Replace(ctx, main, replacements)
 }
 
-func TestCommitPublishesRowsAndConfigurationTogether(t *testing.T) {
+func (s *countingStore) Append(ctx context.Context, main acpcore.SessionKey, base int, entries []acpcore.SessionStoreEntry, replacements []acpcore.SessionStoreReplacement) error {
+	s.mu.Lock()
+	s.appends++
+	s.appended += len(entries)
+	s.configs += len(replacements)
+	fail := s.fail
+	s.mu.Unlock()
+
+	if fail {
+		return errors.New("store unavailable")
+	}
+
+	return s.InMemorySessionStore.Append(ctx, main, base, entries, replacements)
+}
+
+func (s *countingStore) counts() (replaces, appends, appended, configs int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.replaces, s.appends, s.appended, s.configs
+}
+
+func requireStored(t *testing.T, store acpcore.SessionStore, rows []string, model string) {
+	t.Helper()
+
+	var record testRecord
+
+	loaded, found, err := Load(t.Context(), store, "s", &record)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, rows, rowStrings(loaded))
+	require.Equal(t, model, record.Model)
+}
+
+func TestMirrorAppendsOnlyNewRowsAndChangedConfiguration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+	require.False(t, mirror.Committed())
+
+	appendFile(t, path, "{\"a\":1}\n{\"b\":2}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	require.True(t, mirror.Committed())
+
+	replaces, appends, _, _ := store.counts()
+	require.Equal(t, 1, replaces, "the first commit publishes the whole generation")
+	require.Zero(t, appends)
+
+	appendFile(t, path, "{\"c\":3}\n{\"d\":")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
+
+	replaces, appends, appended, configs := store.counts()
+	require.Equal(t, 1, replaces)
+	require.Equal(t, 1, appends)
+	require.Equal(t, 1, appended)
+	require.Zero(t, configs, "an unchanged configuration is not rewritten")
+
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "two")
+
+	_, appends, appended, configs = store.counts()
+	require.Equal(t, 2, appends, "a configuration change appends no rows")
+	require.Equal(t, 1, appended)
+	require.Equal(t, 1, configs)
+
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+
+	replaces, appends, _, _ = store.counts()
+	require.Equal(t, 1, replaces)
+	require.Equal(t, 2, appends, "an unchanged generation is not written")
+
+	appendFile(t, path, "4}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`, `{"d":4}`}, "two")
+}
+
+func TestMirrorRepublishesARewrittenHistory(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+
+	_, err := WriteJSONL(path, [][]byte{[]byte(`{"x":1}`), []byte(`{"y":2}`)})
+	require.NoError(t, err)
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	requireStored(t, store, []string{`{"x":1}`, `{"y":2}`}, "one")
+
+	replaces, appends, _, _ := store.counts()
+	require.Equal(t, 2, replaces, "a history that disagrees with the committed rows is republished")
+	require.Zero(t, appends)
+
+	_, err = WriteJSONL(path, [][]byte{[]byte(`{"x":1}`), []byte(`{"y":2}`), []byte(`{"z":3}`)})
+	require.NoError(t, err)
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	requireStored(t, store, []string{`{"x":1}`, `{"y":2}`, `{"z":3}`}, "one")
+
+	replaces, appends, appended, _ := store.counts()
+	require.Equal(t, 2, replaces, "a replaced file that extends the committed rows appends")
+	require.Equal(t, 1, appends)
+	require.Equal(t, 1, appended)
+}
+
+func TestMirrorRefusesAShorterHistoryUntilReset(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n{\"b\":2}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	require.NoError(t, os.Remove(path))
+
+	require.ErrorContains(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}), "shrank")
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
+
+	mirror.Reset()
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "rebound"}))
+	requireStored(t, store, []string{}, "rebound")
+}
+
+func TestMirrorRepairsAGenerationWrittenAroundIt(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"other":1}`), []byte(`{"other":2}`)}, testRecord{Model: "other"}))
+
+	appendFile(t, path, "{\"b\":2}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
+}
+
+func TestMirrorFailureKeepsThePreviousGeneration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+
+	appendFile(t, path, "{\"b\":2}\n")
+	store.mu.Lock()
+	store.fail = true
+	store.mu.Unlock()
+	require.Error(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+	requireStored(t, store, []string{`{"a":1}`}, "one")
+
+	store.mu.Lock()
+	store.fail = false
+	store.mu.Unlock()
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "two")
+
+	appendFile(t, path, "not json\n")
+	require.Error(t, mirror.Commit(ctx, File(path), testRecord{Model: "two"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "two")
+}
+
+func TestMirrorReplacesWhenTheStoreCannotAppend(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	store := &failingStore{SessionStore: acpcore.NewInMemorySessionStore()}
-	rows := [][]byte{[]byte(`{"type":"message","text":"hello"}`)}
-	require.NoError(t, Commit(ctx, store, "session", rows, testRecord{Model: "one"}))
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	appendFile(t, path, "{\"a\":1}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	appendFile(t, path, "{\"b\":2}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`}, "one")
+
 	store.fail = true
-	require.Error(t, Commit(ctx, store, "session", [][]byte{rows[0], []byte(`{"text":"next"}`)}, testRecord{Model: "two"}))
+	require.NoError(t, mirror.Commit(ctx, File(path), testRecord{Model: "one"}), "an unchanged generation needs no write")
+}
+
+func TestMirrorHydrateMaterializesStoredRowsThenAppends(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newCountingStore()
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"a":1}`), []byte(`{"b":2}`)}, testRecord{Model: "one"}))
+
 	var record testRecord
-	loaded, _, err := Load(ctx, store, "session", &record)
+	stored, _, err := Load(ctx, store, "s", &record)
 	require.NoError(t, err)
-	require.Equal(t, rows, loaded)
-	require.Equal(t, "one", record.Model)
-	store.fail = false
-	require.NoError(t, Commit(ctx, store, "session", rows, testRecord{Model: "two"}))
-	loaded, _, err = Load(ctx, store, "session", &record)
+
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	mirror := NewMirror(store, "s")
+
+	var validated int
+
+	rows, err := mirror.Hydrate(ctx, path, stored, record, func(rows [][]byte) error {
+		validated = len(rows)
+
+		return nil
+	})
 	require.NoError(t, err)
-	require.Equal(t, rows, loaded)
-	require.Equal(t, "two", record.Model)
-}
+	require.Equal(t, 2, validated)
+	require.Equal(t, []string{`{"a":1}`, `{"b":2}`}, rowStrings(rows))
+	require.True(t, mirror.Committed())
 
-func TestLoadRejectsInvalidCurrentRecords(t *testing.T) {
-	t.Parallel()
-	for _, data := range []string{`{"model":"x","extra":1}`, `{"model":"x","model":"y"}`, `{"model":"x","mo\u0064el":"y"}`, `{"model":2}`, `{"model":`, `{"model":"x"} {}`} {
-		t.Run(data, func(t *testing.T) {
-			t.Parallel()
-			store := acpcore.NewInMemorySessionStore()
-			main := acpcore.SessionKey{SessionID: "s"}
-			require.NoError(t, store.Replace(t.Context(), main, []acpcore.SessionStoreReplacement{
-				{Key: main, Entries: []acpcore.SessionStoreEntry{[]byte(`{"type":"message"}`)}},
-				{Key: acpcore.SessionKey{SessionID: "s", Subpath: ConfigSubpath}, Entries: []acpcore.SessionStoreEntry{[]byte(data)}},
-			}))
-			var record testRecord
-			_, _, err := Load(t.Context(), store, "s", &record)
-			require.Error(t, err)
-		})
-	}
-}
-
-func TestReconcileNativeContinuation(t *testing.T) {
-	t.Parallel()
-	rows := [][]byte{[]byte(`{"text":"ACP"}`), []byte(`{"text":"native"}`)}
-	merged, nativeWins, err := Reconcile(rows, rows[:1])
+	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.True(t, nativeWins)
-	require.Equal(t, rows, merged)
-	merged, nativeWins, err = Reconcile(rows[:1], rows)
-	require.NoError(t, err)
-	require.False(t, nativeWins)
-	require.Equal(t, rows, merged)
-	_, _, err = Reconcile([][]byte{[]byte(`{"text":"different"}`)}, rows)
-	require.Error(t, err)
+	require.Equal(t, "{\"a\":1}\n{\"b\":2}\n", string(data))
+
+	appendFile(t, path, "{\"c\":3}\n")
+	require.NoError(t, mirror.Commit(ctx, File(path), record))
+	requireStored(t, store, []string{`{"a":1}`, `{"b":2}`, `{"c":3}`}, "one")
+
+	replaces, appends, appended, configs := store.counts()
+	require.Equal(t, 1, replaces, "hydration and the following turn write no whole generation")
+	require.Equal(t, 1, appends)
+	require.Equal(t, 1, appended)
+	require.Zero(t, configs)
 }
 
-func TestInvalidNativeRowsNeverReplaceCommittedState(t *testing.T) {
+func TestMirrorHydrateAdoptsLongerNativeRows(t *testing.T) {
 	t.Parallel()
-	for _, invalid := range []string{"null", "[]", "false", "{}{}", "{"} {
-		t.Run(invalid, func(t *testing.T) {
-			t.Parallel()
-			store := acpcore.NewInMemorySessionStore()
-			rows := [][]byte{[]byte(`{"text":"saved"}`)}
-			require.NoError(t, Commit(t.Context(), store, "s", rows, testRecord{Model: "one"}))
-			require.Error(t, Commit(t.Context(), store, "s", [][]byte{[]byte(invalid)}, testRecord{Model: "two"}))
-			var record testRecord
-			loaded, _, err := Load(t.Context(), store, "s", &record)
-			require.NoError(t, err)
-			require.Equal(t, rows, loaded)
-			require.Equal(t, "one", record.Model)
-			main := acpcore.SessionKey{SessionID: "s"}
-			require.NoError(t, store.Replace(t.Context(), main, []acpcore.SessionStoreReplacement{
-				{Key: main, Entries: []acpcore.SessionStoreEntry{[]byte(invalid)}},
-				{Key: acpcore.SessionKey{SessionID: "s", Subpath: ConfigSubpath}, Entries: []acpcore.SessionStoreEntry{[]byte(`{"model":"one"}`)}},
-			}))
-			_, _, err = Load(t.Context(), store, "s", &record)
-			require.Error(t, err)
-		})
-	}
-}
+	ctx := t.Context()
+	store := newCountingStore()
+	require.NoError(t, commitRows(ctx, store, "s", [][]byte{[]byte(`{"a":1}`)}, testRecord{Model: "one"}))
 
-type interleavingStore struct {
-	acpcore.SessionStore
-	afterLoad func()
-}
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	appendFile(t, path, "{\"a\":1}\n{\"native\":2}\n")
 
-func (s *interleavingStore) Load(ctx context.Context, sessionID string) (map[string][]acpcore.SessionStoreEntry, error) {
-	rows, err := s.SessionStore.Load(ctx, sessionID)
-	if s.afterLoad != nil {
-		fn := s.afterLoad
-		s.afterLoad = nil
-		fn()
-	}
-
-	return rows, err
-}
-
-func TestLoadKeepsGenerationTogether(t *testing.T) {
-	t.Parallel()
-	store := &interleavingStore{SessionStore: acpcore.NewInMemorySessionStore()}
-	require.NoError(t, Commit(t.Context(), store, "s", [][]byte{[]byte(`{"model":"one"}`)}, testRecord{Model: "one"}))
-	store.afterLoad = func() {
-		require.NoError(t, Commit(t.Context(), store, "s", [][]byte{[]byte(`{"model":"two"}`)}, testRecord{Model: "two"}))
-	}
 	var record testRecord
-	rows, _, err := Load(t.Context(), store, "s", &record)
+	stored, _, err := Load(ctx, store, "s", &record)
 	require.NoError(t, err)
-	var row testRecord
-	require.NoError(t, json.Unmarshal(rows[0], &row))
-	require.Equal(t, row.Model, record.Model, "Load returned native rows and configuration from different committed generations")
-}
 
-type deadlineStore struct {
-	acpcore.SessionStore
-	deadline time.Time
-}
-
-func (s *deadlineStore) Load(ctx context.Context, id string) (map[string][]acpcore.SessionStoreEntry, error) {
-	s.deadline, _ = ctx.Deadline()
-
-	return s.SessionStore.Load(ctx, id)
-}
-
-func (s *deadlineStore) Replace(ctx context.Context, main acpcore.SessionKey, replacements []acpcore.SessionStoreReplacement) error {
-	s.deadline, _ = ctx.Deadline()
-
-	return s.SessionStore.Replace(ctx, main, replacements)
-}
-
-func TestStoreCallsBoundTheirDeadline(t *testing.T) {
-	t.Parallel()
-	store := &deadlineStore{SessionStore: acpcore.NewInMemorySessionStore()}
-	started := time.Now()
-	require.NoError(t, Commit(t.Context(), store, "s", nil, testRecord{Model: "model"}))
-	require.False(t, store.deadline.IsZero())
-	require.WithinDuration(t, started.Add(acpcore.SessionStoreTimeout), store.deadline, time.Second)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	expected, _ := ctx.Deadline()
-	var record testRecord
-	_, _, err := Load(ctx, store, "s", &record)
+	mirror := NewMirror(store, "s")
+	rows, err := mirror.Hydrate(ctx, path, stored, record, nil)
 	require.NoError(t, err)
-	require.Equal(t, expected, store.deadline)
+	require.Equal(t, []string{`{"a":1}`, `{"native":2}`}, rowStrings(rows))
+	requireStored(t, store, []string{`{"a":1}`, `{"native":2}`}, "one")
+
+	_, appends, appended, _ := store.counts()
+	require.Equal(t, 1, appends)
+	require.Equal(t, 1, appended)
+
+	_, err = WriteJSONL(path, [][]byte{[]byte(`{"different":1}`)})
+	require.NoError(t, err)
+	_, err = NewMirror(store, "s").Hydrate(ctx, path, rows, record, nil)
+	require.Error(t, err, "a disagreement at a shared position fails")
+
+	refused := errors.New("not this session's rows")
+	_, err = NewMirror(store, "s").Hydrate(ctx, filepath.Join(t.TempDir(), "absent.jsonl"), rows, record, func([][]byte) error { return refused })
+	require.ErrorIs(t, err, refused)
 }

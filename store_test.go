@@ -16,6 +16,18 @@ func TestInMemorySessionStoreContract(t *testing.T) {
 	storetest.Run(t, func(*testing.T) acpcore.SessionStore { return acpcore.NewInMemorySessionStore() })
 }
 
+// replaceOnlyStore hides the optional append capability, as a host store
+// without it would.
+type replaceOnlyStore struct{ acpcore.SessionStore }
+
+func TestReplaceOnlyStoreContract(t *testing.T) {
+	t.Parallel()
+
+	storetest.Run(t, func(*testing.T) acpcore.SessionStore {
+		return replaceOnlyStore{acpcore.NewInMemorySessionStore()}
+	})
+}
+
 func TestInMemorySessionStoreCancelledContext(t *testing.T) {
 	t.Parallel()
 
@@ -26,6 +38,8 @@ func TestInMemorySessionStoreCancelledContext(t *testing.T) {
 	key := acpcore.SessionKey{SessionID: "s"}
 
 	require.ErrorIs(t, store.Replace(ctx, key, []acpcore.SessionStoreReplacement{{Key: key}}), context.Canceled)
+
+	require.ErrorIs(t, store.Append(ctx, key, 0, nil, nil), context.Canceled)
 
 	_, err := store.Load(ctx, key.SessionID)
 	require.ErrorIs(t, err, context.Canceled)

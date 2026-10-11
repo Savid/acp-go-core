@@ -1,180 +1,318 @@
-// Package sessionlog mirrors native JSONL rows and their session configuration
-// as one durable store generation.
 package sessionlog
 
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"hash"
+	"sync"
 
 	acpcore "github.com/savid/acp-go-core"
 )
 
-// ConfigSubpath holds the current session configuration.
-const ConfigSubpath = "config"
+// Mirror publishes one session's native rows and configuration to a store and
+// remembers what it committed. When the store implements
+// acpcore.SessionStoreAppender and the native history still extends the
+// committed rows, a commit appends only the new rows, replacing the
+// configuration record only when it changed. Otherwise it republishes the
+// whole generation. Every write to the session's store generation goes
+// through its one Mirror; a write that bypasses it is detected by the
+// append base and repaired by a full republish.
+type Mirror struct {
+	store     acpcore.SessionStore
+	sessionID string
 
-// Commit publishes the native rows and configuration atomically. Failure
-// leaves the previous generation intact, including its configuration.
-func Commit(ctx context.Context, store acpcore.SessionStore, sessionID string, rows [][]byte, record any) error {
-	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
-	defer cancel()
+	mu        sync.Mutex
+	committed bool
+	rows      int
+	digest    hash.Hash
+	record    []byte
+	cursor    Cursor
+}
 
+// NewMirror returns the mirror of sessionID in store. It has committed
+// nothing, so its first commit publishes the whole generation.
+func NewMirror(store acpcore.SessionStore, sessionID string) *Mirror {
+	return &Mirror{store: store, sessionID: sessionID, digest: sha256.New()}
+}
+
+// Committed reports whether the store holds a generation this mirror
+// committed or hydrated.
+func (m *Mirror) Committed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.committed
+}
+
+// Reset forgets what the mirror committed, so its next commit republishes the
+// whole generation and may shorten the history, as a native binding change
+// requires.
+func (m *Mirror) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.forget()
+}
+
+// Commit publishes the native rows source reads with record as the session's
+// configuration. It is durable when it returns; a failure leaves the previous
+// generation intact. A history shorter than the committed one fails unless
+// the mirror was Reset.
+func (m *Mirror) Commit(ctx context.Context, source Source, record any) error {
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode session record: %w", err)
 	}
 
-	entries := make([]acpcore.SessionStoreEntry, len(rows))
-	for index, row := range rows {
-		if !validRow(row) {
-			return fmt.Errorf("invalid native row %d", index)
-		}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-		entries[index] = row
+	appender, appends := m.store.(acpcore.SessionStoreAppender)
+
+	from := Cursor{}
+	if appends && m.committed {
+		from = m.cursor
 	}
 
-	main := acpcore.SessionKey{SessionID: sessionID}
+	tail, err := source(from)
+	if err != nil {
+		return fmt.Errorf("read native rows: %w", err)
+	}
 
-	return store.Replace(ctx, main, []acpcore.SessionStoreReplacement{
-		{Key: main, Entries: entries},
-		{Key: acpcore.SessionKey{SessionID: sessionID, Subpath: ConfigSubpath}, Entries: []acpcore.SessionStoreEntry{encoded}},
-	})
+	appendable := appends && m.committed
+
+	if !tail.Full {
+		appendErr := m.appendTail(ctx, appender, tail, encoded)
+		if appendErr == nil || errors.Is(appendErr, errInvalidRow) {
+			return appendErr
+		}
+
+		// The base check refuses an append to a generation the mirror does
+		// not hold; republishing the whole history repairs either case.
+		appendable = false
+
+		if tail, err = source(Cursor{}); err != nil {
+			return fmt.Errorf("read native rows: %w", err)
+		}
+	}
+
+	return m.commitFull(ctx, appender, appendable, tail, encoded)
 }
 
-// Load reads the native rows and decodes the required configuration into
-// record. found is false when the session is missing or tombstoned; a found
-// session with no rows is a committed conversation whose native history is
-// still empty.
-func Load(ctx context.Context, store acpcore.SessionStore, sessionID string, record any) (rows [][]byte, found bool, err error) {
+// Hydrate reconciles the native JSONL file at path with the rows the store
+// holds for the session before a load or resume, as sessionlog.Reconcile
+// decides. Native rows that extend the stored rows are committed with record;
+// a missing or shorter native file is rewritten from the store. validate,
+// when set, sees the reconciled history before either happens. stored and
+// record MUST be the generation Load returned from this mirror's store. It
+// returns the rows the session now holds.
+func (m *Mirror) Hydrate(ctx context.Context, path string, stored [][]byte, record any, validate func(rows [][]byte) error) ([][]byte, error) {
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return nil, fmt.Errorf("encode session record: %w", err)
+	}
+
+	native, err := ReadJSONL(path, Cursor{})
+	if err != nil {
+		return nil, fmt.Errorf("read native rows: %w", err)
+	}
+
+	rows, nativeWins, err := Reconcile(native.Rows, stored)
+	if err != nil {
+		return nil, err
+	}
+
+	if validate != nil && len(rows) > 0 {
+		if validateErr := validate(rows); validateErr != nil {
+			return nil, validateErr
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.forget()
+	m.committed = true
+	m.record = encoded
+	m.extend(stored)
+
+	if nativeWins {
+		if len(rows) > len(stored) {
+			appender, appends := m.store.(acpcore.SessionStoreAppender)
+			if commitErr := m.commitFull(ctx, appender, appends, Tail{Rows: rows, Full: true}, encoded); commitErr != nil {
+				return nil, commitErr
+			}
+		}
+
+		m.cursor = native.Next
+
+		return rows, nil
+	}
+
+	cursor, err := WriteJSONL(path, rows)
+	if err != nil {
+		return nil, err
+	}
+
+	m.cursor = cursor
+
+	return rows, nil
+}
+
+var errInvalidRow = errors.New("invalid native row")
+
+// appendTail appends a continuation of the committed rows.
+func (m *Mirror) appendTail(ctx context.Context, appender acpcore.SessionStoreAppender, tail Tail, encoded []byte) error {
+	if err := validRows(tail.Rows); err != nil {
+		return err
+	}
+
+	if len(tail.Rows) == 0 && bytes.Equal(encoded, m.record) {
+		m.cursor = tail.Next
+
+		return nil
+	}
+
+	if err := m.append(ctx, appender, tail.Rows, encoded); err != nil {
+		return err
+	}
+
+	m.extend(tail.Rows)
+	m.record = encoded
+	m.cursor = tail.Next
+
+	return nil
+}
+
+// commitFull publishes a complete history: skipped when the store already
+// holds it, appended when it extends the committed rows and appendable is set,
+// otherwise republished. A failure keeps what the mirror remembers, since the
+// store keeps its previous generation.
+func (m *Mirror) commitFull(ctx context.Context, appender acpcore.SessionStoreAppender, appendable bool, tail Tail, encoded []byte) error {
+	if err := validRows(tail.Rows); err != nil {
+		return err
+	}
+
+	if m.committed && len(tail.Rows) < m.rows {
+		return fmt.Errorf("native log shrank from %d to %d rows", m.rows, len(tail.Rows))
+	}
+
+	if m.committed && m.extendsCommitted(tail.Rows) {
+		added := tail.Rows[m.rows:]
+		if len(added) == 0 && bytes.Equal(encoded, m.record) {
+			m.cursor = tail.Next
+
+			return nil
+		}
+
+		if appendable && m.append(ctx, appender, added, encoded) == nil {
+			m.extend(added)
+			m.record = encoded
+			m.cursor = tail.Next
+
+			return nil
+		}
+	}
+
+	if err := m.replace(ctx, tail.Rows, encoded); err != nil {
+		return err
+	}
+
+	m.forget()
+	m.committed = true
+	m.record = encoded
+	m.cursor = tail.Next
+	m.extend(tail.Rows)
+
+	return nil
+}
+
+// extendsCommitted reports whether rows begin with exactly the committed rows.
+func (m *Mirror) extendsCommitted(rows [][]byte) bool {
+	digest := sha256.New()
+	for _, row := range rows[:m.rows] {
+		writeDigest(digest, row)
+	}
+
+	return bytes.Equal(digest.Sum(nil), m.digest.Sum(nil))
+}
+
+func (m *Mirror) append(ctx context.Context, appender acpcore.SessionStoreAppender, rows [][]byte, encoded []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
 	defer cancel()
 
-	generation, err := store.Load(ctx, sessionID)
-	if err != nil || generation == nil {
-		return nil, false, err
+	var replacements []acpcore.SessionStoreReplacement
+	if !bytes.Equal(encoded, m.record) {
+		replacements = []acpcore.SessionStoreReplacement{m.configReplacement(encoded)}
 	}
 
-	entries, present := generation[acpcore.SessionStoreMainSubpath]
-	if !present {
-		return nil, false, errors.New("session requires a main record")
+	return appender.Append(ctx, acpcore.SessionKey{SessionID: m.sessionID}, m.rows, entries(rows), replacements)
+}
+
+func (m *Mirror) replace(ctx context.Context, rows [][]byte, encoded []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, acpcore.SessionStoreTimeout)
+	defer cancel()
+
+	main := acpcore.SessionKey{SessionID: m.sessionID}
+
+	return m.store.Replace(ctx, main, []acpcore.SessionStoreReplacement{
+		{Key: main, Entries: entries(rows)},
+		m.configReplacement(encoded),
+	})
+}
+
+func (m *Mirror) configReplacement(encoded []byte) acpcore.SessionStoreReplacement {
+	return acpcore.SessionStoreReplacement{
+		Key:     acpcore.SessionKey{SessionID: m.sessionID, Subpath: ConfigSubpath},
+		Entries: []acpcore.SessionStoreEntry{encoded},
+	}
+}
+
+// extend records rows as committed after the current ones.
+func (m *Mirror) extend(rows [][]byte) {
+	for _, row := range rows {
+		writeDigest(m.digest, row)
 	}
 
-	records := generation[ConfigSubpath]
-	if len(records) != 1 {
-		return nil, false, errors.New("session requires one configuration record")
-	}
+	m.rows += len(rows)
+}
 
-	if err := decodeRecord(records[0], record); err != nil {
-		return nil, false, fmt.Errorf("decode session record: %w", err)
-	}
+func (m *Mirror) forget() {
+	m.committed = false
+	m.rows = 0
+	m.digest.Reset()
+	m.record = nil
+	m.cursor = Cursor{}
+}
 
-	rows = make([][]byte, len(entries))
-	for index, entry := range entries {
-		if !validRow(entry) {
-			return nil, false, fmt.Errorf("invalid native row %d", index)
+// writeDigest adds one length-prefixed row to digest.
+func writeDigest(digest hash.Hash, row []byte) {
+	var length [binary.MaxVarintLen64]byte
+
+	digest.Write(length[:binary.PutUvarint(length[:], uint64(len(row)))])
+	digest.Write(row)
+}
+
+func validRows(rows [][]byte) error {
+	for index, row := range rows {
+		if !validRow(row) {
+			return fmt.Errorf("%w %d", errInvalidRow, index)
 		}
-
-		rows[index] = bytes.Clone(entry)
-	}
-
-	return rows, true, nil
-}
-
-func validRow(row []byte) bool {
-	trimmed := bytes.TrimSpace(row)
-
-	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
-}
-
-func decodeRecord(data []byte, record any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-
-	if err := uniqueValue(decoder, 0); err != nil {
-		return err
-	}
-
-	decoder = json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(record); err != nil {
-		return err
-	}
-
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return errors.New("trailing session record data")
 	}
 
 	return nil
 }
 
-// maxRecordDepth bounds record nesting so a hostile record cannot exhaust
-// the stack; it matches the depth encoding/json accepts.
-const maxRecordDepth = 10000
-
-func uniqueValue(decoder *json.Decoder, depth int) error {
-	if depth > maxRecordDepth {
-		return errors.New("record nesting exceeds its bound")
+func entries(rows [][]byte) []acpcore.SessionStoreEntry {
+	converted := make([]acpcore.SessionStoreEntry, len(rows))
+	for index, row := range rows {
+		converted[index] = row
 	}
 
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-
-	delimiter, compound := token.(json.Delim)
-	if !compound {
-		return nil
-	}
-
-	seen := make(map[string]struct{})
-
-	for decoder.More() {
-		if delimiter == '{' {
-			key, keyErr := decoder.Token()
-			if keyErr != nil {
-				return keyErr
-			}
-
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("object key is not a string")
-			}
-
-			if _, duplicate := seen[name]; duplicate {
-				return fmt.Errorf("duplicate record key %q", name)
-			}
-
-			seen[name] = struct{}{}
-		}
-
-		if valueErr := uniqueValue(decoder, depth+1); valueErr != nil {
-			return valueErr
-		}
-	}
-
-	_, err = decoder.Token()
-
-	return err
-}
-
-// Reconcile returns the longer log when both agree at every shared position
-// and reports whether the native log is the one to keep. The native log may
-// contain rows written outside ACP; a shorter native log is replaced by the
-// store's copy.
-func Reconcile(native, stored [][]byte) (rows [][]byte, nativeWins bool, err error) {
-	for index := 0; index < len(native) && index < len(stored); index++ {
-		if !bytes.Equal(native[index], stored[index]) {
-			return nil, false, fmt.Errorf("native row %d disagrees with the store", index)
-		}
-	}
-
-	if len(native) >= len(stored) {
-		return native, true, nil
-	}
-
-	return stored, false, nil
+	return converted
 }

@@ -58,8 +58,22 @@ type SessionStore interface {
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
 }
 
+// SessionStoreAppender is an optional SessionStore capability that extends a
+// committed generation instead of republishing it. Append atomically appends
+// entries to the main record of main's committed generation and replaces each
+// listed subpath, keeping every unlisted subpath. base is the number of main
+// entries the caller expects the generation to hold; when it holds another
+// number, or when the session has no committed generation, Append fails
+// without writing. An append to a deleted session writes nothing and returns
+// success. Append is durable before it returns, copies what it receives, and
+// on failure preserves the previous generation.
+type SessionStoreAppender interface {
+	Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
+}
+
 // InMemorySessionStore is the default store when a host provides none, and the
-// reference implementation the store contract battery is written against.
+// reference implementation the store contract battery is written against. It
+// holds its own copy of every entry, and Load returns another copy.
 type InMemorySessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*storedSession
@@ -75,7 +89,10 @@ type storedSession struct {
 	updatedAt int64
 }
 
-var _ SessionStore = (*InMemorySessionStore)(nil)
+var (
+	_ SessionStore         = (*InMemorySessionStore)(nil)
+	_ SessionStoreAppender = (*InMemorySessionStore)(nil)
+)
 
 // NewInMemorySessionStore creates an empty process-local store.
 func NewInMemorySessionStore() *InMemorySessionStore {
@@ -139,6 +156,81 @@ func (s *InMemorySessionStore) Replace(ctx context.Context, main SessionKey, rep
 	}
 
 	s.sessions[main.SessionID] = record
+
+	return nil
+}
+
+// Append extends the main record of the session's committed generation and
+// replaces the listed subpaths.
+func (s *InMemorySessionStore) Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if main.SessionID == "" {
+		return ErrSessionIDRequired
+	}
+
+	if main.Subpath != SessionStoreMainSubpath {
+		return fmt.Errorf("main subpath must be %q", SessionStoreMainSubpath)
+	}
+
+	if err := validateAppendReplacements(main, replacements); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, gone := s.deleted[main.SessionID]; gone {
+		return nil
+	}
+
+	record := s.sessions[main.SessionID]
+	if record == nil {
+		return fmt.Errorf("session %q has no committed generation to append to", main.SessionID)
+	}
+
+	rows := record.subpaths[SessionStoreMainSubpath]
+	if len(rows) != base {
+		return fmt.Errorf("append base %d does not match the %d committed main entries", base, len(rows))
+	}
+
+	for _, entry := range entries {
+		rows = append(rows, cloneEntry(entry))
+	}
+
+	record.subpaths[SessionStoreMainSubpath] = rows
+	for _, replacement := range replacements {
+		record.subpaths[replacement.Key.Subpath] = cloneEntries(replacement.Entries)
+	}
+
+	record.updatedAt = time.Now().UnixMilli()
+
+	return nil
+}
+
+// validateAppendReplacements checks that every replaced key is a distinct
+// subpath of the addressed session.
+func validateAppendReplacements(main SessionKey, replacements []SessionStoreReplacement) error {
+	seen := make(map[string]struct{}, len(replacements))
+
+	for _, replacement := range replacements {
+		if replacement.Key.SessionID != main.SessionID {
+			return fmt.Errorf("replacement key %s does not belong to session %q",
+				keyLabel(replacement.Key), main.SessionID)
+		}
+
+		if replacement.Key.Subpath == SessionStoreMainSubpath {
+			return errors.New("append replacements must not name the main key")
+		}
+
+		if _, duplicate := seen[replacement.Key.Subpath]; duplicate {
+			return fmt.Errorf("duplicate replacement key %s", keyLabel(replacement.Key))
+		}
+
+		seen[replacement.Key.Subpath] = struct{}{}
+	}
 
 	return nil
 }

@@ -48,6 +48,11 @@ type SessionStore interface {
     ListSessions(ctx context.Context) ([]SessionSummary, error)
 }
 
+// Optional: a store MAY implement it; siblings fall back to Replace.
+type SessionStoreAppender interface {
+    Append(ctx context.Context, main SessionKey, base int, entries []SessionStoreEntry, replacements []SessionStoreReplacement) error
+}
+
 type InMemorySessionStore struct { /* unexported fields only */ }
 
 func NewInMemorySessionStore() *InMemorySessionStore
@@ -64,11 +69,16 @@ beside its own scoped key, never inside `SessionKey`.
 |---|---|
 | `Load` | Atomically returns the latest complete session generation as subpath → entries, preserving row order; nil when missing or tombstoned. A live empty main record is present at key `""`. Returned maps, slices, and bytes belong to the caller. |
 | `Replace` | Atomically publishes one session's complete generation and is durable before return. It copies the entries it receives; the caller keeps ownership and may reuse them. Uncommitted generations are invisible; failure preserves the previous generation. |
+| `Append` (optional) | Atomically extends the main record of the committed generation with `entries` and replaces each listed non-main subpath, keeping unlisted subpaths; durable before return; copies what it receives. Fails without writing when the main record does not hold exactly `base` entries or the session has no committed generation. A tombstoned session writes nothing and succeeds. Failure preserves the previous generation. |
 | `Delete` | Durable tombstone first. Deleting main cascades to all subpaths; deleting a subpath deletes only it. Missing keys succeed. |
 | `ListSessions` | Committed, non-tombstoned main keys, newest `UpdatedAtUnixMilli` first, then `SessionID`. |
 
-Every store call MUST be bounded by `SessionStoreTimeout`. `sessionlog.Load`
-and `sessionlog.Commit` apply that bound to the calls they own.
+`InMemorySessionStore` implements `Append`, holds its own copy of every entry,
+and returns another copy from `Load`.
+
+Every store call MUST be bounded by `SessionStoreTimeout`. `sessionlog.Load`,
+`sessionlog.LoadRecord`, and `sessionlog.Mirror` apply that bound to each call
+they make.
 
 All timestamps are Unix milliseconds. An empty `SessionID` makes delete a
 no-op and load return nil; every replace fails `ErrSessionIDRequired`.
@@ -88,7 +98,8 @@ A `Replace` addresses exactly one session:
 - External stores stage generation entries and publish a final commit marker;
   reads pin one committed generation for every returned subpath and ignore uncommitted generations.
 
-`storetest.Run` proves these rules against any implementation.
+`storetest.Run` proves these rules against any implementation, and the
+`Append` rules against a store that implements it.
 
 ## Ephemeral Sessions
 
@@ -116,15 +127,40 @@ trust. A poisoned session refuses every operation but `session/close` and
 ## Mirror Out
 
 - Read native rows after turns and publish them with the current session
-  configuration through `sessionlog.Commit`, using one atomic store generation.
-  Configuration changes commit even when no native rows were added. A
-  successfully established empty conversation commits its native empty-state
-  representation with its configuration.
+  configuration through the session's one `sessionlog.Mirror`. Every write to
+  a session's generation goes through that mirror. Configuration changes
+  commit even when no native rows were added. A successfully established empty
+  conversation commits its native empty-state representation with its
+  configuration.
 - A sibling MUST NOT commit while foreground native input, a foreground-blocking
   permission or elicitation, or foreground message generation is pending.
   Deferred native input that does not start execution MUST be preserved in the
   same atomic generation.
 - Preserve raw native bytes.
+
+### Incremental Mirror
+
+A `Mirror` remembers the rows and configuration it committed: their count, a
+digest of the rows, and, for an append-only JSONL file read through
+`sessionlog.File` or `ReadJSONL`, a cursor after the last complete line. A
+commit:
+
+- appends only the rows after the committed ones through
+  `SessionStoreAppender`, replacing the configuration record only when its
+  encoding changed, when the store implements it and the native history still
+  extends the committed rows;
+- writes nothing when neither rows nor configuration changed;
+- otherwise republishes the whole generation through `Replace`: on the first
+  commit, after `Reset`, with a store without `Append`, when the native
+  history no longer extends the committed rows, or when an append fails;
+- fails, leaving the generation intact, when the native history is shorter
+  than the committed one. A native binding change calls `Reset` first.
+
+`ReadJSONL` returns only complete lines after its cursor and reads the whole
+file again when it was replaced, truncated, or rewritten before the cursor.
+`WriteJSONL` materializes rows by staging and renaming. `Mirror.Hydrate`
+applies the [hydrate rules](#hydrate-in) to an append-only JSONL file and
+leaves the mirror holding the stored generation, so the next commit appends.
 
 ### Commit Ordering
 
