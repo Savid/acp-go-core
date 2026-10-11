@@ -35,6 +35,8 @@ func TestUniformErrors(t *testing.T) {
 			map[string]any{"error": "unsupported", "field": `_meta["` + LifecycleKey + `"]`}},
 		{"turn failed", TurnFailed("hermes", TurnFailure{Cause: CauseProvider, Message: "boom", StatusCode: 429, ProviderCode: "rate"}), -32603,
 			map[string]any{"error": "hermes_turn_failed", "cause": "provider", "message": "boom", "statusCode": 429, "providerCode": "rate"}},
+		{"recovered turn failed", TurnFailed("codex", TurnFailure{Cause: CauseProvider, Message: "invalid arguments", Recovery: RecoveryRecovered}), -32603,
+			map[string]any{"error": "codex_turn_failed", "cause": "provider", "message": "invalid arguments", "recovery": "recovered"}},
 		{"image turn failed", TurnFailed("pi", TurnFailure{Cause: CauseTransport, Message: "gone", Stage: "image_output", Reason: "storage_failed"}), -32603,
 			map[string]any{"error": "pi_turn_failed", "cause": "transport", "message": "gone", "stage": "image_output", "reason": "storage_failed"}},
 	}

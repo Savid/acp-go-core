@@ -200,7 +200,8 @@ no stop reason:
     "cause": "process_exit",
     "message": "<real native cause text>",
     "statusCode": 429,
-    "providerCode": "<provider error code>"
+    "providerCode": "<provider error code>",
+    "recovery": "recovered"
   }
 }
 ```
@@ -211,7 +212,10 @@ real native cause and is never a placeholder or a bare `EOF`; it is valid
 UTF-8 bounded by `wire.TurnFailed`: at most 18 KiB for `process_exit`,
 including the complete retained 16 KiB stderr tail, and at most 2048 bytes
 for other causes. `statusCode` and `providerCode` appear only when the harness
-supplies them. Semantics are in [04-behavior.md](04-behavior.md#native-turn-failure).
+supplies them. `recovery` appears only when the sibling ran a recovery after
+the failure so the next prompt can succeed: `recovered` when it did, `failed`
+when it could not. The [registry](registry.md#turn-failure) records which
+failures a sibling recovers from and how. Semantics are in [04-behavior.md](04-behavior.md#native-turn-failure).
 
 A native turn failure MUST take precedence over a simultaneous mirror commit
 failure. When a mirror commit failure supplies the `session/prompt` error,

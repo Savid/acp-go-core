@@ -328,6 +328,9 @@ A native turn failure is any way a turn ends other than a clean stop reason.
   harness.
 - **Recover the cause before surfacing.** Parse the result frame or read the
   exit status and stderr tail so `message` names the real cause.
+- **A recovery is reported, never hidden.** A sibling that repairs native
+  state after a failure so the next prompt can succeed still fails the turn
+  and reports the outcome as `recovery`.
 - **The session stays addressable and retriable.** A failure neither removes,
   tombstones, nor poisons the session. The next prompt re-drives the turn,
   relaunching the native process lazily where the lifecycle requires. Only a

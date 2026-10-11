@@ -22,12 +22,13 @@ const processCauseMaxBytes = nativeCauseMaxBytes + 16*1024
 
 // Data member names shared by every uniform error.
 const (
-	FieldError   = "error"
-	FieldField   = "field"
-	FieldCause   = "cause"
-	FieldMessage = "message"
-	FieldClass   = "class"
-	FieldLimit   = "limit"
+	FieldError    = "error"
+	FieldField    = "field"
+	FieldCause    = "cause"
+	FieldMessage  = "message"
+	FieldClass    = "class"
+	FieldLimit    = "limit"
+	FieldRecovery = "recovery"
 )
 
 // Invalid-params verdicts.
@@ -39,6 +40,13 @@ const (
 	verdictAgentClosed    = "agent closed"
 	fieldSessionID        = "sessionId"
 	fieldSeedFiles        = "seedFiles"
+)
+
+// Outcomes of the recovery a sibling runs after a turn failure so the next
+// prompt can succeed.
+const (
+	RecoveryRecovered = "recovered"
+	RecoveryFailed    = "failed"
 )
 
 // Turn failure causes.
@@ -162,6 +170,9 @@ type TurnFailure struct {
 	Message      string
 	StatusCode   int
 	ProviderCode string
+	// Recovery is RecoveryRecovered or RecoveryFailed when the sibling ran a
+	// recovery after the failure, and empty otherwise.
+	Recovery string
 	// Stage, Reason, SizeBytes, and MaxBytes appear only on image output
 	// failures.
 	Stage     string
@@ -185,6 +196,10 @@ func TurnFailed(vendor string, failure TurnFailure) *acp.RequestError {
 
 	if failure.ProviderCode != "" {
 		data["providerCode"] = failure.ProviderCode
+	}
+
+	if failure.Recovery != "" {
+		data[FieldRecovery] = failure.Recovery
 	}
 
 	if failure.Stage != "" {
