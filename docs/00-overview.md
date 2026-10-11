@@ -134,7 +134,7 @@ repository names and store formats. Every sibling claims exactly one of each:
 | Import path | `github.com/savid/acp-go-<sibling>` | `github.com/savid/acp-go-pi` |
 | Binary name | `acp-go-<sibling>` | `acp-go-pi` |
 | Extension prefix | `_<vendor>/` | `_pi/` |
-| Store format | `<vendor>-<native-state-kind>-v1` | `pi-session-jsonl-v1` |
+| Store format | `<vendor>-<native-state-kind>-v<N>` | `pi-session-jsonl-v2` |
 
 ### Shared Versions
 

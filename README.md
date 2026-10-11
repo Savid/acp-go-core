@@ -10,12 +10,12 @@ the checks that keep the siblings aligned.
 
 | Repo | Package | Vendor key | Native surface | Store format |
 |---|---|---|---|---|
-| [acp-go-claude](https://github.com/savid/acp-go-claude) | `claudeacp` | `claude` | Claude Code stream-json and control protocol | `claude-transcript-jsonl-v1` |
-| [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v1` |
-| [acp-go-hermes](https://github.com/savid/acp-go-hermes) | `hermesacp` | `hermes` | `hermes serve` WebSocket JSON-RPC and HTTP persistence | `hermes-session-json-v1` |
+| [acp-go-claude](https://github.com/savid/acp-go-claude) | `claudeacp` | `claude` | Claude Code stream-json and control protocol | `claude-transcript-jsonl-v2` |
+| [acp-go-codex](https://github.com/savid/acp-go-codex) | `codexacp` | `codex` | `codex app-server` stdio protocol | `codex-rollout-jsonl-v2` |
+| [acp-go-hermes](https://github.com/savid/acp-go-hermes) | `hermesacp` | `hermes` | `hermes serve` WebSocket JSON-RPC and HTTP persistence | `hermes-session-json-v2` |
 | [acp-go-opencode](https://github.com/savid/acp-go-opencode) | `opencodeacp` | `opencode` | `opencode serve` HTTP and SSE | `opencode-sync-events-v1` |
-| [acp-go-opencodev2](https://github.com/savid/acp-go-opencodev2) | `opencodeacp` | `opencode` | OpenCode v2 `opencode serve` HTTP and SSE | `opencode-session-export-v1` |
-| [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v1` |
+| [acp-go-opencodev2](https://github.com/savid/acp-go-opencodev2) | `opencodeacp` | `opencode` | OpenCode v2 `opencode serve` HTTP and SSE | `opencode-session-export-v2` |
+| [acp-go-pi](https://github.com/savid/acp-go-pi) | `piacp` | `pi` | `pi --mode rpc` JSONL protocol | `pi-session-jsonl-v2` |
 | [acp-go-amp](https://github.com/savid/acp-go-amp) | `ampacp` | `amp` | `amp threads continue` stream-json with a native lifecycle plugin | `amp-thread-json-v1` |
 | [acp-go-nanocodex](https://github.com/savid/acp-go-nanocodex) | `nanocodexacp` | `nanocodex` | Bundled Rust helper embedding the Nanocodex library over JSONL | `nanocodex-rollout-jsonl-v1` |
 

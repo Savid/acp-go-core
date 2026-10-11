@@ -54,7 +54,7 @@ type InMemorySessionStore struct { /* unexported fields only */ }
 func NewInMemorySessionStore() *InMemorySessionStore
 ```
 
-Each sibling exports its own `const SessionStoreFormat = "<vendor>-<kind>-v1"`.
+Each sibling exports its own `const SessionStoreFormat = "<vendor>-<kind>-v<N>"`.
 Store keys are exactly `{SessionID, Subpath}`. Workspace, worker, and format
 scoping belong to the host's store adapter, which records the sibling's format
 beside its own scoped key, never inside `SessionKey`.
@@ -113,7 +113,8 @@ until `session/delete`. Every other rule of a session applies unchanged.
 
 ## Store Formats
 
-Each sibling exports exactly one `<vendor>-<native-state-kind>-v1` format. Raw
+Each sibling exports exactly one `<vendor>-<native-state-kind>-v<N>` format. A
+stored layout the previous format cannot read takes the next `N`. Raw
 native rows or exports are mirrored after turns under the main subpath, plus a
 configuration sidecar. The [registry](registry.md#session-stores) records each
 sibling's kind and carrier record.

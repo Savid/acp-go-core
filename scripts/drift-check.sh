@@ -167,7 +167,7 @@ def fail(message):
 
 formats = set()
 for sibling, (package, vendor, store_format) in identities.items():
-    if package != vendor + "acp" or not re.fullmatch(re.escape(vendor) + r"-[a-z-]+-v1", store_format):
+    if package != vendor + "acp" or not re.fullmatch(re.escape(vendor) + r"-[a-z-]+-v[1-9][0-9]*", store_format):
         fail(f"acp-go-{sibling}: README identity does not follow the identity contract")
     if store_format in formats:
         fail(f"acp-go-{sibling}: store format is not unique in the family")
